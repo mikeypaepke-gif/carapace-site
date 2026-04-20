@@ -1,5 +1,13 @@
 # Security policy
 
+> **Legal context.** This document describes how to report security
+> issues responsibly. It does not modify or expand the Author's
+> liability, warranty disclaimer, or indemnification provisions. Those
+> live in [TERMS.md](./TERMS.md) and at
+> <https://carapace.info/terms/>, and the Author accepts no liability
+> whatsoever for security-related events affecting your systems or
+> data. Continue only if you've read and agreed to those Terms.
+
 ## Reporting a vulnerability
 
 **Please do not open public GitHub issues for security bugs.**

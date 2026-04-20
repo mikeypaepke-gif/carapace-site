@@ -99,6 +99,10 @@ echo -e "${TEAL}${BOLD}  ║           CARAPACE — Headless Setup  🐚        
 echo -e "${TEAL}${BOLD}  ║        Your AI, your server, always free.       ║${RESET}"
 echo -e "${TEAL}${BOLD}  ╚══════════════════════════════════════════════════╝${RESET}"
 echo ""
+echo -e "  ${DIM}By continuing, you agree to the Terms of Use at${RESET}"
+echo -e "  ${DIM}https://carapace.info/terms/ and acknowledge the Software${RESET}"
+echo -e "  ${DIM}is provided AS IS, with no security or availability warranty.${RESET}"
+echo ""
 
 # ── Prerequisites ────────────────────────────────────
 echo -e "\n${DIM}Checking prerequisites...${RESET}"

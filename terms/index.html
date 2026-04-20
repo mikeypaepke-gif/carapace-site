@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terms of Use — CARAPACE</title>
+  <meta name="description" content="Terms of Use governing the CARAPACE software, website, and related services.">
+  <meta property="og:title" content="Terms of Use — CARAPACE">
+  <meta property="og:description" content="Terms of Use governing the CARAPACE software, website, and related services.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://carapace.info/terms/">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="icon" href="/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'] },
+          colors: { teal: { 400: '#00DCC8', 500: '#00C4B4', 600: '#00A89A' } },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { background: #080A12; }
+    .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06); }
+    .glass-elevated { background: rgba(255,255,255,0.05); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid rgba(255,255,255,0.08); }
+    .gradient-text { background: linear-gradient(135deg, #00DCC8 0%, #00C4B4 50%, #2dd4bf 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+    /* Legal prose */
+    .legal h2 {
+      font-size: 1.125rem;
+      font-weight: 700;
+      color: rgba(255,255,255,0.9);
+      margin-top: 2.25rem;
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.01em;
+    }
+    .legal h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.75);
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .legal p, .legal li {
+      color: rgba(255,255,255,0.55);
+      line-height: 1.7;
+      font-size: 0.9rem;
+    }
+    .legal p { margin-bottom: 0.9rem; }
+    .legal ul, .legal ol { margin: 0.75rem 0 1rem 1.5rem; }
+    .legal ul { list-style-type: disc; }
+    .legal ol { list-style-type: decimal; }
+    .legal li { margin-bottom: 0.4rem; }
+    .legal .allcaps {
+      display: block;
+      background: rgba(255,255,255,0.02);
+      border-left: 2px solid rgba(0,220,200,0.3);
+      padding: 1rem 1.25rem;
+      margin: 1rem 0;
+      font-size: 0.82rem;
+      letter-spacing: 0.01em;
+      color: rgba(255,255,255,0.7);
+    }
+    .legal a { color: #00DCC8; }
+    .legal a:hover { text-decoration: underline; }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #080A12; }
+    ::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
+  </style>
+</head>
+<body class="text-white font-sans antialiased">
+
+  <!-- NAV -->
+  <nav class="fixed top-0 w-full z-50 backdrop-blur-xl bg-[#080A12]/80 border-b border-white/[0.05]">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-8 h-8 rounded-lg">
+        <span class="font-bold tracking-tight">CARAPACE</span>
+      </a>
+      <div class="hidden sm:flex items-center gap-8 text-sm">
+        <a href="/install/mac/" class="text-white/50 hover:text-white transition-colors">Mac</a>
+        <a href="/install/linux/" class="text-white/50 hover:text-white transition-colors">Linux</a>
+        <a href="/install/ios/" class="text-white/50 hover:text-white transition-colors">iOS</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="text-white/50 hover:text-white transition-colors">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HEADER -->
+  <section class="pt-32 pb-10 md:pt-40">
+    <div class="max-w-3xl mx-auto px-6">
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-teal-400 mb-4">Legal</p>
+      <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight mb-3">Terms of Use</h1>
+      <p class="text-sm text-white/40">Effective Date: April 20, 2026</p>
+    </div>
+  </section>
+
+  <!-- BODY -->
+  <section class="pb-24">
+    <div class="max-w-3xl mx-auto px-6">
+      <div class="glass rounded-2xl p-8 md:p-10 legal">
+
+        <p>These Terms of Use ("Terms") govern your use of the CARAPACE software (as defined below), the website at <a href="https://carapace.info">https://carapace.info</a>, and any related services (together, the "Software"). By downloading, installing, running, or using any part of the Software, you agree to be bound by these Terms. If you do not agree, do not use the Software.</p>
+
+        <h2>1. The Software</h2>
+        <p>The Software consists of:</p>
+        <ul>
+          <li>The open-source Linux installer (<code>install.sh</code>) and the marketing-website content published in the project's source repository, distributed under the MIT License (the "Open-Source Components").</li>
+          <li>The CARAPACE macOS application (distributed as <code>Carapace-*.dmg</code>), which is proprietary software.</li>
+          <li>The CARAPACE iOS application, distributed through the Apple App Store, which is proprietary software.</li>
+        </ul>
+        <p>The MIT License governing the Open-Source Components contains its own limitation-of-liability and warranty-disclaimer provisions, which apply in addition to these Terms.</p>
+
+        <h2>2. No Warranty</h2>
+        <div class="allcaps">
+          THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE," WITH ALL FAULTS AND WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, TITLE, ACCURACY, RELIABILITY, QUIET ENJOYMENT, OR THAT THE SOFTWARE WILL BE ERROR-FREE, UNINTERRUPTED, TIMELY, COMPLETE, OR SECURE. NO ORAL OR WRITTEN INFORMATION OR ADVICE FROM THE AUTHOR OR ANY AUTHORIZED REPRESENTATIVE CREATES ANY WARRANTY. SOME JURISDICTIONS DO NOT ALLOW THE EXCLUSION OF IMPLIED WARRANTIES, SO THE ABOVE EXCLUSION MAY NOT APPLY TO YOU TO THE EXTENT PROHIBITED BY APPLICABLE LAW.
+        </div>
+
+        <h2>3. Security — No Liability</h2>
+        <p>YOU ARE SOLELY AND EXCLUSIVELY RESPONSIBLE FOR THE SECURITY OF ANY SYSTEM ON WHICH YOU INSTALL, RUN, OR USE THE SOFTWARE, AND FOR THE SECURITY OF ANY DATA YOU PROCESS USING THE SOFTWARE. This includes, without limitation:</p>
+        <ul>
+          <li>physical and network access to your devices and servers;</li>
+          <li>credential, API key, and authentication-token management;</li>
+          <li>operating-system updates, patches, and hardening;</li>
+          <li>firewall, routing, SSH, and remote-access configuration (including but not limited to Tailscale, which the Author recommends but does not operate or control);</li>
+          <li>backup and disaster-recovery procedures;</li>
+          <li>regulatory and contractual compliance applicable to your use.</li>
+        </ul>
+        <div class="allcaps">
+          THE AUTHOR MAKES NO REPRESENTATION OR WARRANTY THAT THE SOFTWARE IS SECURE, FREE OF VULNERABILITIES, OR IMMUNE TO UNAUTHORIZED ACCESS, INTRUSION, MALWARE, OR ANY OTHER SECURITY INCIDENT. TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE AUTHOR ACCEPTS NO LIABILITY WHATSOEVER FOR ANY DATA BREACH, PRIVACY INCIDENT, UNAUTHORIZED ACCESS, CREDENTIAL COMPROMISE, DATA LOSS, BUSINESS INTERRUPTION, OR OTHER SECURITY-RELATED EVENT AFFECTING YOU, YOUR SYSTEMS, YOUR USERS, OR ANY THIRD PARTY, WHETHER OR NOT ARISING FROM USE OF THE SOFTWARE.
+        </div>
+
+        <h2>4. Limitation of Liability</h2>
+        <div class="allcaps">
+          TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE AUTHOR, CONTRIBUTORS, OR AFFILIATES (TOGETHER, THE "COVERED PARTIES") BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, DATA, USE, GOODWILL, REPUTATION, OR OTHER INTANGIBLE LOSSES, ARISING OUT OF OR RELATING TO YOUR USE OF OR INABILITY TO USE THE SOFTWARE, EVEN IF THE COVERED PARTIES HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES, AND REGARDLESS OF WHETHER THE CLAIM IS BASED IN CONTRACT, TORT (INCLUDING NEGLIGENCE), STATUTE, STRICT LIABILITY, OR ANY OTHER LEGAL THEORY.
+        </div>
+        <div class="allcaps">
+          TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE TOTAL AGGREGATE LIABILITY OF THE COVERED PARTIES ARISING OUT OF OR RELATING TO THESE TERMS OR THE SOFTWARE SHALL NOT EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID FOR THE SOFTWARE IN THE TWELVE (12) MONTHS PRECEDING THE EVENT GIVING RISE TO THE CLAIM OR (B) ONE U.S. DOLLAR (US$1.00).
+        </div>
+        <p>Some jurisdictions do not allow the exclusion or limitation of incidental or consequential damages. In those jurisdictions, the limitations above apply only to the maximum extent permitted by law.</p>
+
+        <h2>5. Third-Party Services</h2>
+        <p>The Software interoperates with third-party services, including without limitation Tailscale, Google (Gemini), OpenAI, Anthropic, xAI, Cloudflare, your hosting provider, and the Apple App Store (together, "Third-Party Services"). Third-Party Services are operated by their respective owners under their own terms and privacy policies. The Author does not operate, control, endorse, or guarantee any Third-Party Service, and accepts no liability for any act, omission, outage, charge, security incident, or other event relating to any Third-Party Service.</p>
+        <p>You are solely responsible for all charges and fees incurred with any Third-Party Service (including, without limitation, AI-provider usage fees, cloud-hosting costs, and domain registration), regardless of whether such charges result from your own use of the Software, a configuration error, compromise of your credentials, or otherwise.</p>
+
+        <h2>6. AI Output</h2>
+        <p>The Software provides access to artificial-intelligence models operated by Third-Party Services. OUTPUT FROM SUCH MODELS MAY BE INACCURATE, INCOMPLETE, BIASED, OFFENSIVE, OR OTHERWISE UNSUITABLE FOR YOUR PURPOSE. The Author does not generate, review, endorse, or warrant any AI output delivered through the Software. You are solely responsible for evaluating AI output before relying on it. You must not use AI output as the sole basis for any decision with legal, medical, financial, safety, or other material consequence.</p>
+
+        <h2>7. Your Responsibilities</h2>
+        <p>You represent, warrant, and agree that you will:</p>
+        <ol>
+          <li>use the Software only for lawful purposes and in accordance with all applicable laws and regulations;</li>
+          <li>maintain appropriate security on all systems where the Software is installed, run, or accessed;</li>
+          <li>be solely responsible for all data you process using the Software, including any personal data of third parties, and for compliance with all privacy, data-protection, and recordkeeping laws applicable to such data;</li>
+          <li>not attempt to reverse-engineer, decompile, disassemble, or circumvent any technical measures in the proprietary macOS or iOS applications except to the extent expressly permitted by applicable law notwithstanding this limitation;</li>
+          <li>not use the Software to develop, train, or improve a competing AI operating layer, agent runtime, or personal-AI gateway product;</li>
+          <li>not use the Software in any manner that could damage, disable, overburden, or impair the Software, any Third-Party Service, or any other user's systems.</li>
+        </ol>
+
+        <h2>8. Indemnification</h2>
+        <p>To the maximum extent permitted by law, you agree to defend, indemnify, and hold harmless the Covered Parties from and against any and all claims, liabilities, damages, losses, costs, and expenses (including reasonable attorneys' fees) arising out of or in any way connected with:</p>
+        <ol type="a">
+          <li>your use or misuse of the Software;</li>
+          <li>your violation of these Terms;</li>
+          <li>your violation of any law or any right of a third party, including privacy, publicity, intellectual-property, or contract rights;</li>
+          <li>any data, content, prompt, or material you submit to, process with, or generate using the Software.</li>
+        </ol>
+
+        <h2>9. Paid Applications</h2>
+        <p>The macOS and iOS applications are sold for a one-time license fee as published at <a href="https://carapace.info">https://carapace.info</a>. The license fee grants a non-transferable, non-exclusive right to use the applications on the number of devices specified for the applicable tier. No refund is available after download except as required by applicable consumer-protection law or the platform operator's (e.g., Apple's) refund policy. Beta programs, including the Meta Ray-Ban integration beta, are offered on a best-efforts basis at the Author's sole discretion and may be modified, delayed, limited in availability, or withdrawn at any time without liability.</p>
+
+        <h2>10. Open-Source Components</h2>
+        <p>The Open-Source Components are licensed under the MIT License (see the <code>LICENSE</code> file in the source repository). In the event of any conflict between these Terms and the MIT License with respect to the Open-Source Components, these Terms control to the maximum extent permitted by applicable law; the MIT License remains in effect for the rights it grants you to copy, modify, and redistribute the Open-Source Components.</p>
+
+        <h2>11. Modifications</h2>
+        <p>The Author may update these Terms from time to time. The revised Terms take effect when posted at <a href="https://carapace.info/terms/">https://carapace.info/terms/</a> with an updated "Effective Date." Your continued use of the Software after the Effective Date constitutes acceptance of the revised Terms.</p>
+
+        <h2>12. Termination</h2>
+        <p>The Author may suspend or terminate your access to the Software at any time, with or without notice, for any reason, including any breach of these Terms. The provisions of Sections 2, 3, 4, 5, 6, 7, 8, 10, 13, 14, and 15 survive any termination.</p>
+
+        <h2>13. Governing Law and Venue</h2>
+        <p>These Terms are governed by the laws of the State of California, United States, without regard to its conflict-of-laws rules. Any dispute arising under or relating to these Terms or the Software shall be resolved exclusively in the state or federal courts located in Orange County, California, and you consent to the personal jurisdiction of such courts. The United Nations Convention on Contracts for the International Sale of Goods does not apply.</p>
+
+        <h2>14. Severability</h2>
+        <p>If any provision of these Terms is held invalid or unenforceable, the remaining provisions shall continue in full force and effect, and the invalid provision shall be modified only to the minimum extent necessary to make it enforceable.</p>
+
+        <h2>15. Entire Agreement</h2>
+        <p>These Terms, together with the <code>LICENSE</code> file for the Open-Source Components and any additional end-user license agreement embedded in the macOS or iOS application, constitute the entire agreement between you and the Author concerning the Software and supersede any prior or contemporaneous agreement, understanding, or communication.</p>
+
+        <h2>Contact</h2>
+        <p>Questions about these Terms: <a href="https://github.com/mikeypaepke-gif/carapace-site/issues">github.com/mikeypaepke-gif/carapace-site/issues</a></p>
+      </div>
+
+      <p class="mt-6 text-center text-xs text-white/25">
+        <a href="/" class="hover:text-white/60 transition-colors">← Back to carapace.info</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="border-t border-white/[0.05] py-10">
+    <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-white/30">
+      <div class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-6 h-6 rounded-md opacity-60">
+        <span>CARAPACE · <a href="/" class="hover:text-white/60 transition-colors">carapace.info</a></span>
+      </div>
+      <div class="flex items-center gap-5">
+        <a href="/install/mac/" class="hover:text-white/60 transition-colors">Mac</a>
+        <a href="/install/linux/" class="hover:text-white/60 transition-colors">Linux</a>
+        <a href="/install/ios/" class="hover:text-white/60 transition-colors">iOS</a>
+        <a href="/terms/" class="hover:text-white/60 transition-colors">Terms</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="hover:text-white/60 transition-colors">GitHub</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

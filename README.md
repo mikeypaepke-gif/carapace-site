@@ -76,46 +76,24 @@ bash install.sh   # run it
 
 ## Security & liability
 
-**This software is provided AS IS, without warranty of any kind, express or
-implied.** The MIT [LICENSE](./LICENSE) covers the legal side. In plain
-English, what that means for you:
+**The Software is provided AS IS, WITH ALL FAULTS, AND WITHOUT WARRANTY OF
+ANY KIND.** You are solely responsible for the security of any system on
+which you install or run the Software, for the management of your API
+keys and AI-provider bills, for the configuration of Tailscale (or any
+other remote-access tool you choose) and your network, and for any data
+you process. The Author accepts **no liability** for data breaches,
+privacy incidents, credential compromise, data loss, runaway bills,
+third-party service outages, AI model output, or any other damages
+arising from use of the Software.
 
-### You are responsible for
+Full terms, including warranty disclaimer, limitation of liability,
+indemnification, and governing law, are in **[TERMS.md](./TERMS.md)**
+(also published at <https://carapace.info/terms/>). By using the
+Software, you agree to those Terms.
 
-- **Your hardware and hosting.** The installer modifies system configuration
-  on the box you run it on (writes to `$HOME/.openclaw/`, installs systemd
-  units, adds a cron entry, pulls packages from your distro's repos). Review
-  the script if that matters to you.
-- **Your API keys and your AI bills.** You bring your own keys for Gemini /
-  OpenAI / Anthropic / xAI. CARAPACE never sees those keys — they stay on
-  your machine. That also means: *if you generate $500 in usage overnight,
-  that's between you and the AI provider.* Set quotas if you're worried.
-- **Your data.** CARAPACE is designed so conversations, documents, and
-  agent outputs stay on hardware you control. That also means **you own
-  your backups** — if your VPS disappears, so does your data.
-- **Your network and access control.** SSH keys, Tailscale ACLs, firewall
-  rules, physical access to the device — all you.
-- **Evaluating model output.** LLMs hallucinate, misread documents, and
-  produce confidently wrong answers. Don't use CARAPACE (or any LLM) as
-  the only source of truth for anything that matters.
-
-### We are not liable for
-
-- Data breaches, credential leaks, or privacy holes in your own setup.
-- Runaway bills at your AI provider.
-- Data loss on your hardware or cloud provider.
-- Outages at third-party services (AI providers, Tailscale, Cloudflare,
-  your hosting company, Apple's App Store).
-- Anything a model says or does. We ship a runtime; the model output is
-  upstream.
-- Damages, direct or indirect, arising from use of this software.
-
-If that level of responsibility isn't right for you, don't use CARAPACE.
-
-### Reporting a vulnerability
-
-Please do **not** open a public GitHub issue for security bugs. Follow the
-private-disclosure process in [SECURITY.md](./SECURITY.md).
+**Reporting a vulnerability:** please do *not* open a public GitHub
+issue for security bugs. Follow the private-disclosure process in
+[SECURITY.md](./SECURITY.md).
 
 ---
 

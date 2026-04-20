@@ -28,6 +28,19 @@ This license does NOT cover:
     provider APIs, your hosting provider). Each has its own terms
     and privacy policy that you agree to when you use them.
 
+ADDITIONAL TERMS
+
+Your use of the Software is also subject to the Terms of Use
+published in TERMS.md in this repository and at
+https://carapace.info/terms/, which include additional warranty
+disclaimers, security-related liability disclaimers, limitation of
+liability, and indemnification provisions. In any conflict between
+these Terms of Use and the MIT License below with respect to your
+use of the Software, the Terms of Use control to the maximum extent
+permitted by applicable law, while the MIT License continues to grant
+you the rights it confers to copy, modify, and redistribute the
+Software.
+
 ---
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
