@@ -1,12 +1,31 @@
-# CARAPACE
+<p align="center">
+  <img src="assets/app-icon.png" alt="CARAPACE" width="128" height="128">
+</p>
 
-The marketing site for [CARAPACE](https://carapace.info/) and the open-source
-Linux installer (`install.sh`) that provisions a headless
+<h1 align="center">CARAPACE</h1>
+
+<p align="center">
+  <strong>Your AI. Your machine. Your rules.</strong><br>
+  <sub>We're just helping you feed it the data it's craving.</sub>
+</p>
+
+<p align="center">
+  <a href="https://carapace.info"><img src="https://img.shields.io/badge/website-carapace.info-00DCC8?style=flat-square" alt="Website"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-00C4B4?style=flat-square" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/platforms-macOS%20%E2%80%A2%20iOS%20%E2%80%A2%20Linux%20%E2%80%A2%20Raspberry%20Pi-888?style=flat-square" alt="Platforms">
+  <a href="https://apps.apple.com/us/app/carapace/id6760282881"><img src="https://img.shields.io/badge/App%20Store-iOS-ffffff?style=flat-square" alt="App Store"></a>
+</p>
+
+<p align="center">
+  <img src="assets/mac-nb-1.png" alt="CARAPACE on macOS" width="820">
+</p>
+
+---
+
+This repository hosts the marketing site for [CARAPACE](https://carapace.info/)
+and the open-source Linux installer (`install.sh`) that provisions a headless
 [OpenClaw](https://openclaw.ai/) gateway on any Ubuntu / Debian / Raspberry Pi
 or Rocky / Alma / Fedora host.
-
-> Your AI. Your machine. Your rules.
-> We're just helping you feed it the data it's craving.
 
 ---
 
