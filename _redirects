@@ -1,0 +1,3 @@
+/manage /manage.html 200
+https://carapace.pages.dev/* https://carapace.info/:splat 301
+/install-v2.sh    /install.sh   301

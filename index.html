@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="build" content="2.0.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CARAPACE — Your AI. Your Machine. Your Rules.</title>
+  <meta name="description" content="CARAPACE is a personal AI operating layer. Runs locally on your Mac, a VPS, or a Raspberry Pi. No cloud dependency. Your data stays on your hardware.">
+  <meta property="og:title" content="CARAPACE — Your AI. Your Machine. Your Rules.">
+  <meta property="og:description" content="A personal AI operating layer that runs locally. Mac menu bar app, headless Linux, iOS companion. No subscriptions. No cloud lock-in.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://carapace.info">
+  <meta property="og:image" content="https://carapace.info/assets/carapace-og.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="icon" href="favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'] },
+          colors: {
+            teal: { 400: '#00DCC8', 500: '#00C4B4', 600: '#00A89A' },
+            dark: { 900: '#080A12', 800: '#111827', 700: '#1a1f2e', 600: '#242938' },
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { background: #080A12; }
+
+    /* Scroll-triggered animations */
+    .reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1); }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+    .reveal-delay-1 { transition-delay: 0.1s; }
+    .reveal-delay-2 { transition-delay: 0.2s; }
+    .reveal-delay-3 { transition-delay: 0.3s; }
+    .reveal-delay-4 { transition-delay: 0.4s; }
+
+    /* Hero ambient glow */
+    .hero-glow { position: relative; overflow: hidden; }
+    .hero-glow::before {
+      content: '';
+      position: absolute;
+      width: 900px; height: 900px;
+      top: -250px; left: 50%;
+      transform: translateX(-50%);
+      background: radial-gradient(circle, rgba(0,220,200,0.10) 0%, rgba(0,220,200,0.04) 40%, transparent 70%);
+      animation: hero-pulse 8s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+    @keyframes hero-pulse {
+      0% { opacity: 0.6; transform: translateX(-50%) scale(1); }
+      100% { opacity: 1; transform: translateX(-50%) scale(1.15); }
+    }
+
+    /* Glass */
+    .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06); }
+    .glass-elevated { background: rgba(255,255,255,0.05); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid rgba(255,255,255,0.08); }
+
+    /* Gradient text */
+    .gradient-text { background: linear-gradient(135deg, #00DCC8 0%, #00C4B4 50%, #2dd4bf 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+    /* Feature card hover */
+    .feature-card { transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+    .feature-card:hover { transform: translateY(-4px); background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); }
+
+    /* Pricing glow */
+    .pricing-popular {
+      border-color: rgba(0,220,200,0.25);
+      box-shadow: 0 0 60px -15px rgba(0,220,200,0.15);
+    }
+
+    /* Device frames */
+    .iphone-frame {
+      background: linear-gradient(165deg, #2a2a35 0%, #1a1a24 50%, #141420 100%);
+      border: 2.5px solid rgba(255,255,255,0.22);
+      box-shadow: 0 50px 100px -20px rgba(0,0,0,0.7), 0 30px 60px -15px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+    }
+
+    /* Screenshot slideshows */
+    .mac-slide { opacity: 0; transition: opacity 1s ease-in-out; }
+    .mac-slide.active { opacity: 1; }
+    .iphone-slide { opacity: 0; transition: opacity 0.8s ease-in-out; }
+    .iphone-slide.active { opacity: 1; }
+
+    /* Code block */
+    .code-block { background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.06); font-family: 'SF Mono', 'Fira Code', monospace; }
+
+    /* Section divider */
+    .section-fade { background: linear-gradient(to bottom, transparent, rgba(0,220,200,0.02) 50%, transparent); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #080A12; }
+    ::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
+  </style>
+</head>
+<body class="text-white font-sans antialiased">
+
+  <!-- Navigation -->
+  <nav class="fixed top-0 w-full z-50 transition-all duration-300" id="nav">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+      <a href="#" class="flex items-center gap-2.5 group">
+        <img src="assets/app-icon.png" alt="CARAPACE" class="w-8 h-8 rounded-[10px] shadow-lg group-hover:scale-105 transition-all duration-300">
+        <span class="text-[15px] font-bold tracking-tight">CARAPACE</span>
+      </a>
+      <div class="hidden sm:flex items-center gap-7 text-[13px]">
+        <a href="#why" class="text-white/50 hover:text-white transition-colors">Why</a>
+        <a href="#install" class="text-white/50 hover:text-white transition-colors">Install</a>
+        <a href="#features" class="text-white/50 hover:text-white transition-colors">Features</a>
+        <a href="#pricing" class="text-white/50 hover:text-white transition-colors">Pricing</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="text-white/50 hover:text-white transition-colors inline-flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .296c-6.627 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.385.6.11.793-.26.793-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.755-1.333-1.755-1.09-.744.082-.73.082-.73 1.205.086 1.838 1.238 1.838 1.238 1.07 1.834 2.807 1.304 3.492.997.108-.775.42-1.304.762-1.604-2.665-.304-5.466-1.334-5.466-5.933 0-1.31.47-2.381 1.235-3.221-.124-.304-.535-1.524.117-3.176 0 0 1.008-.323 3.3 1.23.957-.266 1.98-.4 3-.405 1.02.005 2.043.139 3 .405 2.29-1.553 3.297-1.23 3.297-1.23.653 1.652.242 2.872.118 3.176.77.84 1.234 1.911 1.234 3.221 0 4.61-2.806 5.625-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .319.192.694.8.576 4.765-1.589 8.2-6.085 8.2-11.385 0-6.627-5.373-12-12-12z"/></svg>
+          GitHub
+        </a>
+        <a href="#install" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/[0.07] border border-white/[0.08] hover:bg-white/[0.12] text-white/80 hover:text-white transition-all duration-300">
+          Get CARAPACE
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+        </a>
+      </div>
+      <button class="sm:hidden text-white/60 hover:text-white" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+      </button>
+    </div>
+    <div id="mobile-menu" class="hidden sm:hidden glass-elevated mx-4 mb-2 rounded-2xl p-4 space-y-3">
+      <a href="#why" class="block text-sm text-white/60 hover:text-white py-2">Why</a>
+      <a href="#install" class="block text-sm text-white/60 hover:text-white py-2">Install</a>
+      <a href="#features" class="block text-sm text-white/60 hover:text-white py-2">Features</a>
+      <a href="#pricing" class="block text-sm text-white/60 hover:text-white py-2">Pricing</a>
+      <a href="https://github.com/mikeypaepke-gif/carapace-site" class="block text-sm text-white/60 hover:text-white py-2">GitHub</a>
+      <a href="#install" class="block text-sm text-white/80 hover:text-white py-2 font-medium">Get CARAPACE →</a>
+    </div>
+  </nav>
+
+  <!-- ==================== HERO ==================== -->
+  <section class="hero-glow min-h-screen flex items-center relative">
+    <div class="relative z-10 max-w-7xl mx-auto px-6 pt-28 pb-20 md:pt-32 md:pb-28 w-full">
+      <div class="text-center max-w-3xl mx-auto mb-16 md:mb-20">
+        <div class="reveal inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-elevated text-xs font-medium text-white/60 mb-8">
+          <span class="w-1.5 h-1.5 rounded-full bg-[#00DCC8] animate-pulse"></span>
+          Runs on your hardware. Not ours.
+        </div>
+        <h1 class="reveal reveal-delay-1 text-[clamp(2.5rem,6vw,4.5rem)] font-extrabold leading-[1.05] tracking-tight mb-6">
+          Your AI. Your Machine.<br>
+          <span class="gradient-text">Your Rules.</span>
+        </h1>
+        <p class="reveal reveal-delay-2 text-lg sm:text-xl text-white/50 max-w-2xl mx-auto leading-relaxed mb-4">
+          We're just helping you feed it the data it's craving.
+        </p>
+        <p class="reveal reveal-delay-2 text-base text-white/30 max-w-xl mx-auto leading-relaxed mb-10">
+          Mac, VPS, or Raspberry Pi. Setup is copy-paste simple — a friend's onboarded in about 5 minutes.
+        </p>
+
+        <!-- CTA buttons -->
+        <div class="reveal reveal-delay-3 flex flex-wrap justify-center gap-4">
+          <a href="Carapace-1.9.3.dmg" download class="inline-flex items-center gap-3 pl-4 pr-6 py-3 rounded-xl bg-white text-black hover:bg-white/90 transition-all duration-300 shadow-lg shadow-black/20 hover:shadow-xl hover:-translate-y-0.5 group">
+            <svg class="w-7 h-7 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            <div class="text-left">
+              <div class="text-[10px] font-normal opacity-60 leading-none">Download for</div>
+              <div class="text-[17px] font-semibold leading-tight -mt-0.5">macOS — v1.9.3</div>
+            </div>
+          </a>
+          <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="inline-flex items-center gap-3 pl-4 pr-6 py-3 rounded-xl glass-elevated border border-white/10 hover:bg-white/[0.08] hover:border-white/15 transition-all duration-300 hover:-translate-y-0.5 group">
+            <svg class="w-7 h-7 text-white/70 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            <div class="text-left">
+              <div class="text-[10px] font-normal text-white/40 leading-none">Download on the</div>
+              <div class="text-[17px] font-semibold leading-tight text-white/90 -mt-0.5">App Store — $2.99</div>
+            </div>
+          </a>
+        </div>
+
+        <!-- Secondary: linux / all install guides -->
+        <div class="reveal reveal-delay-3 mt-5 flex flex-wrap justify-center items-center gap-x-5 gap-y-2 text-sm text-white/40">
+          <a href="/install/linux/" class="hover:text-teal-400 transition-colors inline-flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z"/></svg>
+            VPS / Pi install
+          </a>
+          <span class="text-white/15">·</span>
+          <a href="#install" class="hover:text-teal-400 transition-colors inline-flex items-center gap-1.5">
+            See all install guides
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <!-- Device mockups -->
+      <div class="reveal reveal-delay-4 relative flex justify-center pt-4">
+        <div class="relative w-full max-w-4xl mx-auto">
+          <div class="relative mx-auto" style="width: 90%;">
+            <img src="assets/mac-nb-1.png" alt="CARAPACE on Mac - Chat" class="mac-slide w-full h-auto block active" loading="eager">
+            <img src="assets/mac-nb-2.png" alt="CARAPACE on Mac - Conversation" class="mac-slide w-full h-auto block absolute inset-0" loading="eager">
+            <img src="assets/mac-nb-3.png" alt="CARAPACE on Mac - Projects" class="mac-slide w-full h-auto block absolute inset-0" loading="eager">
+            <img src="assets/mac-nb-4.png" alt="CARAPACE on Mac - Settings" class="mac-slide w-full h-auto block absolute inset-0" loading="eager">
+          </div>
+          <div class="absolute -bottom-8 -right-2 sm:right-4 md:right-8 z-20" style="width: 22%; max-width: 180px;">
+            <div class="iphone-frame rounded-[2.2rem] sm:rounded-[2.6rem] p-[4px] sm:p-[5px]">
+              <div class="rounded-[1.9rem] sm:rounded-[2.2rem] overflow-hidden bg-black relative" style="aspect-ratio: 9/19.5;">
+                <img src="assets/ios-home.png" alt="Home" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+                <img src="assets/ios-agents.png" alt="Agents" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+                <img src="assets/ios-vision.png" alt="Vision" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+                <img src="assets/ios-chat.png" alt="Chat" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+                <img src="assets/ios-cron.png" alt="Cron" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+                <img src="assets/ios-projects.png" alt="Projects" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-white/20 animate-bounce">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+    </div>
+  </section>
+
+  <!-- ==================== WHY CARAPACE ==================== -->
+  <section id="why" class="relative py-28 md:py-36">
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="text-center mb-20 space-y-5">
+        <p class="reveal text-xs font-semibold uppercase tracking-[0.2em] text-[#00DCC8]/80">Why CARAPACE</p>
+        <h2 class="reveal reveal-delay-1 text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight leading-tight">
+          Not another chatbot wrapper.<br>
+          <span class="text-white/40">An operating layer.</span>
+        </h2>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-6 max-w-5xl mx-auto">
+        <!-- Seamless switching -->
+        <div class="reveal feature-card glass rounded-2xl p-8 space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#00DCC8]/15 to-[#00DCC8]/5 border border-[#00DCC8]/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-[#00DCC8]" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+          </div>
+          <h3 class="text-lg font-bold">Headless Linux + Mac. Seamless.</h3>
+          <p class="text-sm text-white/40 leading-relaxed">
+            Context tracking means you can switch between your VPS and your Mac and the AI doesn't get lost. It stays on task, tracks projects, remembers decisions. Work on your server, review on your laptop — same brain, zero re-explaining.
+          </p>
+        </div>
+
+        <!-- Runs on your hardware -->
+        <div class="reveal reveal-delay-1 feature-card glass rounded-2xl p-8 space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-green-500/15 to-green-500/5 border border-green-500/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z"/></svg>
+          </div>
+          <h3 class="text-lg font-bold">Runs on a VPS. Runs on a Pi. Runs on whatever you've got.</h3>
+          <p class="text-sm text-white/40 leading-relaxed">
+            No $20/month ChatGPT. No $200/month enterprise tiers. A VPS, a Raspberry Pi, an old Mac Mini in a closet — whatever hardware you already trust. A free Google API key gets you web search, browser control, code execution, cron jobs, and multi-agent orchestration.
+          </p>
+        </div>
+
+        <!-- Vision -->
+        <div class="reveal feature-card glass rounded-2xl p-8 space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/15 to-purple-500/5 border border-purple-500/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          </div>
+          <h3 class="text-lg font-bold">Vision — Send Photos, Get Answers</h3>
+          <p class="text-sm text-white/40 leading-relaxed">
+            Point your phone camera at anything. Medical imaging, documents, receipts, error messages on a screen — your AI sees it and responds. Live camera feed on iOS, photo upload everywhere.
+          </p>
+        </div>
+
+        <!-- Works for everyone -->
+        <div class="reveal reveal-delay-1 feature-card glass rounded-2xl p-8 space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/15 to-amber-500/5 border border-amber-500/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>
+          </div>
+          <h3 class="text-lg font-bold">Works for Everyone</h3>
+          <p class="text-sm text-white/40 leading-relaxed">
+            Power users get headless Linux on a VPS with SSH and cron jobs. Your parents get a Mac app with a guided setup wizard that installs everything automatically. Same platform, different entry points.
+          </p>
+        </div>
+      </div>
+
+      <!-- Full toolbox callout -->
+      <div class="reveal mt-12 max-w-5xl mx-auto">
+        <div class="glass rounded-2xl p-8 md:p-10 relative overflow-hidden">
+          <div class="absolute top-0 left-0 right-0 h-[1px]" style="background: linear-gradient(to right, transparent, rgba(0,220,200,0.3), transparent);"></div>
+          <div class="flex flex-col md:flex-row gap-8 items-start">
+            <div class="flex-1 space-y-4">
+              <h3 class="text-lg font-bold">The Full OpenClaw Toolbox</h3>
+              <p class="text-sm text-white/40 leading-relaxed">
+                This isn't a chat wrapper. It's a full agent runtime with real capabilities.
+              </p>
+            </div>
+            <div class="flex-1 grid grid-cols-2 gap-3">
+              <div class="flex items-center gap-2 text-sm text-white/50">
+                <span class="text-[#00DCC8]">→</span> Web search
+              </div>
+              <div class="flex items-center gap-2 text-sm text-white/50">
+                <span class="text-[#00DCC8]">→</span> Browser control
+              </div>
+              <div class="flex items-center gap-2 text-sm text-white/50">
+                <span class="text-[#00DCC8]">→</span> Code execution
+              </div>
+              <div class="flex items-center gap-2 text-sm text-white/50">
+                <span class="text-[#00DCC8]">→</span> Cron jobs
+              </div>
+              <div class="flex items-center gap-2 text-sm text-white/50">
+                <span class="text-[#00DCC8]">→</span> Persistent memory
+              </div>
+              <div class="flex items-center gap-2 text-sm text-white/50">
+                <span class="text-[#00DCC8]">→</span> Multi-agent orchestration
+              </div>
+              <div class="flex items-center gap-2 text-sm text-white/50">
+                <span class="text-[#00DCC8]">→</span> Image generation
+              </div>
+              <div class="flex items-center gap-2 text-sm text-white/50">
+                <span class="text-[#00DCC8]">→</span> File management
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== INSTALL (was Platforms) ==================== -->
+  <section id="install" class="relative py-28 md:py-36 overflow-hidden">
+    <div class="section-fade absolute inset-0"></div>
+    <div class="relative z-10 max-w-6xl mx-auto px-6">
+      <div class="text-center mb-16 space-y-5">
+        <p class="reveal text-xs font-semibold uppercase tracking-[0.2em] text-[#00DCC8]/80">Install</p>
+        <h2 class="reveal reveal-delay-1 text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight leading-tight">
+          Pick your device.<br>
+          <span class="text-white/40">One brain across all of them.</span>
+        </h2>
+        <p class="reveal reveal-delay-2 text-sm text-white/40 max-w-xl mx-auto">
+          Each guide is a 3-to-5 step walkthrough. Send the link to a friend — they'll handle the rest.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-6">
+        <!-- macOS -->
+        <div class="reveal feature-card glass rounded-2xl p-8 space-y-5">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/15 to-blue-500/5 border border-blue-500/10 flex items-center justify-center text-2xl">
+              🖥️
+            </div>
+            <div>
+              <h3 class="text-lg font-bold">macOS</h3>
+              <p class="text-xs text-white/30">Ventura and later</p>
+            </div>
+          </div>
+          <ul class="space-y-2.5 text-sm text-white/40">
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Menu bar app — always one click away
+            </li>
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Guided setup wizard — installs OpenClaw + Tailscale
+            </li>
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Tailscale integration for secure remote access
+            </li>
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Project tracking, agent grid, cron monitoring
+            </li>
+          </ul>
+          <a href="Carapace-1.9.3.dmg" download class="block w-full py-3 rounded-xl glass-elevated border border-white/10 text-center font-semibold text-sm hover:bg-white/[0.08] transition-all duration-300 hover:-translate-y-0.5">
+            Download DMG — v1.9.3
+          </a>
+          <a href="/install/mac/" class="block text-center text-xs text-white/40 hover:text-teal-400 transition-colors">
+            Full install guide →
+          </a>
+        </div>
+
+        <!-- Linux -->
+        <div class="reveal reveal-delay-1 feature-card glass rounded-2xl p-8 space-y-5">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500/15 to-orange-500/5 border border-orange-500/10 flex items-center justify-center text-2xl">
+              🐧
+            </div>
+            <div>
+              <h3 class="text-lg font-bold">Linux</h3>
+              <p class="text-xs text-white/30">Headless / VPS</p>
+            </div>
+          </div>
+          <ul class="space-y-2.5 text-sm text-white/40">
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              One-liner install — paste and go
+            </li>
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Runs on any VPS — or a Raspberry Pi
+            </li>
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Always-on headless daemon
+            </li>
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Free — no license required for headless
+            </li>
+          </ul>
+          <div class="code-block rounded-xl p-4 text-sm">
+            <div class="text-white/30 text-xs mb-2">Install with one command:</div>
+            <code class="text-[#00DCC8] text-xs sm:text-sm break-all">curl -fsSL https://carapace.info/install.sh | bash</code>
+          </div>
+          <a href="/install/linux/" class="block text-center text-xs text-white/40 hover:text-teal-400 transition-colors">
+            Full install guide →
+          </a>
+        </div>
+
+        <!-- iOS -->
+        <div class="reveal reveal-delay-2 feature-card glass rounded-2xl p-8 space-y-5">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-pink-500/15 to-pink-500/5 border border-pink-500/10 flex items-center justify-center text-2xl">
+              📱
+            </div>
+            <div>
+              <h3 class="text-lg font-bold">iOS</h3>
+              <p class="text-xs text-white/30">iPhone companion</p>
+            </div>
+          </div>
+          <ul class="space-y-2.5 text-sm text-white/40">
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Chat, voice, and photo input
+            </li>
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Live camera vision — AI sees what you see
+            </li>
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              CarPlay + Bluetooth device support
+            </li>
+            <li class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Control any gateway from anywhere
+            </li>
+          </ul>
+          <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="block w-full py-3 rounded-xl bg-gradient-to-r from-[#00DCC8] to-[#00A89A] text-center font-semibold text-sm text-black hover:opacity-90 transition-all duration-300 hover:-translate-y-0.5">
+            App Store — $2.99
+          </a>
+          <a href="/install/ios/" class="block text-center text-xs text-white/40 hover:text-teal-400 transition-colors">
+            Full install guide →
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== EXAMPLE USE CASES ==================== -->
+  <section class="relative py-28 md:py-36">
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="text-center mb-16 space-y-5">
+        <p class="reveal text-xs font-semibold uppercase tracking-[0.2em] text-[#00DCC8]/80">What people use it for</p>
+        <h2 class="reveal reveal-delay-1 text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight leading-tight">
+          Feed it the data.<br>
+          <span class="text-white/40">Get the answer.</span>
+        </h2>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-5 max-w-5xl mx-auto">
+        <!-- Read this for me -->
+        <div class="reveal feature-card glass rounded-2xl p-7 space-y-3">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500/15 to-purple-500/5 border border-purple-500/10 flex items-center justify-center">
+              <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </div>
+            <h3 class="text-base font-semibold">"Read this for me."</h3>
+          </div>
+          <p class="text-sm text-white/40 leading-relaxed">
+            Point your camera at a letter, an Rx label, a fridge nutrition panel, an X-ray, or an error message on a screen. Live Vision reads it and answers in plain English. Works offline from your phone, over your mesh.
+          </p>
+        </div>
+
+        <!-- Morning briefing -->
+        <div class="reveal reveal-delay-1 feature-card glass rounded-2xl p-7 space-y-3">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/15 to-amber-500/5 border border-amber-500/10 flex items-center justify-center">
+              <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
+            </div>
+            <h3 class="text-base font-semibold">Morning briefing at 7 AM.</h3>
+          </div>
+          <p class="text-sm text-white/40 leading-relaxed">
+            Cron-scheduled agent runs while you sleep. Reads your calendar, checks the weather, scans priority inbox threads, and pushes one clean summary to your phone before you're out of bed.
+          </p>
+        </div>
+
+        <!-- Keep working -->
+        <div class="reveal feature-card glass rounded-2xl p-7 space-y-3">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-[#00DCC8]/15 to-[#00DCC8]/5 border border-[#00DCC8]/10 flex items-center justify-center">
+              <svg class="w-5 h-5 text-[#00DCC8]" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.25 6.087c0-.355.186-.676.401-.959.221-.29.349-.634.349-1.003 0-1.036-1.007-1.875-2.25-1.875s-2.25.84-2.25 1.875c0 .369.128.713.349 1.003.215.283.401.604.401.959v0a.64.64 0 01-.657.643 48.39 48.39 0 01-4.163-.3c.186 1.613.293 3.25.315 4.907a.656.656 0 01-.658.663v0c-.355 0-.676-.186-.959-.401a1.647 1.647 0 00-1.003-.349c-1.036 0-1.875 1.007-1.875 2.25s.84 2.25 1.875 2.25c.369 0 .713-.128 1.003-.349.283-.215.604-.401.959-.401v0c.31 0 .555.26.532.57a48.039 48.039 0 01-.642 5.056c1.518.19 3.058.309 4.616.354a.64.64 0 00.657-.643v0c0-.355-.186-.676-.401-.959a1.647 1.647 0 01-.349-1.003c0-1.035 1.008-1.875 2.25-1.875 1.243 0 2.25.84 2.25 1.875 0 .369-.128.713-.349 1.003-.215.283-.4.604-.4.959v0c0 .333.277.599.61.58a48.1 48.1 0 005.427-.63 48.05 48.05 0 00.582-4.717.532.532 0 00-.533-.57v0c-.355 0-.676.186-.959.401-.29.221-.634.349-1.003.349-1.035 0-1.875-1.007-1.875-2.25s.84-2.25 1.875-2.25c.37 0 .713.128 1.003.349.283.215.604.401.96.401v0a.656.656 0 00.658-.663 48.422 48.422 0 00-.37-5.36c-1.886.342-3.81.574-5.766.689a.578.578 0 01-.61-.58v0z"/></svg>
+            </div>
+            <h3 class="text-base font-semibold">"Keep working while I'm at dinner."</h3>
+          </div>
+          <p class="text-sm text-white/40 leading-relaxed">
+            Hand your VPS agent a half-done task — finish the landing page, triage the inbox, watch a PR for reviewers. Walk away. Come back to a status report. No SSH, no re-prompting.
+          </p>
+        </div>
+
+        <!-- Family tech support -->
+        <div class="reveal reveal-delay-1 feature-card glass rounded-2xl p-7 space-y-3">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-500/15 to-pink-500/5 border border-pink-500/10 flex items-center justify-center">
+              <svg class="w-5 h-5 text-pink-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>
+            </div>
+            <h3 class="text-base font-semibold">Stop being family IT support.</h3>
+          </div>
+          <p class="text-sm text-white/40 leading-relaxed">
+            Set up Mom's Mac once with a free Gemini key. Now she asks her phone instead of asking you. "What does this error mean?" "Translate this menu." "Remind me to take my meds at 8." You get your Saturdays back.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== FEATURES ==================== -->
+  <section id="features" class="relative py-28 md:py-36">
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="text-center mb-20 space-y-5">
+        <p class="reveal text-xs font-semibold uppercase tracking-[0.2em] text-white/40">Features</p>
+        <h2 class="reveal reveal-delay-1 text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight leading-tight">
+          Everything you need.<br>
+          <span class="text-white/40">Nothing you don't.</span>
+        </h2>
+      </div>
+
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <!-- Vision -->
+        <div class="reveal feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/15 to-purple-600/10 border border-purple-500/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Live Vision</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Point your camera at anything. Your AI sees it in real time. Read labels, analyze documents, identify parts, interpret X-rays — whatever's in front of you.
+          </p>
+        </div>
+
+        <!-- Voice -->
+        <div class="reveal reveal-delay-1 feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500/15 to-cyan-600/10 border border-cyan-500/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Voice Mode</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Full hands-free voice interface. Talk naturally while driving, cooking, or working. Vision hits Gemini Flash first — fast and cheap — and only escalates to your full agent when it needs to.
+          </p>
+        </div>
+
+        <!-- Agent monitoring -->
+        <div class="reveal reveal-delay-2 feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#00DCC8]/15 to-[#00DCC8]/5 border border-[#00DCC8]/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-[#00DCC8]" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Live Agent Monitoring</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Watch your agents think in real-time. Monitor token usage, subagent trees, active sessions. Kill runaway processes with a tap.
+          </p>
+        </div>
+
+        <!-- Projects & Cron -->
+        <div class="reveal feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500/15 to-indigo-600/10 border border-indigo-500/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Projects &amp; Cron Jobs</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Track workstreams, completion percentages, and scheduled jobs in one view. See what's running in the background without opening a terminal.
+          </p>
+        </div>
+
+        <!-- Security -->
+        <div class="reveal reveal-delay-1 feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-green-500/15 to-green-600/10 border border-green-500/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Zero-Trust Security</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Encrypted end-to-end. No cloud relay, no data leaves your mesh. Pair via QR code, connect over Tailscale or direct TLS. Your conversations never touch a third-party server.
+          </p>
+        </div>
+
+        <!-- Multi-gateway -->
+        <div class="reveal reveal-delay-2 feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/15 to-amber-600/10 border border-amber-500/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Multi-Gateway Control</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Run gateways on your Mac, a VPS, and a Pi. Switch between them with one tap. Saved profiles, zero reconfiguration. One app controls your entire mesh.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== META GLASSES BETA ==================== -->
+  <section class="relative py-20 md:py-28 overflow-hidden">
+    <!-- Subtle teal glow in the background -->
+    <div class="absolute inset-0 pointer-events-none">
+      <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] rounded-full blur-3xl opacity-40" style="background: radial-gradient(circle, rgba(0,220,200,0.12) 0%, rgba(0,220,200,0.03) 50%, transparent 80%);"></div>
+    </div>
+    <div class="relative z-10 max-w-4xl mx-auto px-6">
+      <div class="reveal glass-elevated rounded-3xl p-8 md:p-12 relative overflow-hidden">
+        <div class="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#00DCC8] to-transparent"></div>
+        <div class="grid md:grid-cols-[1fr_auto] gap-8 items-center">
+          <div class="space-y-5">
+            <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#00DCC8]/10 border border-[#00DCC8]/25 text-[11px] font-semibold text-[#00DCC8] uppercase tracking-wider">
+              <span class="w-1.5 h-1.5 rounded-full bg-[#00DCC8] animate-pulse"></span>
+              Coming soon · Limited beta
+            </div>
+            <h2 class="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight leading-[1.05]">
+              Your AI.<br>
+              <span class="gradient-text">On your face.</span>
+            </h2>
+            <p class="text-base sm:text-lg text-white/55 leading-relaxed max-w-xl">
+              Meta Ray-Ban glasses + CARAPACE. Hands-free voice, live vision, every direction you look — all routed through your own gateway.
+            </p>
+            <p class="text-sm text-white/35 leading-relaxed max-w-xl">
+              When Meta opens their SDK, the <span class="text-white/60 font-semibold">first 500 paid CARAPACE Mac users</span> get a TestFlight invite. No waitlist, no extra cost on top of your license — just buy Personal or Pro to lock your spot. Free tier isn't eligible.
+            </p>
+            <div class="flex flex-wrap gap-3 items-center pt-2">
+              <a href="Carapace-1.9.3.dmg" download class="inline-flex items-center gap-3 pl-4 pr-5 py-3 rounded-xl bg-white text-black hover:bg-white/90 transition-all duration-300 shadow-lg shadow-black/20 hover:-translate-y-0.5 group">
+                <svg class="w-6 h-6 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+                <div class="text-left">
+                  <div class="text-[10px] font-normal opacity-60 leading-none">Lock your beta spot</div>
+                  <div class="text-[15px] font-semibold leading-tight -mt-0.5">Download macOS — v1.9.3</div>
+                </div>
+              </a>
+              <span class="text-xs text-white/35 max-w-[200px]">Already own CARAPACE for Mac? <span class="text-[#00DCC8]/70">You're in.</span></span>
+            </div>
+          </div>
+
+          <!-- Glasses illustration (scroll-bound rotation — see JS at bottom).
+               Stage sized to the glasses shape (wider than tall); glow is a
+               radial ellipse behind, not a square-masked gradient. -->
+          <div class="hidden md:flex items-center justify-center">
+            <div id="beta-glasses-stage" class="relative" style="perspective: 900px; width: 240px; height: 150px;">
+              <!-- Soft radial halo, matches glasses proportions -->
+              <div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(ellipse at center, rgba(0,220,200,0.18) 0%, rgba(0,220,200,0.04) 45%, transparent 75%); filter: blur(14px);"></div>
+              <svg id="beta-glasses" class="relative w-full h-full text-[#00DCC8]/85" fill="none" stroke="currentColor" stroke-width="1.3" viewBox="0 0 24 16" style="transform-origin: center center;" aria-hidden="true">
+                <!-- Stylized sunglasses — original illustration, tight viewBox so it fills the frame -->
+                <circle cx="6.5" cy="8" r="3.5"/>
+                <circle cx="17.5" cy="8" r="3.5"/>
+                <path d="M10 8h4" stroke-linecap="round"/>
+                <path d="M3 8L5 2h4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M21 8L19 2h-4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== PRICING ==================== -->
+  <section id="pricing" class="relative py-28 md:py-36 overflow-hidden">
+    <div class="section-fade absolute inset-0"></div>
+    <div class="relative z-10 max-w-6xl mx-auto px-6">
+      <div class="text-center mb-20 space-y-5">
+        <p class="reveal text-xs font-semibold uppercase tracking-[0.2em] text-white/40">Pricing</p>
+        <h2 class="reveal reveal-delay-1 text-3xl sm:text-4xl font-bold tracking-tight">
+          Pay once. Own it forever.
+        </h2>
+        <p class="reveal reveal-delay-2 text-base text-white/35 max-w-lg mx-auto">
+          No subscriptions. No usage limits. No cloud fees. Just the app and your own hardware.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto items-start">
+
+        <!-- Free -->
+        <div class="reveal glass rounded-2xl p-8 space-y-6 hover:bg-white/[0.04] transition-colors duration-300">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-gray-500/20 to-gray-600/10 border border-gray-500/15 flex items-center justify-center">
+              <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-2.25-1.313M21 7.5v2.25m0-2.25l-2.25 1.313M3 7.5l2.25-1.313M3 7.5l2.25 1.313M3 7.5v2.25m9 3l2.25-1.313M12 12.75l-2.25-1.313M12 12.75V15m0 6.75l2.25-1.313M12 21.75V15m0 0l-2.25-1.313"/></svg>
+            </div>
+            <div>
+              <h3 class="text-lg font-bold">Free</h3>
+              <p class="text-xs text-white/30">Mac + Linux</p>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-baseline gap-1.5">
+              <span class="text-5xl font-extrabold tracking-tight">$0</span>
+              <span class="text-white/30 text-sm font-medium">forever</span>
+            </div>
+          </div>
+          <div class="border-t border-white/[0.06] pt-5 space-y-3">
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-[#00DCC8] flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Chat with your AI
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-[#00DCC8] flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              1 device
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-[#00DCC8] flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Full OpenClaw toolbox
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/30">
+              <svg class="w-4 h-4 text-white/15 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              No project tracking
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/30">
+              <svg class="w-4 h-4 text-white/15 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              No cron tracking
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/30">
+              <svg class="w-4 h-4 text-white/15 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              No agent status servers
+            </div>
+          </div>
+          <a href="Carapace-1.9.3.dmg" download class="block w-full py-3 rounded-xl glass-elevated border border-white/10 text-center font-semibold text-sm hover:bg-white/[0.08] transition-all duration-300 hover:-translate-y-0.5">
+            Download Free
+          </a>
+        </div>
+
+        <!-- Personal — popular -->
+        <div class="reveal reveal-delay-1 glass rounded-2xl p-8 space-y-6 pricing-popular relative overflow-hidden hover:bg-white/[0.04] transition-colors duration-300">
+          <div class="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#00DCC8] to-transparent"></div>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-[#00DCC8]/20 to-[#00DCC8]/5 border border-[#00DCC8]/15 flex items-center justify-center">
+                <svg class="w-5 h-5 text-[#00DCC8]" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z"/></svg>
+              </div>
+              <div>
+                <h3 class="text-lg font-bold">Personal</h3>
+                <p class="text-xs text-white/30">Mac</p>
+              </div>
+            </div>
+            <span class="px-2.5 py-1 rounded-full bg-[#00DCC8]/10 border border-[#00DCC8]/20 text-[#00DCC8] text-[10px] font-semibold uppercase tracking-wider">Most Popular</span>
+          </div>
+          <div>
+            <div class="flex items-baseline gap-1.5">
+              <span class="text-5xl font-extrabold tracking-tight">$9.99</span>
+              <span class="text-white/30 text-sm font-medium">one-time</span>
+            </div>
+          </div>
+          <div class="border-t border-white/[0.06] pt-5 space-y-3">
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-[#00DCC8] flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Everything in Free
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-[#00DCC8] flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Up to 2 devices
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-[#00DCC8] flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Project tracking
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-[#00DCC8] flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Cron job monitoring
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-[#00DCC8] flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Agent grid &amp; status servers
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-[#00DCC8] flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Pay once, own forever
+            </div>
+          </div>
+          <a href="Carapace-1.9.3.dmg" download class="block w-full py-3.5 rounded-xl bg-gradient-to-r from-[#00DCC8] to-[#00A89A] text-center font-semibold text-sm text-black hover:opacity-90 transition-all duration-300 shadow-lg shadow-[#00DCC8]/20 hover:-translate-y-0.5">
+            Download — $9.99 one-time
+          </a>
+        </div>
+
+        <!-- Pro -->
+        <div class="reveal reveal-delay-2 glass rounded-2xl p-8 space-y-6 hover:bg-white/[0.04] transition-colors duration-300">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-indigo-600/10 border border-indigo-500/15 flex items-center justify-center">
+              <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+            </div>
+            <div>
+              <h3 class="text-lg font-bold">Pro</h3>
+              <p class="text-xs text-white/30">Mac</p>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-baseline gap-1.5">
+              <span class="text-5xl font-extrabold tracking-tight">$24.99</span>
+              <span class="text-white/30 text-sm font-medium">one-time</span>
+            </div>
+          </div>
+          <div class="border-t border-white/[0.06] pt-5 space-y-3">
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Everything in Personal
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Up to 10 devices
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Advanced debugging &amp; log viewer
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Desktop notifications &amp; widgets
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Pay once, own forever
+            </div>
+          </div>
+          <a href="Carapace-1.9.3.dmg" download class="block w-full py-3.5 rounded-xl glass-elevated border border-white/10 text-center font-semibold text-sm hover:bg-white/[0.08] transition-all duration-300 hover:-translate-y-0.5">
+            Download — $24.99 one-time
+          </a>
+        </div>
+      </div>
+
+      <!-- iOS callout -->
+      <div class="reveal mt-8 max-w-5xl mx-auto text-center">
+        <div class="inline-flex items-center gap-3 px-5 py-3 rounded-full glass-elevated text-sm text-white/50">
+          <svg class="w-5 h-5 text-white/40" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          iOS companion app: <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="text-[#00DCC8] hover:text-[#00DCC8]/80 font-semibold transition-colors">$2.99 on the App Store</a> <span class="text-white/25">(separate purchase)</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Getting Started section was removed — the /install/<platform>/ pages
+       replace it with actual picture-by-picture walkthroughs. -->
+
+  <!-- ==================== CTA / DOWNLOAD ==================== -->
+  <section id="download" class="relative py-28 md:py-36 overflow-hidden">
+    <div class="absolute inset-0">
+      <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-gradient-to-t from-[#00DCC8]/[0.05] to-transparent rounded-full blur-3xl"></div>
+    </div>
+    <div class="relative z-10 max-w-3xl mx-auto px-6 text-center space-y-10">
+      <img src="assets/app-icon.png" alt="CARAPACE" class="reveal w-20 h-20 rounded-[1.4rem] shadow-2xl mx-auto">
+      <div class="reveal reveal-delay-1 space-y-4">
+        <h2 class="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight">
+          Your turn.<br>
+          <span class="text-white/40">Five minutes, start to finish.</span>
+        </h2>
+        <p class="text-base text-white/35 max-w-lg mx-auto leading-relaxed">
+          Pick your flavor. Each install guide is a short picture-by-picture walkthrough you can send to a non-technical friend.
+        </p>
+      </div>
+      <div class="reveal reveal-delay-2 flex flex-wrap justify-center gap-4 pt-2">
+        <a href="Carapace-1.9.3.dmg" download class="inline-flex items-center gap-3 pl-4 pr-6 py-3.5 rounded-xl bg-white text-black hover:bg-white/90 transition-all duration-300 shadow-lg shadow-black/20 hover:shadow-xl hover:-translate-y-0.5 group">
+          <svg class="w-7 h-7 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          <div class="text-left">
+            <div class="text-[10px] font-normal opacity-60 leading-none">Download for</div>
+            <div class="text-[17px] font-semibold leading-tight -mt-0.5">macOS — v1.9.3</div>
+          </div>
+        </a>
+        <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="inline-flex items-center gap-3 pl-4 pr-6 py-3.5 rounded-xl glass-elevated border border-white/10 hover:bg-white/[0.08] hover:border-white/15 transition-all duration-300 hover:-translate-y-0.5 group">
+          <svg class="w-7 h-7 text-white/70 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          <div class="text-left">
+            <div class="text-[10px] font-normal text-white/40 leading-none">Download on the</div>
+            <div class="text-[17px] font-semibold leading-tight text-white/90 -mt-0.5">App Store — $2.99</div>
+          </div>
+        </a>
+      </div>
+
+      <!-- Linux install -->
+      <div class="reveal reveal-delay-3 max-w-lg mx-auto space-y-3">
+        <div class="code-block rounded-xl p-4 text-center">
+          <div class="text-white/30 text-xs mb-2">Linux / VPS / Raspberry Pi — free, headless, open source</div>
+          <code class="text-[#00DCC8] text-sm break-all">curl -fsSL https://carapace.info/install.sh | bash</code>
+        </div>
+        <div class="flex flex-wrap justify-center items-center gap-x-5 gap-y-2 text-xs text-white/40">
+          <a href="/install/mac/" class="hover:text-teal-400 transition-colors">Mac guide →</a>
+          <span class="text-white/15">·</span>
+          <a href="/install/linux/" class="hover:text-teal-400 transition-colors">Linux guide →</a>
+          <span class="text-white/15">·</span>
+          <a href="/install/ios/" class="hover:text-teal-400 transition-colors">iOS guide →</a>
+        </div>
+      </div>
+
+      <!-- Trust indicators -->
+      <div class="reveal reveal-delay-3 flex flex-wrap justify-center gap-x-8 gap-y-3 pt-4 text-xs text-white/20">
+        <span class="flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+          End-to-end encrypted
+        </span>
+        <span class="flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"/></svg>
+          No cloud dependency
+        </span>
+        <span class="flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+          Your data stays on your hardware
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== FOOTER ==================== -->
+  <footer class="border-t border-white/[0.04] py-12">
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-6">
+        <div class="flex items-center gap-3">
+          <img src="assets/app-icon.png" alt="CARAPACE" class="w-7 h-7 rounded-[8px]">
+          <span class="text-sm font-semibold text-white/50">CARAPACE</span>
+          <span class="text-xs text-white/15">by Mike Paepke</span>
+        </div>
+        <div class="flex items-center gap-6 text-xs text-white/25">
+          <a href="https://github.com/mikeypaepke-gif/carapace-site" class="hover:text-white/50 transition-colors inline-flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .296c-6.627 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.385.6.11.793-.26.793-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.755-1.333-1.755-1.09-.744.082-.73.082-.73 1.205.086 1.838 1.238 1.838 1.238 1.07 1.834 2.807 1.304 3.492.997.108-.775.42-1.304.762-1.604-2.665-.304-5.466-1.334-5.466-5.933 0-1.31.47-2.381 1.235-3.221-.124-.304-.535-1.524.117-3.176 0 0 1.008-.323 3.3 1.23.957-.266 1.98-.4 3-.405 1.02.005 2.043.139 3 .405 2.29-1.553 3.297-1.23 3.297-1.23.653 1.652.242 2.872.118 3.176.77.84 1.234 1.911 1.234 3.221 0 4.61-2.806 5.625-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .319.192.694.8.576 4.765-1.589 8.2-6.085 8.2-11.385 0-6.627-5.373-12-12-12z"/></svg>
+            GitHub
+          </a>
+          <a href="https://openclaw.dev" class="hover:text-white/50 transition-colors">OpenClaw</a>
+          <a href="manage.html" class="hover:text-white/50 transition-colors">Manage License</a>
+          <a href="mailto:hello@patrickbig.dog" class="hover:text-white/50 transition-colors">Contact</a>
+          <a href="https://venmo.com/Mike-Paepke" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 text-white/40 hover:text-white/70 hover:border-white/20 transition-all text-[11px] font-medium">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.593c-5.63-5.539-11-10.297-11-14.402 0-3.791 3.068-5.191 5.281-5.191 1.312 0 4.151.501 5.719 4.457 1.59-3.968 4.464-4.447 5.726-4.447 2.54 0 5.274 1.621 5.274 5.181 0 4.069-5.136 8.625-11 14.402z"/></svg>
+            Tip
+          </a>
+        </div>
+      </div>
+      <div class="mt-8 text-center text-[11px] text-white/10">
+        &copy; 2026 Mike Paepke. All rights reserved. Apple and the Apple logo are trademarks of Apple Inc.
+      </div>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script>
+    // Scroll reveal
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) entry.target.classList.add('visible');
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+    // Nav background on scroll
+    const nav = document.getElementById('nav');
+    window.addEventListener('scroll', () => {
+      if (window.scrollY > 50) {
+        nav.classList.add('glass');
+        nav.style.borderBottom = '1px solid rgba(255,255,255,0.04)';
+      } else {
+        nav.classList.remove('glass');
+        nav.style.borderBottom = 'none';
+      }
+    }, { passive: true });
+
+    // Close mobile menu on link click
+    document.querySelectorAll('#mobile-menu a').forEach(a => {
+      a.addEventListener('click', () => document.getElementById('mobile-menu').classList.add('hidden'));
+    });
+
+    // Mac screenshot slideshow
+    const macSlides = document.querySelectorAll('.mac-slide');
+    if (macSlides.length > 0) {
+      let macCurrent = 0;
+      macSlides[0].classList.add('active');
+      setInterval(() => {
+        macSlides[macCurrent].classList.remove('active');
+        macCurrent = (macCurrent + 1) % macSlides.length;
+        macSlides[macCurrent].classList.add('active');
+      }, 4000);
+    }
+
+    // iPhone screenshot slideshow
+    const slides = document.querySelectorAll('.iphone-slide');
+    if (slides.length > 0) {
+      let current = 0;
+      slides[0].classList.add('active');
+      setInterval(() => {
+        slides[current].classList.remove('active');
+        current = (current + 1) % slides.length;
+        slides[current].classList.add('active');
+      }, 3000);
+    }
+
+    // Scroll-bound rotation on the Meta-beta glasses SVG.
+    // Ties rotation to viewport progress so they spin as the user scrolls
+    // past the section — same effect-feel as eyewear product pages, but
+    // on our own original illustration so there's no IP leakage.
+    (() => {
+      const glasses = document.getElementById('beta-glasses');
+      const stage = document.getElementById('beta-glasses-stage');
+      if (!glasses || !stage) return;
+      // Respect users who've asked their OS to reduce motion.
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+      let ticking = false;
+      let inView = false;
+
+      const update = () => {
+        ticking = false;
+        if (!inView) return;
+        const rect = stage.getBoundingClientRect();
+        const vh = window.innerHeight || document.documentElement.clientHeight;
+        // progress: 0 when the stage is just entering the bottom of the
+        // viewport, 1 when it's fully past the top.
+        const progress = Math.max(0, Math.min(1, (vh - rect.top) / (vh + rect.height)));
+        // 540° rotateY across the scroll range = 1.5 full spins. Subtle
+        // rotateX tilt peaks in the middle for a 3D "coming toward you"
+        // feel without going full disorienting.
+        const rotY = progress * 540;
+        const rotX = Math.sin(progress * Math.PI) * 12;
+        glasses.style.transform = `rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+      };
+
+      const onScroll = () => {
+        if (!ticking) {
+          requestAnimationFrame(update);
+          ticking = true;
+        }
+      };
+
+      // Only attach scroll work when the section is near the viewport.
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          inView = e.isIntersecting;
+          if (inView) update();
+        }
+      }, { rootMargin: '200px 0px' });
+      io.observe(stage);
+
+      window.addEventListener('scroll', onScroll, { passive: true });
+      window.addEventListener('resize', onScroll, { passive: true });
+      update();
+    })();
+  </script>
+
+</body>
+</html><!-- v2.0.0 Wed Apr 16 08:15:00 PDT 2026 -->

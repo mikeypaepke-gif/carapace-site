@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Install CARAPACE on Linux — Open Source, ~5 min</title>
+  <meta name="description" content="Provision a headless OpenClaw gateway on any Ubuntu/Debian VPS. MIT-licensed installer, one curl command, five minutes.">
+  <meta property="og:title" content="Install CARAPACE on Linux">
+  <meta property="og:description" content="Headless OpenClaw gateway on any VPS. Open source, one curl command, five minutes.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://carapace.info/install/linux/">
+  <meta property="og:image" content="https://carapace.info/assets/carapace-og.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="icon" href="/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'SF Mono', 'Menlo', 'monospace'],
+          },
+          colors: {
+            teal: { 400: '#00DCC8', 500: '#00C4B4', 600: '#00A89A' },
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { background: #080A12; }
+
+    /* Reveal animations */
+    .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1); }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+    .reveal-delay-1 { transition-delay: 0.1s; }
+    .reveal-delay-2 { transition-delay: 0.2s; }
+    .reveal-delay-3 { transition-delay: 0.3s; }
+
+    /* Glass */
+    .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06); }
+    .glass-elevated { background: rgba(255,255,255,0.05); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid rgba(255,255,255,0.08); }
+    .gradient-text { background: linear-gradient(135deg, #00DCC8 0%, #00C4B4 50%, #2dd4bf 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+    /* Hero glow */
+    .hero-glow { position: relative; overflow: hidden; }
+    .hero-glow::before {
+      content: '';
+      position: absolute;
+      width: 700px; height: 700px;
+      top: -200px; left: 50%;
+      transform: translateX(-50%);
+      background: radial-gradient(circle, rgba(0,220,200,0.08) 0%, rgba(0,220,200,0.03) 40%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* Terminal window */
+    .term-window {
+      background: #0A0E14;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      box-shadow: 0 30px 60px -15px rgba(0,0,0,0.6), 0 20px 40px -20px rgba(0,0,0,0.4);
+      overflow: hidden;
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .term-chrome {
+      background: linear-gradient(180deg, #1e2230 0%, #161a24 100%);
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .term-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .term-dot.red { background: #ff5f56; }
+    .term-dot.yellow { background: #ffbd2e; }
+    .term-dot.green { background: #27c93f; }
+    .term-title { flex: 1; text-align: center; color: rgba(255,255,255,0.35); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; }
+    .term-body { padding: 18px 20px; color: rgba(230,237,243,0.85); white-space: pre-wrap; overflow-x: auto; }
+    .term-body .prompt { color: #00DCC8; }
+    .term-body .user { color: #e6edf3; }
+    .term-body .out { color: rgba(230,237,243,0.6); }
+    .term-body .dim { color: rgba(230,237,243,0.35); }
+    .term-body .teal { color: #00DCC8; }
+    .term-body .yellow { color: #ffbd2e; }
+    .term-body .green { color: #52d987; }
+    .term-body .red { color: #ff6b6b; }
+    .term-body .bold { color: #e6edf3; font-weight: 600; }
+    .cursor {
+      display: inline-block;
+      width: 8px; height: 15px;
+      background: #00DCC8;
+      margin-left: 2px;
+      vertical-align: -2px;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 50% { background: transparent; } }
+
+    /* Step markers */
+    .step-badge {
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(0,220,200,0.15), rgba(0,220,200,0.05));
+      border: 1px solid rgba(0,220,200,0.2);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: #00DCC8;
+      font-size: 18px;
+    }
+
+    /* Copy button */
+    .copy-btn {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.7);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .copy-btn:hover { background: rgba(255,255,255,0.08); color: #fff; border-color: rgba(0,220,200,0.3); }
+    .copy-btn.copied { background: rgba(0,220,200,0.15); border-color: rgba(0,220,200,0.4); color: #00DCC8; }
+
+    /* OSS badge */
+    .oss-badge {
+      background: linear-gradient(135deg, rgba(0,220,200,0.15), rgba(0,220,200,0.05));
+      border: 1px solid rgba(0,220,200,0.25);
+    }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #080A12; }
+    ::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
+  </style>
+</head>
+<body class="text-white font-sans antialiased">
+
+  <!-- ==================== NAV ==================== -->
+  <nav class="fixed top-0 w-full z-50 backdrop-blur-xl bg-[#080A12]/80 border-b border-white/[0.05]">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3 group">
+        <img src="/assets/app-icon.png" alt="" class="w-8 h-8 rounded-lg">
+        <span class="font-bold tracking-tight">CARAPACE</span>
+      </a>
+      <div class="hidden sm:flex items-center gap-8 text-sm">
+        <a href="/install/mac/" class="text-white/50 hover:text-white transition-colors">Mac</a>
+        <a href="/install/linux/" class="text-teal-400">Linux</a>
+        <a href="/install/ios/" class="text-white/50 hover:text-white transition-colors">iOS</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="text-white/50 hover:text-white transition-colors inline-flex items-center gap-1.5">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .296c-6.627 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.385.6.11.793-.26.793-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.755-1.333-1.755-1.09-.744.082-.73.082-.73 1.205.086 1.838 1.238 1.838 1.238 1.07 1.834 2.807 1.304 3.492.997.108-.775.42-1.304.762-1.604-2.665-.304-5.466-1.334-5.466-5.933 0-1.31.47-2.381 1.235-3.221-.124-.304-.535-1.524.117-3.176 0 0 1.008-.323 3.3 1.23.957-.266 1.98-.4 3-.405 1.02.005 2.043.139 3 .405 2.29-1.553 3.297-1.23 3.297-1.23.653 1.652.242 2.872.118 3.176.77.84 1.234 1.911 1.234 3.221 0 4.61-2.806 5.625-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .319.192.694.8.576 4.765-1.589 8.2-6.085 8.2-11.385 0-6.627-5.373-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ==================== HERO ==================== -->
+  <section class="hero-glow pt-36 pb-16 md:pt-44 md:pb-20 relative">
+    <div class="max-w-4xl mx-auto px-6 text-center relative z-10">
+      <div class="reveal inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full oss-badge text-xs font-semibold text-teal-400 mb-8">
+        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .296c-6.627 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.385.6.11.793-.26.793-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.755-1.333-1.755-1.09-.744.082-.73.082-.73 1.205.086 1.838 1.238 1.838 1.238 1.07 1.834 2.807 1.304 3.492.997.108-.775.42-1.304.762-1.604-2.665-.304-5.466-1.334-5.466-5.933 0-1.31.47-2.381 1.235-3.221-.124-.304-.535-1.524.117-3.176 0 0 1.008-.323 3.3 1.23.957-.266 1.98-.4 3-.405 1.02.005 2.043.139 3 .405 2.29-1.553 3.297-1.23 3.297-1.23.653 1.652.242 2.872.118 3.176.77.84 1.234 1.911 1.234 3.221 0 4.61-2.806 5.625-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .319.192.694.8.576 4.765-1.589 8.2-6.085 8.2-11.385 0-6.627-5.373-12-12-12z"/></svg>
+        100% Open Source · MIT
+      </div>
+      <h1 class="reveal reveal-delay-1 text-[clamp(2rem,5vw,3.5rem)] font-extrabold leading-[1.05] tracking-tight mb-6">
+        Install CARAPACE on Linux.<br>
+        <span class="gradient-text">One command. ~5 minutes.</span>
+      </h1>
+      <p class="reveal reveal-delay-2 text-lg text-white/45 max-w-2xl mx-auto leading-relaxed mb-4">
+        A headless OpenClaw gateway on any Ubuntu or Debian VPS. Provision, pick a provider, paste your key, connect Tailscale, pair your phone. Done.
+      </p>
+      <p class="reveal reveal-delay-2 text-sm text-white/30 max-w-xl mx-auto">
+        The installer is <a href="https://github.com/mikeypaepke-gif/carapace-site/blob/main/install.sh" class="text-teal-400 hover:text-teal-300 underline-offset-4 hover:underline">open source</a> — read it, fork it, send PRs.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==================== PREREQS ==================== -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="reveal glass rounded-2xl p-7">
+        <h2 class="text-sm font-semibold uppercase tracking-[0.15em] text-white/40 mb-5">Before you start</h2>
+        <ul class="space-y-3 text-sm text-white/70">
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-teal-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+            <div><span class="text-white">An Ubuntu or Debian VPS</span> — anything from $5/mo works. DigitalOcean, Hetzner, Vultr, Linode, Scaleway — whatever you like.</div>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-teal-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+            <div><span class="text-white">SSH access</span> — `ssh user@your.vps.ip` needs to work. The installer runs as your user; it'll `sudo` when it needs to.</div>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-teal-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+            <div><span class="text-white">An API key</span> for your chosen provider — or nothing if you want to skip and configure it later. <span class="text-white/40">Gemini's free tier is the easiest on-ramp.</span></div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== STEP 1 ==================== -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="flex items-center gap-4 mb-6">
+        <div class="step-badge">1</div>
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight">Run the one-liner</h2>
+          <p class="text-sm text-white/40 mt-1">SSH into your VPS and paste this.</p>
+        </div>
+      </div>
+
+      <div class="reveal glass rounded-2xl p-1.5">
+        <div class="flex items-center justify-between px-5 py-4">
+          <code class="font-mono text-sm text-teal-400 tracking-tight select-all">curl -fsSL https://carapace.info/install.sh | bash</code>
+          <button class="copy-btn" data-copy="curl -fsSL https://carapace.info/install.sh | bash">Copy</button>
+        </div>
+      </div>
+
+      <p class="text-xs text-white/30 mt-4 leading-relaxed">
+        <span class="text-yellow-400/80">Heads up:</span> piping to <code class="font-mono text-white/50">bash</code> means you trust the code. Read it first if you want —
+        <a href="https://github.com/mikeypaepke-gif/carapace-site/blob/main/install.sh" class="text-teal-400 hover:text-teal-300 underline-offset-4 hover:underline">it's on GitHub</a>.
+        The script installs OpenClaw, Node via nvm, tmux, jq, and sets up your gateway. It's idempotent — safe to re-run.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==================== STEP 2: PICK PROVIDER ==================== -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="flex items-center gap-4 mb-6">
+        <div class="step-badge">2</div>
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight">Pick your AI provider</h2>
+          <p class="text-sm text-white/40 mt-1">The installer pauses here. Press the number for the one you want.</p>
+        </div>
+      </div>
+
+      <div class="reveal term-window">
+        <div class="term-chrome">
+          <div class="term-dot red"></div>
+          <div class="term-dot yellow"></div>
+          <div class="term-dot green"></div>
+          <div class="term-title">ubuntu@vps ~ — carapace install</div>
+        </div>
+<div class="term-body">  <span class="bold">Pick your AI provider:</span>
+    <span class="dim">1)</span> Google Gemini    <span class="dim">(free tier, recommended)</span>
+    <span class="dim">2)</span> OpenAI Codex     <span class="dim">(ChatGPT OAuth — Plus/Pro subscription)</span>
+    <span class="dim">3)</span> Anthropic Claude <span class="dim">(API key — pay-as-you-go)</span>
+    <span class="dim">4)</span> OpenAI API       <span class="dim">(API key — pay-as-you-go)</span>
+    <span class="dim">5)</span> xAI Grok         <span class="dim">(API key — pay-as-you-go)</span>
+    <span class="dim">6)</span> Skip             <span class="dim">(I'll do this myself later)</span>
+
+  Choice [1]: <span class="teal">1</span><span class="cursor"></span>
+</div>
+      </div>
+
+      <p class="text-xs text-white/30 mt-4 leading-relaxed">
+        <span class="text-white/50">Don't have a key yet?</span> Grab a free Gemini key at <a href="https://aistudio.google.com/apikey" class="text-teal-400 hover:text-teal-300">aistudio.google.com/apikey</a> — no credit card, ~60 requests/min on the free tier. Or pick Skip (6) and configure it from the dashboard later.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==================== STEP 3: PASTE KEY ==================== -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="flex items-center gap-4 mb-6">
+        <div class="step-badge">3</div>
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight">Paste your API key</h2>
+          <p class="text-sm text-white/40 mt-1">Each character echoes as <code class="font-mono text-white/60">*</code> so you can see your paste landed.</p>
+        </div>
+      </div>
+
+      <div class="reveal term-window">
+        <div class="term-chrome">
+          <div class="term-dot red"></div>
+          <div class="term-dot yellow"></div>
+          <div class="term-dot green"></div>
+          <div class="term-title">ubuntu@vps ~ — carapace install</div>
+        </div>
+<div class="term-body">  <span class="bold">Paste your google API key</span> <span class="dim">(AIza...)</span>
+  <span class="dim">(each character echoes as * — paste + press Enter)</span>
+  Key: <span class="teal">*********************************</span>
+    <span class="dim">→ captured: AIzaSy•••1nU</span>
+
+  <span class="green">✓</span> AI configured: google/gemini-2.5-flash
+</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== STEP 4: TAILSCALE ==================== -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="flex items-center gap-4 mb-6">
+        <div class="step-badge">4</div>
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight">Connect Tailscale</h2>
+          <p class="text-sm text-white/40 mt-1">The only step where you leave the terminal — click the auth URL and approve.</p>
+        </div>
+      </div>
+
+      <div class="reveal term-window">
+        <div class="term-chrome">
+          <div class="term-dot red"></div>
+          <div class="term-dot yellow"></div>
+          <div class="term-dot green"></div>
+          <div class="term-title">ubuntu@vps ~ — carapace install</div>
+        </div>
+<div class="term-body">  <span class="bold">Connecting Tailscale...</span>
+
+  To authenticate, visit:
+
+      <span class="teal">https://login.tailscale.com/a/abc123xyz</span>
+
+  <span class="dim">Waiting for authentication...</span>
+  <span class="green">✓</span> Tailscale connected — vps-london.tail-scale.ts.net
+</div>
+      </div>
+
+      <p class="text-xs text-white/30 mt-4 leading-relaxed">
+        <span class="text-white/50">No Tailscale account?</span> Sign up free at <a href="https://tailscale.com/start/" class="text-teal-400 hover:text-teal-300">tailscale.com/start</a> — personal use is free up to 100 devices. Tailscale gives you a secure mesh so your phone can reach your VPS anywhere, without exposing any ports.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==================== STEP 5: PAIR iPHONE ==================== -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="flex items-center gap-4 mb-6">
+        <div class="step-badge">5</div>
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight">Pair your iPhone</h2>
+          <p class="text-sm text-white/40 mt-1">Open the Carapace iOS app → Settings → Add Gateway → Scan. That's it.</p>
+        </div>
+      </div>
+
+      <div class="reveal grid md:grid-cols-[1fr_auto] gap-6 items-start">
+        <div class="term-window">
+          <div class="term-chrome">
+            <div class="term-dot red"></div>
+            <div class="term-dot yellow"></div>
+            <div class="term-dot green"></div>
+            <div class="term-title">ubuntu@vps ~ — carapace install</div>
+          </div>
+<div class="term-body">  <span class="bold">Ready to pair.</span> <span class="dim">Scan the QR →</span>
+
+  <span class="green">✓</span> Gateway listening on vps-london.tail-scale.ts.net:18789
+  <span class="green">✓</span> Pair token active — expires in 5 minutes
+
+  <span class="dim"># If you'd rather not scan, paste this into the iOS app:</span>
+  <span class="teal">carapace://config?gatewayBaseURL=https%3A%2F%2F...</span>
+
+  <span class="dim">Waiting for device...</span><span class="cursor"></span>
+</div>
+        </div>
+
+        <div class="glass rounded-2xl p-5 flex flex-col items-center gap-3" style="max-width: 240px;">
+          <div class="bg-white rounded-xl p-3">
+            <img src="/assets/pair-qr-mock.svg" alt="Example QR — encodes carapace.info" class="w-44 h-44 block">
+          </div>
+          <p class="text-[10px] text-white/30 text-center leading-snug">
+            Mock QR for preview only. Scans to <span class="text-white/50">carapace.info</span> — your real pair QR embeds a one-time token.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== DONE ==================== -->
+  <section class="py-16">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="reveal glass-elevated rounded-2xl p-8 md:p-10 text-center relative overflow-hidden">
+        <div class="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-teal-400 to-transparent"></div>
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-400/20 to-teal-400/5 border border-teal-400/25 mb-5">
+          <svg class="w-8 h-8 text-teal-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+        </div>
+        <h2 class="text-2xl sm:text-3xl font-bold mb-3">That's it. You're live.</h2>
+        <p class="text-white/50 max-w-lg mx-auto leading-relaxed">
+          Your gateway's running, your phone's paired, your key's set. Open the iOS app, start talking. Optional: add a Gemini vision key in Settings → Vision if you picked a different chat provider.
+        </p>
+        <div class="mt-7 flex flex-wrap justify-center gap-3">
+          <a href="/install/ios/" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-black font-semibold text-sm hover:bg-white/90 transition-all">
+            iOS setup →
+          </a>
+          <a href="/" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl glass-elevated border border-white/10 font-semibold text-sm text-white/80 hover:text-white transition-all">
+            Back to home
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== STUCK? ==================== -->
+  <section class="py-16 border-t border-white/[0.05]">
+    <div class="max-w-4xl mx-auto px-6 text-center">
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-white/40 mb-4">Stuck?</p>
+      <h2 class="text-xl sm:text-2xl font-bold mb-3">Open an issue on GitHub.</h2>
+      <p class="text-sm text-white/45 max-w-md mx-auto leading-relaxed mb-6">
+        The installer is open source. Bug reports, feature requests, and PRs welcome.
+      </p>
+      <a href="https://github.com/mikeypaepke-gif/carapace-site/issues" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl glass-elevated border border-white/10 font-semibold text-sm hover:bg-white/[0.08] transition-all">
+        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .296c-6.627 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.385.6.11.793-.26.793-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.755-1.333-1.755-1.09-.744.082-.73.082-.73 1.205.086 1.838 1.238 1.838 1.238 1.07 1.834 2.807 1.304 3.492.997.108-.775.42-1.304.762-1.604-2.665-.304-5.466-1.334-5.466-5.933 0-1.31.47-2.381 1.235-3.221-.124-.304-.535-1.524.117-3.176 0 0 1.008-.323 3.3 1.23.957-.266 1.98-.4 3-.405 1.02.005 2.043.139 3 .405 2.29-1.553 3.297-1.23 3.297-1.23.653 1.652.242 2.872.118 3.176.77.84 1.234 1.911 1.234 3.221 0 4.61-2.806 5.625-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .319.192.694.8.576 4.765-1.589 8.2-6.085 8.2-11.385 0-6.627-5.373-12-12-12z"/></svg>
+        Open an issue
+      </a>
+    </div>
+  </section>
+
+  <!-- ==================== FOOTER ==================== -->
+  <footer class="border-t border-white/[0.05] py-10">
+    <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-white/30">
+      <div class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-6 h-6 rounded-md opacity-60">
+        <span>CARAPACE · <a href="/" class="hover:text-white/60 transition-colors">carapace.info</a></span>
+      </div>
+      <div class="flex items-center gap-5">
+        <a href="/install/mac/" class="hover:text-white/60 transition-colors">Mac</a>
+        <a href="/install/linux/" class="hover:text-white/60 transition-colors">Linux</a>
+        <a href="/install/ios/" class="hover:text-white/60 transition-colors">iOS</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="hover:text-white/60 transition-colors">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Reveal on scroll
+    const obs = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); }
+    }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+    document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+
+    // Copy button
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(btn.dataset.copy);
+          const original = btn.textContent;
+          btn.textContent = 'Copied';
+          btn.classList.add('copied');
+          setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1800);
+        } catch (err) {
+          btn.textContent = 'Press ⌘C';
+        }
+      });
+    });
+  </script>
+</body>
+</html>

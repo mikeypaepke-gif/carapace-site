@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CARAPACE — Your AI Just Got Its Senses</title>
+  <meta name="description" content="Give your self-hosted AI agent sight, voice, and presence. Native iOS + Mac. Eyes, voice mode, multi-gateway mesh control, Meta glasses beta.">
+  <meta property="og:title" content="CARAPACE — Your AI Just Got Its Senses 👁️">
+  <meta property="og:description" content="Give your self-hosted AI agent sight, voice, and presence. Native iOS + Mac. Eyes, voice mode, multi-gateway mesh, Meta glasses beta. Fresh Mac to live in ~5 minutes.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://carapace.info">
+  <meta property="og:image" content="https://carapace.info/assets/carapace-og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="CARAPACE — Your AI Just Got Its Senses">
+  <meta name="twitter:description" content="Give your self-hosted AI agent sight, voice, and presence. Native iOS + Mac. Eyes, voice mode, multi-gateway mesh, Meta glasses beta.">
+  <meta name="twitter:image" content="https://carapace.info/assets/carapace-og.png">
+    <meta name="theme-color" content="#06b6d4">
+    <meta name="msapplication-TileColor" content="#06b6d4">
+    <meta name="msapplication-config" content="/browserconfig.xml">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="/apple-touch-icon-167x167.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon-152x152.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#06b6d4">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=SF+Pro+Display:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'] },
+          colors: {
+            claw: {
+              50: '#ecfeff', 100: '#cffafe', 200: '#a5f3fc', 300: '#67e8f9',
+              400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2', 700: '#0e7490',
+              800: '#155e75', 900: '#164e63', 950: '#083344',
+            },
+            shell: {
+              50: '#f0fdfa', 100: '#ccfbf1', 200: '#99f6e4', 300: '#5eead4',
+              400: '#2dd4bf', 500: '#14b8a6', 600: '#0d9488', 700: '#0f766e',
+              800: '#115e59', 900: '#134e4a', 950: '#042f2e',
+            },
+            surface: {
+              0: '#000000', 1: '#0a0a0f', 2: '#111118', 3: '#18181f', 4: '#1e1e28',
+            }
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    /* Scroll-triggered animations */
+    .reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1); }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+    .reveal-delay-1 { transition-delay: 0.1s; }
+    .reveal-delay-2 { transition-delay: 0.2s; }
+    .reveal-delay-3 { transition-delay: 0.3s; }
+    .reveal-delay-4 { transition-delay: 0.4s; }
+    .reveal-delay-5 { transition-delay: 0.5s; }
+
+    /* Hero ambient glow */
+    .hero-glow {
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-glow::before {
+      content: '';
+      position: absolute;
+      width: 800px; height: 800px;
+      top: -200px; left: 50%;
+      transform: translateX(-50%);
+      background: radial-gradient(circle, rgba(6,182,212,0.12) 0%, rgba(20,184,166,0.08) 40%, transparent 70%);
+      animation: hero-pulse 8s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+    @keyframes hero-pulse {
+      0% { opacity: 0.6; transform: translateX(-50%) scale(1); }
+      100% { opacity: 1; transform: translateX(-50%) scale(1.15); }
+    }
+
+    /* Glass */
+    .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06); }
+    .glass-elevated { background: rgba(255,255,255,0.05); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid rgba(255,255,255,0.08); }
+
+    /* Device mockups */
+    .iphone-frame {
+      background: linear-gradient(165deg, #2a2a35 0%, #1a1a24 50%, #141420 100%);
+      border: 2.5px solid rgba(255,255,255,0.22);
+      box-shadow:
+        0 50px 100px -20px rgba(0,0,0,0.7),
+        0 30px 60px -15px rgba(0,0,0,0.5),
+        inset 0 1px 0 rgba(255,255,255,0.1),
+        0 0 80px -20px rgba(6,182,212,0.1),
+        0 0 80px -20px rgba(20,184,166,0.1);
+    }
+    .mac-frame {
+      background: linear-gradient(165deg, #2a2a35 0%, #1a1a24 50%, #141420 100%);
+      border: 2px solid rgba(255,255,255,0.1);
+      box-shadow:
+        0 40px 80px -20px rgba(0,0,0,0.6),
+        0 20px 40px -10px rgba(0,0,0,0.4),
+        inset 0 1px 0 rgba(255,255,255,0.08);
+    }
+
+    /* Feature card hover */
+    .feature-card { transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+    .feature-card:hover { transform: translateY(-4px); background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); }
+    .feature-card:hover .feature-icon-wrap { transform: scale(1.1); }
+
+    /* Gradient text */
+    .gradient-text { background: linear-gradient(135deg, #67e8f9 0%, #22d3ee 30%, #2dd4bf 70%, #14b8a6 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+    /* Pricing glow */
+    .pricing-popular {
+      background: linear-gradient(165deg, rgba(248,59,59,0.06) 0%, rgba(255,255,255,0.03) 100%);
+      border-color: rgba(6,182,212,0.2);
+      box-shadow: 0 0 80px -20px rgba(6,182,212,0.15), 0 0 40px -10px rgba(20,184,166,0.08);
+    }
+
+    /* Mesh node animation */
+    .mesh-node { animation: mesh-float 6s ease-in-out infinite; }
+    .mesh-node:nth-child(2) { animation-delay: -2s; }
+    .mesh-node:nth-child(3) { animation-delay: -4s; }
+    @keyframes mesh-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+
+    /* Connection line pulse */
+    .connection-line { stroke-dasharray: 6 4; animation: dash-flow 1.5s linear infinite; }
+    @keyframes dash-flow { to { stroke-dashoffset: -20; } }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0a0a0f; }
+    ::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
+
+    /* Smooth section divider */
+    .section-fade { background: linear-gradient(to bottom, transparent, rgba(6,182,212,0.03) 50%, transparent); }
+
+    /* Screenshot slideshows */
+    .mac-slide {
+      opacity: 0;
+      transition: opacity 1s ease-in-out;
+    }
+    .mac-slide.active {
+      opacity: 1;
+    }
+    .iphone-slide {
+      opacity: 0;
+      transition: opacity 0.8s ease-in-out;
+    }
+    .iphone-slide.active {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body class="bg-surface-0 text-white font-sans antialiased">
+
+  <!-- Navigation -->
+  <nav class="fixed top-0 w-full z-50 transition-all duration-300" id="nav">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+      <a href="#" class="flex items-center gap-2.5 group">
+        <img src="assets/app-icon.png" alt="CARAPACE" class="w-8 h-8 rounded-[10px] shadow-lg shadow-claw-500/20 group-hover:scale-105 transition-all duration-300">
+        <span class="text-[15px] font-bold tracking-tight">CARAPACE</span>
+      </a>
+      <div class="hidden sm:flex items-center gap-7 text-[13px]">
+        <a href="#features" class="text-white/50 hover:text-white transition-colors">Features</a>
+        <a href="#eyes" class="text-white/50 hover:text-white transition-colors">Eyes</a>
+        <a href="#mesh" class="text-white/50 hover:text-white transition-colors">Mesh</a>
+        <a href="#wearables" class="text-white/50 hover:text-white transition-colors">Wearables</a>
+        <a href="#pricing" class="text-white/50 hover:text-white transition-colors">Pricing</a>
+        <a href="transparency.html" class="text-white/50 hover:text-white transition-colors">Security</a>
+        <a href="#download" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/[0.07] border border-white/[0.08] hover:bg-white/[0.12] text-white/80 hover:text-white transition-all duration-300">
+          Download
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg>
+        </a>
+      </div>
+      <!-- Mobile menu button -->
+      <button class="sm:hidden text-white/60 hover:text-white" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+      </button>
+    </div>
+    <!-- Mobile menu -->
+    <div id="mobile-menu" class="hidden sm:hidden glass-elevated mx-4 mb-2 rounded-2xl p-4 space-y-3">
+      <a href="#features" class="block text-sm text-white/60 hover:text-white py-2">Features</a>
+      <a href="#eyes" class="block text-sm text-white/60 hover:text-white py-2">Eyes</a>
+      <a href="#mesh" class="block text-sm text-white/60 hover:text-white py-2">Mesh Control</a>
+      <a href="#wearables" class="block text-sm text-white/60 hover:text-white py-2">Wearables</a>
+      <a href="#pricing" class="block text-sm text-white/60 hover:text-white py-2">Pricing</a>
+      <a href="transparency.html" class="block text-sm text-white/60 hover:text-white py-2">Security</a>
+      <a href="#download" class="block text-sm text-white/80 hover:text-white py-2 font-medium">Download →</a>
+    </div>
+  </nav>
+
+  <!-- ==================== HERO ==================== -->
+  <section class="hero-glow min-h-screen flex items-center relative">
+    <div class="relative z-10 max-w-7xl mx-auto px-6 pt-28 pb-20 md:pt-32 md:pb-28 w-full">
+      <!-- Top: centered copy -->
+      <div class="text-center max-w-3xl mx-auto mb-16 md:mb-20">
+        <div class="reveal inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-elevated text-xs font-medium text-white/60 mb-8">
+          <span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
+          Native iOS &amp; macOS App
+        </div>
+        <h1 class="reveal reveal-delay-1 text-[clamp(2.5rem,6vw,4.5rem)] font-extrabold leading-[1.05] tracking-tight mb-6">
+          Your AI just got<br>
+          <span class="gradient-text">its senses.</span>
+        </h1>
+        <p class="reveal reveal-delay-2 text-lg sm:text-xl text-white/40 max-w-2xl mx-auto leading-relaxed mb-10">
+          CARAPACE gives your OpenClaw agent sight, voice, and presence — through your iPhone and the world around you. Point, speak, and let your AI actually experience what you do.
+        </p>
+        <!-- Store badges -->
+        <div class="reveal reveal-delay-3 flex flex-wrap justify-center gap-4">
+          <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="inline-flex items-center gap-3 pl-4 pr-6 py-3 rounded-xl bg-white text-black hover:bg-white/90 transition-all duration-300 shadow-lg shadow-black/20 hover:shadow-xl hover:shadow-black/30 hover:-translate-y-0.5 group">
+            <svg class="w-8 h-8 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            <div class="text-left">
+              <div class="text-[10px] font-normal opacity-60 leading-none">Download on the</div>
+              <div class="text-[17px] font-semibold leading-tight -mt-0.5">App Store</div>
+            </div>
+          </a>
+          <a href="Carapace-1.3.1.dmg" download class="inline-flex items-center gap-3 pl-4 pr-6 py-3 rounded-xl glass-elevated border border-white/10 hover:bg-white/[0.08] hover:border-white/15 transition-all duration-300 hover:-translate-y-0.5 group">
+            <svg class="w-8 h-8 text-white/70 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            <div class="text-left">
+              <div class="text-[10px] font-normal text-white/40 leading-none">Download for</div>
+              <div class="text-[17px] font-semibold leading-tight text-white/90 -mt-0.5">macOS — v1.3.1</div>
+            </div>
+          </a>
+        </div>
+      </div>
+
+      <!-- Device mockups: MacBook hero with iPhone overlay -->
+      <div class="reveal reveal-delay-4 relative flex justify-center pt-4">
+        <!-- Container for both devices -->
+        <div class="relative w-full max-w-4xl mx-auto">
+          <!-- MacBook (large, centered) -->
+          <div class="relative mx-auto" style="width: 90%;">
+            <img src="assets/mac-nb-1.png" alt="CARAPACE on Mac — Chat" class="mac-slide w-full h-auto block active" loading="eager">
+            <img src="assets/mac-nb-2.png" alt="CARAPACE on Mac — Conversation" class="mac-slide w-full h-auto block absolute inset-0" loading="eager">
+            <img src="assets/mac-nb-3.png" alt="CARAPACE on Mac — Projects" class="mac-slide w-full h-auto block absolute inset-0" loading="eager">
+            <img src="assets/mac-nb-4.png" alt="CARAPACE on Mac — Settings" class="mac-slide w-full h-auto block absolute inset-0" loading="eager">
+          </div>
+
+          <!-- iPhone (overlaid, bottom-right, overlapping MacBook) -->
+          <div class="absolute -bottom-8 -right-2 sm:right-4 md:right-8 z-20" style="width: 22%; max-width: 180px;">
+            <div class="iphone-frame rounded-[2.2rem] sm:rounded-[2.6rem] p-[4px] sm:p-[5px]" style="box-shadow: 0 30px 60px -10px rgba(0,0,0,0.6), 0 0 40px -10px rgba(6,182,212,0.08);">
+              <div class="rounded-[1.9rem] sm:rounded-[2.2rem] overflow-hidden bg-black relative" style="aspect-ratio: 9/19.5;">
+                <img src="assets/ios-home.png" alt="Home" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+                <img src="assets/ios-agents.png" alt="Agents" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+                <img src="assets/ios-vision.png" alt="Vision" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+                <img src="assets/ios-chat.png" alt="Chat" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+                <img src="assets/ios-cron.png" alt="Cron" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+                <img src="assets/ios-projects.png" alt="Projects" class="iphone-slide absolute inset-0 w-full h-full object-cover" loading="eager">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scroll indicator -->
+    <!-- Scroll indicator -->
+    <div class="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-white/20 animate-bounce">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+    </div>
+  </section>
+
+  <!-- ==================== FEATURES ==================== -->
+  <section id="features" class="relative py-28 md:py-36">
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="text-center mb-20 space-y-5">
+        <p class="reveal text-xs font-semibold uppercase tracking-[0.2em] text-claw-400/80">Features</p>
+        <h2 class="reveal reveal-delay-1 text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight leading-tight">
+          Everything you need.<br>
+          <span class="text-white/40">Nothing you don't.</span>
+        </h2>
+      </div>
+
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <!-- Feature 1 -->
+        <div class="reveal feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="feature-icon-wrap w-12 h-12 rounded-2xl bg-gradient-to-br from-claw-500/15 to-claw-600/10 border border-claw-500/10 flex items-center justify-center transition-transform duration-300">
+            <svg class="w-6 h-6 text-claw-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Native on Every Device</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Built with SwiftUI for iPhone and Mac. Not a web wrapper — a real app that feels right at home on every Apple device.
+          </p>
+        </div>
+
+        <!-- Feature 2 -->
+        <div class="reveal reveal-delay-1 feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="feature-icon-wrap w-12 h-12 rounded-2xl bg-gradient-to-br from-shell-500/15 to-shell-600/10 border border-shell-500/10 flex items-center justify-center transition-transform duration-300">
+            <svg class="w-6 h-6 text-shell-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Live Agent Monitoring</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Watch your agents think in real-time. Monitor token usage, subagent trees, active sessions, and kill runaway processes with a tap.
+          </p>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="reveal reveal-delay-2 feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="feature-icon-wrap w-12 h-12 rounded-2xl bg-gradient-to-br from-green-500/15 to-green-600/10 border border-green-500/10 flex items-center justify-center transition-transform duration-300">
+            <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Zero-Trust Security</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Encrypted end-to-end. No cloud relay, no data leaves your mesh. Pair via QR code, connect over Tailscale or direct TLS.
+          </p>
+        </div>
+
+        <!-- Feature 4 -->
+        <div class="reveal feature-card glass rounded-2xl p-7 space-y-4 opacity-60">
+          <div class="flex items-start justify-between">
+            <div class="feature-icon-wrap w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/15 to-amber-600/10 border border-amber-500/10 flex items-center justify-center transition-transform duration-300">
+              <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+            </div>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-amber-400/20 text-amber-400/70 bg-amber-400/5">Coming Soon</span>
+          </div>
+          <h3 class="text-base font-semibold">Push Notifications</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Get alerted when agents need attention, tasks complete, cron jobs fire, or your gateway status changes. Never miss a beat.
+          </p>
+        </div>
+
+        <!-- Feature 5 -->
+        <div class="reveal reveal-delay-1 feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="feature-icon-wrap w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/15 to-purple-600/10 border border-purple-500/10 flex items-center justify-center transition-transform duration-300">
+            <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Eyes — Live Vision</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            Point your camera at anything — your AI sees it in real time. Ask questions, get analysis, read documents, identify objects. Your agent goes eyes-on with you.
+          </p>
+        </div>
+
+        <!-- Feature 6 -->
+        <div class="reveal reveal-delay-2 feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="feature-icon-wrap w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500/15 to-cyan-600/10 border border-cyan-500/10 flex items-center justify-center transition-transform duration-300">
+            <svg class="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Dedicated Voice Mode</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            A full hands-free voice interface built for real use — driving, cooking, working. Talk naturally, get spoken responses.
+          </p>
+          <p class="text-sm text-white/25 leading-relaxed">
+            Vision analysis routes through Gemini Flash first — fast, cheap, and on-device enough to handle most requests without touching your OpenClaw agent. Only escalates when it needs to. Fully editable Gemini base prompt in-app so you control exactly when and how it escalates.
+          </p>
+        </div>
+        <!-- Feature 7 -->
+        <div class="reveal feature-card glass rounded-2xl p-7 space-y-4">
+          <div class="feature-icon-wrap w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/15 to-purple-600/10 border border-purple-500/10 flex items-center justify-center transition-transform duration-300">
+            <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
+          </div>
+          <h3 class="text-base font-semibold">Projects &amp; Cron Jobs</h3>
+          <p class="text-sm text-white/35 leading-relaxed">
+            See every active project and scheduled job in one view. Track workstreams, completion percentages, and what’s running in the background — without opening a terminal.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ==================== EYES / VISION ==================== -->
+  <section id="eyes" class="relative py-28 md:py-36 overflow-hidden">
+    <div class="section-fade absolute inset-0"></div>
+    <div class="relative z-10 max-w-6xl mx-auto px-6">
+      <div class="grid lg:grid-cols-2 gap-16 lg:gap-20 items-center">
+
+        <!-- Left: copy -->
+        <div class="reveal space-y-8">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-claw-400/80 mb-4">Eyes</p>
+            <h2 class="text-3xl sm:text-4xl font-bold tracking-tight leading-tight mb-5">
+              Sight, voice, presence.<br>
+              <span class="text-white/40">All through your phone.</span>
+            </h2>
+            <p class="text-base text-white/40 leading-relaxed">
+              CARAPACE Eyes gives your OpenClaw agent a live view through your iPhone camera. Hold it up, ask a question, and your AI sees exactly what you see — in real time. No uploads, no delays. Just point and ask.
+            </p>
+          </div>
+
+          <div class="space-y-4">
+            <div class="flex items-start gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-claw-500/10 border border-claw-500/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-claw-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold mb-1">Real-Time Camera Feed</div>
+                <div class="text-xs text-white/35 leading-relaxed">Your agent sees through your camera live. Read labels, analyze paperwork, identify parts, interpret X-rays — whatever’s in front of you.</div>
+              </div>
+            </div>
+            <div class="flex items-start gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-shell-500/10 border border-shell-500/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-shell-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold mb-1">Voice + Vision Together</div>
+                <div class="text-xs text-white/35 leading-relaxed">Talk while your agent watches. Describe what you need, ask follow-up questions, get spoken responses. Hands-free intelligence.</div>
+              </div>
+            </div>
+            <div class="flex items-start gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold mb-1">Smart Escalation — Fast and Cheap by Default</div>
+                <div class="text-xs text-white/35 leading-relaxed">Vision data hits Gemini Flash first — instant, low-cost. Only escalates to your OpenClaw agent when it actually needs to. You control the escalation logic with an editable base prompt right inside the app.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: visual -->
+        <div class="reveal order-2 flex justify-center">
+          <div class="relative">
+            <!-- Phone with camera overlay -->
+            <div class="iphone-frame rounded-[3rem] p-[6px]" style="width: 260px; box-shadow: 0 40px 80px -20px rgba(0,0,0,0.7), 0 0 60px -10px rgba(6,182,212,0.12);">
+              <div class="rounded-[2.6rem] overflow-hidden bg-black" style="aspect-ratio: 9/19.5;">
+                <img src="assets/ios-vision.png" alt="CARAPACE Eyes" class="w-full h-full object-cover">
+              </div>
+            </div>
+            <!-- Glow ring -->
+            <div class="absolute inset-0 rounded-[3rem]" style="box-shadow: 0 0 80px 0 rgba(6,182,212,0.08), 0 0 120px 0 rgba(20,184,166,0.05); pointer-events: none;"></div>
+            <!-- Floating label -->
+            <div class="absolute -right-6 top-1/3 glass-elevated rounded-xl px-4 py-3 text-xs font-semibold border border-claw-400/20" style="box-shadow: 0 8px 24px rgba(0,0,0,0.4);">
+              <div class="text-claw-400 mb-0.5">CARAPACE Eyes</div>
+              <div class="text-white/40 font-normal">AI sees what you see</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== MESH CONTROL ==================== -->
+  <section id="mesh" class="relative py-28 md:py-36 overflow-hidden">
+    <div class="section-fade absolute inset-0"></div>
+    <div class="relative z-10 max-w-6xl mx-auto px-6">
+      <div class="grid lg:grid-cols-2 gap-16 lg:gap-20 items-center">
+        <!-- Left: visual -->
+        <div class="reveal order-2 lg:order-1 flex justify-center items-center">
+          <div class="relative py-6" style="width: 300px;">
+            <!-- Central spine line -->
+            <div class="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-[3px] rounded-full" style="background: linear-gradient(180deg, rgba(6,182,212,0.8) 0%, rgba(20,184,166,0.6) 35%, rgba(6,182,212,0.4) 65%, rgba(20,184,166,0.2) 100%); box-shadow: 0 0 12px rgba(6,182,212,0.3);"></div>
+
+            <!-- CARAPACE — top of spine -->
+            <div class="relative flex justify-center mb-10">
+              <div class="relative z-10 flex flex-col items-center gap-2">
+                <div class="w-16 h-16 rounded-full bg-gradient-to-br from-claw-500 to-shell-600 flex items-center justify-center text-2xl shadow-xl border-2 border-claw-400/30" style="box-shadow: 0 0 20px rgba(6,182,212,0.4), 0 0 40px rgba(6,182,212,0.15);">
+                  📱
+                </div>
+                <div class="text-center">
+                  <div class="text-xs font-bold">CARAPACE</div>
+                  <div class="text-[10px] text-claw-400 font-medium">CONNECTED</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Mac mini — branches left -->
+            <div class="relative flex items-center mb-8">
+              <!-- Branch line -->
+              <div class="absolute left-1/2 w-[35%] h-[2px]" style="transform: translateX(-100%); background: linear-gradient(to left, rgba(6,182,212,0.1), rgba(34,211,238,0.5));"></div>
+              <!-- Node -->
+              <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-lg border-2 border-claw-400/30" style="background: rgba(6,182,212,0.15); box-shadow: 0 0 12px rgba(6,182,212,0.2);">🖥️</div>
+                <div>
+                  <div class="text-[11px] font-semibold">Mac mini</div>
+                  <div class="text-[9px] text-green-400 font-medium">● Home · 4ms</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- VPS — branches right -->
+            <div class="relative flex items-center justify-end mb-8">
+              <!-- Branch line -->
+              <div class="absolute left-1/2 w-[35%] h-[2px]" style="background: linear-gradient(to right, rgba(20,184,166,0.1), rgba(45,212,191,0.5));"></div>
+              <!-- Node -->
+              <div class="flex items-center gap-3 flex-row-reverse">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-lg border-2 border-shell-400/30" style="background: rgba(20,184,166,0.15); box-shadow: 0 0 12px rgba(20,184,166,0.2);">☁️</div>
+                <div class="text-right">
+                  <div class="text-[11px] font-semibold">VPS</div>
+                  <div class="text-[9px] text-green-400 font-medium">● Cloud · 38ms</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Raspberry Pi — branches left -->
+            <div class="relative flex items-center mb-4">
+              <!-- Branch line -->
+              <div class="absolute left-1/2 w-[35%] h-[2px]" style="transform: translateX(-100%); background: linear-gradient(to left, rgba(6,182,212,0.1), rgba(250,204,21,0.4));"></div>
+              <!-- Node -->
+              <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-lg border-2 border-yellow-400/20" style="background: rgba(250,204,21,0.1); box-shadow: 0 0 12px rgba(250,204,21,0.15);">🥧</div>
+                <div>
+                  <div class="text-[11px] font-semibold">Raspberry Pi</div>
+                  <div class="text-[9px] text-yellow-400 font-medium">● Office · 2ms</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tailscale badge at bottom of spine -->
+            <div class="relative flex justify-center mt-6">
+              <div class="relative z-10 px-4 py-2 rounded-full border border-white/[0.08] text-[10px] font-semibold text-white/35" style="background: rgba(255,255,255,0.03); backdrop-filter: blur(8px);">
+                🔒 Encrypted via Tailscale
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: copy -->
+        <div class="reveal order-1 lg:order-2 space-y-8">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-shell-400/80 mb-4">Multi-Gateway Control</p>
+            <h2 class="text-3xl sm:text-4xl font-bold tracking-tight leading-tight mb-5">
+              One app.<br>
+              <span class="text-white/40">Every gateway.</span>
+            </h2>
+            <p class="text-base text-white/40 leading-relaxed">
+              Deploy OpenClaw instances across your Tailscale mesh — at home, in the cloud, on a Pi at the office — and control them all from one interface. CARAPACE is your unified control plane.
+            </p>
+          </div>
+
+          <div class="space-y-4">
+            <div class="flex items-start gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-claw-500/10 border border-claw-500/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-claw-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold mb-1">Instant Switching</div>
+                <div class="text-xs text-white/35 leading-relaxed">Tap to switch between gateways. Saved profiles mean zero reconfiguration.</div>
+              </div>
+            </div>
+            <div class="flex items-start gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-shell-500/10 border border-shell-500/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-shell-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z"/><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold mb-1">QR Code Pairing</div>
+                <div class="text-xs text-white/35 leading-relaxed">Scan once to pair. Cryptographic trust, no passwords to remember.</div>
+              </div>
+            </div>
+            <div class="flex items-start gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-green-500/10 border border-green-500/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold mb-1">Zero Cloud Dependency</div>
+                <div class="text-xs text-white/35 leading-relaxed">All traffic encrypted peer-to-peer via WireGuard. No relay servers, no third-party cloud.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== WEARABLES / META GLASSES ==================== -->
+  <section id="wearables" class="relative py-28 md:py-36 overflow-hidden">
+    <div class="absolute inset-0" style="background: radial-gradient(ellipse at 50% 50%, rgba(139,92,246,0.04) 0%, transparent 70%);"></div>
+    <div class="relative z-10 max-w-4xl mx-auto px-6">
+
+      <!-- Section header -->
+      <div class="text-center mb-16 space-y-5">
+        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-purple-500/20 bg-purple-500/5 text-xs font-semibold text-purple-400/80">
+          <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
+          Coming Soon &mdash; Pending App Store Approval
+        </div>
+        <h2 class="reveal text-3xl sm:text-4xl font-bold tracking-tight">
+          CARAPACE for<br>
+          <span style="background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 50%, #7c3aed 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">Meta Glasses</span>
+        </h2>
+        <p class="reveal text-base text-white/35 max-w-2xl mx-auto leading-relaxed">
+          Imagine your AI agent living in your glasses. No phone in hand. No screen to look at. Just you, the world, and an AI that sees everything you do.
+        </p>
+        <p class="reveal text-sm text-white/25 max-w-xl mx-auto">
+          We’ve built the Meta wearables SDK integration. It’s ready. We’re awaiting Meta’s SDK approval to ship it through the App Store. In the meantime — we’re giving beta access to our first 500 iOS users.
+        </p>
+      </div>
+
+      <!-- Feature highlights -->
+      <div class="reveal grid sm:grid-cols-3 gap-5 mb-16">
+        <div class="glass rounded-2xl p-6 text-center space-y-3">
+          <div class="text-3xl">👓</div>
+          <h3 class="text-sm font-semibold">Always-On Context</h3>
+          <p class="text-xs text-white/35 leading-relaxed">Your AI sees through your glasses continuously. No activation, no unlock. It’s just there.</p>
+        </div>
+        <div class="glass rounded-2xl p-6 text-center space-y-3">
+          <div class="text-3xl">🎙️</div>
+          <h3 class="text-sm font-semibold">Whisper-to-Agent</h3>
+          <p class="text-xs text-white/35 leading-relaxed">Talk quietly. Your agent listens, processes through your OpenClaw gateway, and responds in your ear.</p>
+        </div>
+        <div class="glass rounded-2xl p-6 text-center space-y-3">
+          <div class="text-3xl">🔒</div>
+          <h3 class="text-sm font-semibold">Still Your Data</h3>
+          <p class="text-xs text-white/35 leading-relaxed">Everything routes through your private OpenClaw gateway. Meta doesn’t see your conversations.</p>
+        </div>
+      </div>
+
+      <!-- TestFlight CTA -->
+      <div class="reveal relative overflow-hidden rounded-2xl p-8 sm:p-10 text-center" style="background: linear-gradient(135deg, rgba(139,92,246,0.08) 0%, rgba(109,40,217,0.05) 100%); border: 1px solid rgba(139,92,246,0.15);">
+        <div class="absolute top-0 left-0 right-0 h-[1px]" style="background: linear-gradient(to right, transparent, rgba(139,92,246,0.4), transparent);"></div>
+
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-xs font-semibold text-purple-300 mb-6">
+          📦 Early Beta Access
+        </div>
+
+        <h3 class="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
+          First 500 iOS buyers get in.
+        </h3>
+        <p class="text-white/40 text-base mb-2 max-w-lg mx-auto">
+          Purchase CARAPACE on the App Store and you’re on the list. We’ll send your TestFlight invite for the Meta glasses beta the moment it’s ready.
+        </p>
+        <p class="text-white/20 text-sm mb-8">No extra cost. No sign-up required. Just buy the app.</p>
+
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+          <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="inline-flex items-center gap-3 pl-4 pr-6 py-3.5 rounded-xl bg-white text-black hover:bg-white/90 transition-all duration-300 shadow-lg hover:shadow-xl hover:-translate-y-0.5 group">
+            <svg class="w-7 h-7 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            <div class="text-left">
+              <div class="text-[10px] font-normal opacity-60 leading-none">Get on the list &mdash; buy on</div>
+              <div class="text-[16px] font-semibold leading-tight -mt-0.5">App Store — $1.99</div>
+            </div>
+          </a>
+          <div class="text-xs text-white/20 max-w-[180px] text-center leading-relaxed">
+            Spots limited to 500.<br>Currently <span class="text-purple-400/60 font-semibold">open</span>.
+          </div>
+        </div>
+
+        <p class="mt-8 text-[11px] text-white/15">Beta availability subject to Meta SDK approval. TestFlight invites will be distributed in purchase order.</p>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ==================== PROJECTS & CRON ==================== -->
+  <section id="projects" class="relative py-28 md:py-36 overflow-hidden">
+    <div class="section-fade absolute inset-0"></div>
+    <div class="relative z-10 max-w-6xl mx-auto px-6">
+      <div class="grid lg:grid-cols-2 gap-16 lg:gap-20 items-center">
+
+        <!-- Left: copy -->
+        <div class="reveal space-y-8">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-claw-400/80 mb-4">Projects &amp; Cron</p>
+            <h2 class="text-3xl sm:text-4xl font-bold tracking-tight leading-tight mb-5">
+              Stay organized.<br>
+              <span class="text-white/40">Actually get things done.</span>
+            </h2>
+            <p class="text-base text-white/40 leading-relaxed">
+              Every active project and scheduled job, surfaced in one place. Track workstreams, completion percentages, and what's running in the background — without ever opening a terminal.
+            </p>
+          </div>
+
+          <div class="space-y-4">
+            <div class="flex items-start gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-claw-500/10 border border-claw-500/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-claw-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold mb-1">Project Board</div>
+                <div class="text-xs text-white/35 leading-relaxed">Track every workstream with completion percentages, subtask health, and at-a-glance status. Know exactly where each project stands.</div>
+              </div>
+            </div>
+            <div class="flex items-start gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-shell-500/10 border border-shell-500/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-shell-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold mb-1">Scheduled Jobs</div>
+                <div class="text-xs text-white/35 leading-relaxed">See every cron job, when it last ran, when it runs next, and whether it's healthy. Your entire automation schedule in one view.</div>
+              </div>
+            </div>
+            <div class="flex items-start gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold mb-1">No Terminal Required</div>
+                <div class="text-xs text-white/35 leading-relaxed">Your agent runs in the background — check in from anywhere, anytime. Everything important surfaces automatically.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: two phone mockups -->
+        <div class="reveal order-2 flex justify-center items-center gap-4">
+          <!-- Projects phone -->
+          <div class="relative" style="width: 42%;">
+            <div class="iphone-frame rounded-[2.6rem] p-[5px]" style="box-shadow: 0 30px 60px -10px rgba(0,0,0,0.6), 0 0 40px -10px rgba(6,182,212,0.08);">
+              <div class="rounded-[2.2rem] overflow-hidden bg-black" style="aspect-ratio: 9/19.5;">
+                <img src="assets/ios-projects.png" alt="CARAPACE Projects" class="w-full h-full object-cover">
+              </div>
+            </div>
+            <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 glass-elevated rounded-lg px-3 py-1.5 text-[10px] font-semibold text-claw-400/80 whitespace-nowrap border border-claw-400/10">Projects</div>
+          </div>
+          <!-- Cron phone -->
+          <div class="relative" style="width: 42%; margin-top: 32px;">
+            <div class="iphone-frame rounded-[2.6rem] p-[5px]" style="box-shadow: 0 30px 60px -10px rgba(0,0,0,0.6), 0 0 40px -10px rgba(20,184,166,0.08);">
+              <div class="rounded-[2.2rem] overflow-hidden bg-black" style="aspect-ratio: 9/19.5;">
+                <img src="assets/ios-cron.png" alt="CARAPACE Cron Jobs" class="w-full h-full object-cover">
+              </div>
+            </div>
+            <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 glass-elevated rounded-lg px-3 py-1.5 text-[10px] font-semibold text-shell-400/80 whitespace-nowrap border border-shell-400/10">Scheduled Jobs</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== HOW IT WORKS ==================== -->
+  <section class="relative py-28 md:py-36">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="text-center mb-20 space-y-5">
+        <p class="reveal text-xs font-semibold uppercase tracking-[0.2em] text-white/40">Getting Started</p>
+        <h2 class="reveal reveal-delay-1 text-3xl sm:text-4xl font-bold tracking-tight">
+          Up and running<br><span class="text-white/40">in three steps.</span>
+        </h2>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-8 md:gap-6">
+        <div class="reveal text-center space-y-5">
+          <div class="w-16 h-16 rounded-2xl mx-auto bg-gradient-to-br from-claw-500/10 to-claw-600/5 border border-claw-500/10 flex items-center justify-center">
+            <span class="text-2xl font-bold gradient-text">1</span>
+          </div>
+          <h3 class="text-base font-semibold">Install CARAPACE</h3>
+          <p class="text-sm text-white/35 leading-relaxed">Download from the App Store or Mac App Store. Native, lightweight, no dependencies.</p>
+        </div>
+        <div class="reveal reveal-delay-1 text-center space-y-5">
+          <div class="w-16 h-16 rounded-2xl mx-auto bg-gradient-to-br from-shell-500/10 to-shell-600/5 border border-shell-500/10 flex items-center justify-center">
+            <span class="text-2xl font-bold gradient-text">2</span>
+          </div>
+          <h3 class="text-base font-semibold">Scan to Pair</h3>
+          <p class="text-sm text-white/35 leading-relaxed">Scan the QR code from your OpenClaw gateway. Cryptographic pairing in seconds.</p>
+        </div>
+        <div class="reveal reveal-delay-2 text-center space-y-5">
+          <div class="w-16 h-16 rounded-2xl mx-auto bg-gradient-to-br from-green-500/10 to-green-600/5 border border-green-500/10 flex items-center justify-center">
+            <span class="text-2xl font-bold gradient-text">3</span>
+          </div>
+          <h3 class="text-base font-semibold">Take Control</h3>
+          <p class="text-sm text-white/35 leading-relaxed">Monitor agents, chat with your AI, manage skills — from anywhere on your mesh.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ==================== SETUP GUIDE ==================== -->
+  <section id="setup" class="relative py-28 md:py-36 overflow-hidden">
+    <div class="section-fade absolute inset-0"></div>
+    <div class="relative z-10 max-w-4xl mx-auto px-6">
+      <div class="text-center mb-16 space-y-5">
+        <p class="reveal text-xs font-semibold uppercase tracking-[0.2em] text-shell-400/80">Setup Guide</p>
+        <h2 class="reveal reveal-delay-1 text-3xl sm:text-4xl font-bold tracking-tight">
+          Fresh Mac to live gateway<br>
+          <span class="text-white/40">in about 5 minutes.</span>
+          <span class="text-white/15 text-xl font-normal"> (unless you're on dial-up)</span>
+        </h2>
+        <p class="reveal reveal-delay-2 text-base text-white/40 max-w-2xl mx-auto leading-relaxed">
+          Tired of installing OpenClaw for your friends and family? We got you. CARAPACE walks you through everything — OpenClaw, Tailscale, pairing — right inside the app. No terminal required.
+        </p>
+      </div>
+
+      <!-- How it works -->
+      <div class="space-y-5 mb-16">
+
+        <!-- Step 1 -->
+        <div class="reveal flex gap-5 items-start">
+          <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-claw-500/15 to-claw-600/10 border border-claw-500/10 flex items-center justify-center">
+            <span class="text-base font-bold gradient-text">1</span>
+          </div>
+          <div class="glass rounded-xl p-6 flex-1 space-y-2">
+            <h4 class="text-base font-semibold">Download CARAPACE on Mac</h4>
+            <p class="text-sm text-white/35 leading-relaxed">Open the app and hit “Set up a gateway.” The built-in wizard takes it from there — it installs OpenClaw, configures it to run in the background, and handles the heavy lifting automatically.</p>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="reveal reveal-delay-1 flex gap-5 items-start">
+          <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-shell-500/15 to-shell-600/10 border border-shell-500/10 flex items-center justify-center">
+            <span class="text-base font-bold gradient-text">2</span>
+          </div>
+          <div class="glass rounded-xl p-6 flex-1 space-y-2">
+            <h4 class="text-base font-semibold">Connect securely with Tailscale</h4>
+            <p class="text-sm text-white/35 leading-relaxed">CARAPACE prompts you to install Tailscale and walks you through enabling HTTPS. This is what lets your phone reach your Mac from anywhere — at home, on LTE, or halfway around the world — without opening a single firewall port.</p>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="reveal reveal-delay-2 flex gap-5 items-start">
+          <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500/15 to-teal-600/10 border border-teal-500/10 flex items-center justify-center">
+            <span class="text-base font-bold gradient-text">3</span>
+          </div>
+          <div class="glass rounded-xl p-6 flex-1 space-y-2">
+            <h4 class="text-base font-semibold">Scan the QR code on your iPhone</h4>
+            <p class="text-sm text-white/35 leading-relaxed">The Mac app generates a pairing code. Open CARAPACE on your iPhone, scan it, and you’re live. No passwords, no config files, no guesswork.</p>
+          </div>
+        </div>
+
+        <!-- Done -->
+        <div class="reveal reveal-delay-3 flex gap-5 items-start">
+          <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-green-500/15 to-green-600/10 border border-green-500/10 flex items-center justify-center text-lg">
+            ✓
+          </div>
+          <div class="relative overflow-hidden rounded-xl p-6 flex-1" style="background: linear-gradient(135deg, rgba(20,184,166,0.05) 0%, rgba(6,182,212,0.03) 100%); border: 1px solid rgba(20,184,166,0.1);">
+            <h4 class="text-base font-semibold mb-2">You’re in.</h4>
+            <p class="text-sm text-white/35 leading-relaxed">Your iPhone talks directly to your Mac over an encrypted private network. No relay servers. No third-party cloud. Just your devices, your agents, your data.</p>
+            <div class="flex flex-wrap gap-2 mt-4">
+              <span class="px-3 py-1 rounded-full bg-green-500/10 border border-green-500/15 text-[11px] text-green-400/80">✓ End-to-end encrypted</span>
+              <span class="px-3 py-1 rounded-full bg-green-500/10 border border-green-500/15 text-[11px] text-green-400/80">✓ No cloud dependency</span>
+              <span class="px-3 py-1 rounded-full bg-green-500/10 border border-green-500/15 text-[11px] text-green-400/80">✓ Works anywhere</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Troubleshooting -->
+      <div class="reveal glass rounded-xl p-6 space-y-4">
+        <h3 class="text-sm font-semibold flex items-center gap-2">
+          <svg class="w-4 h-4 text-white/40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg>
+          If something’s not working
+        </h3>
+        <div class="grid sm:grid-cols-2 gap-4 text-xs text-white/35 leading-relaxed">
+          <div>
+            <div class="text-white/60 font-medium mb-1">Can’t connect?</div>
+            Make sure Tailscale is running on both devices and they can see each other. The CARAPACE setup wizard has a built-in connectivity check that catches most issues automatically.
+          </div>
+          <div>
+            <div class="text-white/60 font-medium mb-1">HTTPS not enabled?</div>
+            The wizard links you directly to the Tailscale dashboard to enable it. One toggle, takes 30 seconds. Then re-run the wizard and it picks up where it left off.
+          </div>
+          <div>
+            <div class="text-white/60 font-medium mb-1">Adding more gateways?</div>
+            Run the pairing flow on each machine. CARAPACE saves named profiles for all your gateways — switch between your Mac, a VPS, or a Pi with one tap.
+          </div>
+          <div>
+            <div class="text-white/60 font-medium mb-1">Still stuck?</div>
+            Reach out at <a href="/cdn-cgi/l/email-protection#543c3138383b14243520263d373f363d337a303b33" class="text-teal-400/60 hover:text-teal-400 transition-colors"><span class="__cf_email__" data-cfemail="cea6aba2a2a18ebeafbabca7ada5aca7a9e0aaa1a9">[email&#160;protected]</span></a> — we’re a small team and we actually reply.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== PRICING ==================== -->
+  <section id="pricing" class="relative py-28 md:py-36 overflow-hidden">
+    <div class="section-fade absolute inset-0"></div>
+    <div class="relative z-10 max-w-6xl mx-auto px-6">
+      <div class="text-center mb-20 space-y-5">
+        <p class="reveal text-xs font-semibold uppercase tracking-[0.2em] text-white/40">Pricing</p>
+        <h2 class="reveal reveal-delay-1 text-3xl sm:text-4xl font-bold tracking-tight">
+          Simple, honest pricing
+        </h2>
+        <p class="reveal reveal-delay-2 text-base text-white/35 max-w-lg mx-auto">
+          No hidden fees. No usage limits. No cloud subscriptions. Just the app and your gateway.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto items-start">
+        <!-- iOS -->
+        <div class="reveal glass rounded-2xl p-8 space-y-6 pricing-popular relative overflow-hidden">
+          <div class="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-claw-500 to-transparent"></div>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-claw-500/20 to-claw-600/10 border border-claw-500/15 flex items-center justify-center">
+                <svg class="w-5 h-5 text-claw-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"/></svg>
+              </div>
+              <div>
+                <h3 class="text-lg font-bold">iOS</h3>
+                <p class="text-xs text-white/30">iPhone</p>
+              </div>
+            </div>
+            <span class="px-2.5 py-1 rounded-full bg-claw-500/10 border border-claw-500/20 text-claw-400 text-[10px] font-semibold uppercase tracking-wider">Best Value</span>
+          </div>
+          <div class="flex items-baseline gap-1.5">
+            <span class="text-5xl font-extrabold tracking-tight">$1.99</span>
+            <span class="text-white/30 text-sm font-medium">one-time</span>
+          </div>
+          <p class="text-xs text-white/25">Pay once. Own it forever. Every future update included.</p>
+          <div class="border-t border-white/[0.06] pt-5 space-y-3">
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-claw-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Full gateway control &amp; monitoring
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-claw-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Multi-gateway mesh support
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/30">
+              <svg class="w-4 h-4 text-white/20 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              Push notifications <span class="text-[10px] text-amber-400/50 ml-1">coming soon</span>
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-claw-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Direct chat with your agents
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-claw-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              All future updates free
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-purple-300/70">
+              <svg class="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Meta glasses beta access (first 500)
+            </div>
+          </div>
+          <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="block w-full py-3.5 rounded-xl bg-gradient-to-r from-claw-500 to-claw-600 text-center font-semibold text-sm hover:from-claw-400 hover:to-claw-500 transition-all duration-300 shadow-lg shadow-claw-500/20 hover:shadow-xl hover:shadow-claw-500/30 hover:-translate-y-0.5">
+            Get CARAPACE for iOS — $1.99
+          </a>
+        </div>
+
+        <!-- Mac -->
+        <div class="reveal reveal-delay-1 glass rounded-2xl p-8 space-y-6 hover:bg-white/[0.04] transition-colors duration-300">
+          <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-shell-500/20 to-shell-600/10 border border-shell-500/15 flex items-center justify-center">
+              <svg class="w-5 h-5 text-shell-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z"/></svg>
+            </div>
+            <div>
+              <h3 class="text-lg font-bold">Mac</h3>
+              <p class="text-xs text-white/30">macOS Ventura+</p>
+            </div>
+          </div>
+          <span class="px-2.5 py-1 rounded-full bg-shell-500/10 border border-shell-500/20 text-shell-400 text-[10px] font-semibold uppercase tracking-wider">Most Powerful</span>
+          </div>
+          <div class="flex items-baseline gap-1.5">
+            <span class="text-5xl font-extrabold tracking-tight">$5.99</span>
+            <span class="text-white/30 text-sm font-medium">/month</span>
+          </div>
+          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-shell-500/10 border border-shell-500/15 text-shell-400 text-xs font-medium">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 11.25v8.25a1.5 1.5 0 01-1.5 1.5H5.25a1.5 1.5 0 01-1.5-1.5v-8.25M12 4.875A2.625 2.625 0 109.375 7.5H12m0-2.625V7.5m0-2.625A2.625 2.625 0 1114.625 7.5H12m0 0V21m-8.625-9.75h18c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125h-18c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>
+            Free 7-day trial
+          </div>
+          <div class="border-t border-white/[0.06] pt-5 space-y-3">
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-shell-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Everything in iOS
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-shell-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Menubar quick access
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-shell-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Multi-window &amp; keyboard shortcuts
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-shell-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Advanced debugging &amp; log viewer
+            </div>
+            <div class="flex items-center gap-2.5 text-sm text-white/50">
+              <svg class="w-4 h-4 text-shell-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              Desktop notifications &amp; widgets
+            </div>
+          </div>
+          <a href="Carapace-1.3.1.dmg" download class="block w-full py-3.5 rounded-xl glass-elevated border border-white/10 text-center font-semibold text-sm hover:bg-white/[0.08] transition-all duration-300 hover:-translate-y-0.5">
+            Download v1.3.1 — macOS
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== CTA / DOWNLOAD ==================== -->
+  <section id="download" class="relative py-28 md:py-36 overflow-hidden">
+    <div class="absolute inset-0">
+      <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-gradient-to-t from-claw-500/[0.05] via-shell-500/[0.03] to-transparent rounded-full blur-3xl"></div>
+    </div>
+    <div class="relative z-10 max-w-3xl mx-auto px-6 text-center space-y-10">
+      <img src="assets/app-icon.png" alt="CARAPACE" class="reveal w-20 h-20 rounded-[1.4rem] shadow-2xl shadow-claw-500/25">
+      <div class="reveal reveal-delay-1 space-y-4">
+        <h2 class="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight">
+          Your AI. Your rules.<br>
+          <span class="text-white/40">Your pocket.</span>
+        </h2>
+        <p class="text-base text-white/35 max-w-lg mx-auto leading-relaxed">
+          Download CARAPACE and connect to your OpenClaw gateway in under a minute.
+        </p>
+      </div>
+      <div class="reveal reveal-delay-2 flex flex-wrap justify-center gap-4 pt-2">
+        <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="inline-flex items-center gap-3 pl-4 pr-6 py-3.5 rounded-xl bg-white text-black hover:bg-white/90 transition-all duration-300 shadow-lg shadow-black/20 hover:shadow-xl hover:-translate-y-0.5 group">
+          <svg class="w-8 h-8 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          <div class="text-left">
+            <div class="text-[10px] font-normal opacity-60 leading-none">Download on the</div>
+            <div class="text-[17px] font-semibold leading-tight -mt-0.5">App Store</div>
+          </div>
+        </a>
+        <a href="Carapace-1.3.1.dmg" download class="inline-flex items-center gap-3 pl-4 pr-6 py-3.5 rounded-xl glass-elevated border border-white/10 hover:bg-white/[0.08] hover:border-white/15 transition-all duration-300 hover:-translate-y-0.5 group">
+          <svg class="w-8 h-8 text-white/70 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          <div class="text-left">
+            <div class="text-[10px] font-normal text-white/40 leading-none">Download for</div>
+            <div class="text-[17px] font-semibold leading-tight text-white/90 -mt-0.5">macOS — v1.3.1</div>
+          </div>
+        </a>
+      </div>
+
+      <!-- Trust indicators -->
+      <div class="reveal reveal-delay-3 flex flex-wrap justify-center gap-x-8 gap-y-3 pt-6 text-xs text-white/20">
+        <span class="flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+          End-to-end encrypted
+        </span>
+        <span class="flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"/></svg>
+          No cloud dependency
+        </span>
+        <span class="flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.39a4.493 4.493 0 00-1.757 4.306 4.493 4.493 0 004.306-1.758M16.5 9a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/></svg>
+          Built with SwiftUI
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== ROADMAP ==================== -->
+  <section class="relative py-28 md:py-36 overflow-hidden">
+    <div class="section-fade absolute inset-0"></div>
+    <div class="relative z-10 max-w-6xl mx-auto px-6">
+      <div class="text-center mb-16 space-y-4">
+        <p class="reveal text-xs font-semibold uppercase tracking-[0.2em] text-white/40">What's Coming</p>
+        <h2 class="reveal reveal-delay-1 text-3xl sm:text-4xl font-bold tracking-tight">
+          This is just the beginning.
+        </h2>
+        <p class="reveal reveal-delay-2 text-base text-white/35 max-w-xl mx-auto">
+          CARAPACE is shipping fast. Here’s what’s already built and what’s coming next.
+        </p>
+      </div>
+
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+
+        <!-- Cron editor -->
+        <div class="reveal glass rounded-2xl p-6 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-2xl">⏰</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-claw-400/20 text-claw-400/70 bg-claw-400/5">Coming Soon</span>
+          </div>
+          <h3 class="text-sm font-semibold">Cron Job Editor</h3>
+          <p class="text-xs text-white/35 leading-relaxed">Create, edit, and manage scheduled jobs directly from your phone. Set it, forget it, get notified when it runs.</p>
+        </div>
+
+        <!-- Smart project steering -->
+        <div class="reveal reveal-delay-1 glass rounded-2xl p-6 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-2xl">🧠</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-claw-400/20 text-claw-400/70 bg-claw-400/5">Coming Soon</span>
+          </div>
+          <h3 class="text-sm font-semibold">Smart Project Steering</h3>
+          <p class="text-xs text-white/35 leading-relaxed">AI-suggested prompts based on where your project is right now. Jump back in with one tap — CARAPACE knows what question to ask next.</p>
+        </div>
+
+        <!-- Force Touch focus -->
+        <div class="reveal reveal-delay-2 glass rounded-2xl p-6 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-2xl">🖖</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-claw-400/20 text-claw-400/70 bg-claw-400/5">Coming Soon</span>
+          </div>
+          <h3 class="text-sm font-semibold">Force Touch to Focus</h3>
+          <p class="text-xs text-white/35 leading-relaxed">Hard press any project to instantly steer your agent’s full attention to it. No typing, no context switching — just press and go.</p>
+        </div>
+
+        <!-- Push notifications -->
+        <div class="reveal glass rounded-2xl p-6 space-y-3 opacity-60">
+          <div class="flex items-center justify-between">
+            <span class="text-2xl">🔔</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-amber-400/20 text-amber-400/70 bg-amber-400/5">Coming Soon</span>
+          </div>
+          <h3 class="text-sm font-semibold">Push Notifications</h3>
+          <p class="text-xs text-white/35 leading-relaxed">Get alerted when tasks complete, cron jobs fire, or your agent needs attention. Stay in the loop without staying in the app.</p>
+        </div>
+
+        <!-- Meta glasses -->
+        <div class="reveal reveal-delay-1 glass rounded-2xl p-6 space-y-3 opacity-60">
+          <div class="flex items-center justify-between">
+            <span class="text-2xl">👓</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-purple-400/20 text-purple-400/70 bg-purple-400/5">Pending Approval</span>
+          </div>
+          <h3 class="text-sm font-semibold">Meta Glasses — Full Integration</h3>
+          <p class="text-xs text-white/35 leading-relaxed">Already built. Awaiting Meta SDK App Store approval. First 500 iOS buyers get TestFlight beta access the moment it clears.</p>
+        </div>
+
+        <!-- Widgets -->
+        <div class="reveal reveal-delay-2 glass rounded-2xl p-6 space-y-3 opacity-60">
+          <div class="flex items-center justify-between">
+            <span class="text-2xl">📱</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-white/10 text-white/30 bg-white/5">Planned</span>
+          </div>
+          <h3 class="text-sm font-semibold">Home Screen Widgets</h3>
+          <p class="text-xs text-white/35 leading-relaxed">Project health, active agents, and next scheduled job — visible at a glance without opening the app.</p>
+        </div>
+
+        <!-- Usage tracking -->
+        <div class="reveal glass rounded-2xl p-6 space-y-3 opacity-60">
+          <div class="flex items-center justify-between">
+            <span class="text-2xl">📊</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-white/10 text-white/30 bg-white/5">Planned</span>
+          </div>
+          <h3 class="text-sm font-semibold">Usage &amp; Cost Tracking</h3>
+          <p class="text-xs text-white/35 leading-relaxed">See token spend, cost per session, and model breakdown right in the app. Know exactly what your AI is costing you in real time.</p>
+        </div>
+
+        <!-- Session history -->
+        <div class="reveal reveal-delay-1 glass rounded-2xl p-6 space-y-3 opacity-60">
+          <div class="flex items-center justify-between">
+            <span class="text-2xl">📜</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-white/10 text-white/30 bg-white/5">Planned</span>
+          </div>
+          <h3 class="text-sm font-semibold">Session History Browser</h3>
+          <p class="text-xs text-white/35 leading-relaxed">Scroll back through past conversations across all your gateways. Search, resume, or reference anything your agent has done.</p>
+        </div>
+
+        <!-- Gateway health -->
+        <div class="reveal reveal-delay-2 glass rounded-2xl p-6 space-y-3 opacity-60">
+          <div class="flex items-center justify-between">
+            <span class="text-2xl">🟢</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-white/10 text-white/30 bg-white/5">Planned</span>
+          </div>
+          <h3 class="text-sm font-semibold">Gateway Health &amp; Uptime</h3>
+          <p class="text-xs text-white/35 leading-relaxed">Uptime graph, response time history, and instant alerts when a gateway goes offline. Full visibility into your mesh health.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== FOOTER ==================== -->
+  <footer class="border-t border-white/[0.04] py-12">
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-6">
+        <div class="flex items-center gap-3">
+          <img src="assets/app-icon.png" alt="CARAPACE" class="w-7 h-7 rounded-[8px]">
+          <span class="text-sm font-semibold text-white/50">CARAPACE</span>
+          <span class="text-xs text-white/15">by Mike Paepke</span>
+        </div>
+        <div class="flex items-center gap-6 text-xs text-white/25">
+          <a href="https://openclaw.dev" class="hover:text-white/50 transition-colors">OpenClaw</a>
+          <a href="transparency.html" class="hover:text-white/50 transition-colors">Security</a>
+          <a href="privacy.html" class="hover:text-white/50 transition-colors">Privacy</a>
+          <a href="terms.html" class="hover:text-white/50 transition-colors">Terms</a>
+          <a href="/cdn-cgi/l/email-protection#acc4c9c0c0c3ecdccdd8dec5cfc7cec5cb82c8c3cb" class="hover:text-white/50 transition-colors">Contact</a>
+        </div>
+      </div>
+      <div class="mt-8 text-center text-[11px] text-white/10">
+        &copy; 2026 Mike Paepke. All rights reserved. Apple and the Apple logo are trademarks of Apple Inc.
+      </div>
+    </div>
+  </footer>
+
+  <!-- Scroll reveal + nav background -->
+  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+    // Intersection Observer for scroll animations
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+    // Nav background on scroll
+    const nav = document.getElementById('nav');
+    let lastScroll = 0;
+    window.addEventListener('scroll', () => {
+      const scroll = window.scrollY;
+      if (scroll > 50) {
+        nav.classList.add('glass');
+        nav.style.borderBottom = '1px solid rgba(255,255,255,0.04)';
+      } else {
+        nav.classList.remove('glass');
+        nav.style.borderBottom = 'none';
+      }
+      lastScroll = scroll;
+    }, { passive: true });
+
+    // Close mobile menu on link click
+    document.querySelectorAll('#mobile-menu a').forEach(a => {
+      a.addEventListener('click', () => {
+        document.getElementById('mobile-menu').classList.add('hidden');
+      });
+    });
+
+    // Mac screenshot slideshow
+    const macSlides = document.querySelectorAll('.mac-slide');
+    if (macSlides.length > 0) {
+      let macCurrent = 0;
+      macSlides[0].classList.add('active');
+      setInterval(() => {
+        macSlides[macCurrent].classList.remove('active');
+        macCurrent = (macCurrent + 1) % macSlides.length;
+        macSlides[macCurrent].classList.add('active');
+      }, 4000);
+    }
+
+    // iPhone screenshot slideshow
+    const slides = document.querySelectorAll('.iphone-slide');
+    if (slides.length > 0) {
+      let current = 0;
+      slides[0].classList.add('active');
+      setInterval(() => {
+        slides[current].classList.remove('active');
+        current = (current + 1) % slides.length;
+        slides[current].classList.add('active');
+      }, 3000);
+    }
+  </script>
+
+</body>
+</html>

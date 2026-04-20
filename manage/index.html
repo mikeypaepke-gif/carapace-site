@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CARAPACE - Manage License</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', -apple-system, system-ui, sans-serif; background: #0a0a0f; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .glow { position: fixed; top: -200px; left: 50%; transform: translateX(-50%); width: 600px; height: 600px; background: radial-gradient(circle, rgba(6,182,212,0.1) 0%, transparent 70%); pointer-events: none; }
+    .card { position: relative; width: 100%; max-width: 420px; margin: 2rem; padding: 2.5rem; background: rgba(255,255,255,0.03); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06); border-radius: 20px; }
+    h1 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #22d3ee; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.25rem; font-weight: 700; color: #f1f5f9; margin-bottom: 1.5rem; }
+    .sub { font-size: 0.85rem; color: #94a3b8; margin-bottom: 1.25rem; }
+    label { display: block; font-size: 0.75rem; font-weight: 500; color: #94a3b8; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.08em; }
+    input { width: 100%; padding: 0.7rem 1rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: #f1f5f9; font-size: 0.95rem; font-family: inherit; outline: none; transition: border-color 0.2s; }
+    input:focus { border-color: #22d3ee; }
+    input::placeholder { color: #475569; }
+    .btn { width: 100%; padding: 0.75rem; margin-top: 1rem; background: linear-gradient(135deg, #0891b2, #0d9488); border: none; border-radius: 10px; color: #fff; font-size: 0.9rem; font-weight: 600; font-family: inherit; cursor: pointer; transition: opacity 0.2s; }
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-outline { background: transparent; border: 1px solid rgba(255,255,255,0.1); color: #94a3b8; margin-top: 0.75rem; }
+    .btn-outline:hover { background: rgba(255,255,255,0.04); opacity: 1; }
+    .btn-upgrade { background: linear-gradient(135deg, #22d3ee, #14b8a6); }
+    .error { color: #f87171; font-size: 0.8rem; margin-top: 0.5rem; }
+    .badge { display: inline-block; padding: 0.2rem 0.7rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+    .badge-free { background: rgba(148,163,184,0.15); color: #94a3b8; }
+    .badge-personal { background: rgba(99,102,241,0.15); color: #a5b4fc; }
+    .badge-pro { background: rgba(20,184,166,0.15); color: #2dd4bf; }
+    .expiry { font-size: 0.85rem; color: #facc15; margin-top: 0.5rem; margin-bottom: 1.25rem; }
+    .device { display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.8rem; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin-bottom: 0.5rem; font-size: 0.85rem; }
+    .device code { color: #67e8f9; font-size: 0.8rem; }
+    .device button { background: none; border: none; color: #f87171; font-size: 0.75rem; font-weight: 600; cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 6px; transition: background 0.2s; }
+    .device button:hover { background: rgba(248,113,113,0.1); }
+    .devices-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; margin-bottom: 0.5rem; margin-top: 1.25rem; }
+    .section { display: none; }
+    .section.active { display: block; }
+    .back { font-size: 0.8rem; color: #64748b; cursor: pointer; margin-bottom: 1rem; background: none; border: none; font-family: inherit; }
+    .back:hover { color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="card">
+    <!-- State 1: Sign In -->
+    <div id="sign-in" class="section active">
+      <h1>CARAPACE</h1>
+      <h2>Manage your license</h2>
+      <label for="email">Email address</label>
+      <input type="email" id="email" placeholder="you@example.com" autocomplete="email">
+      <div id="send-err" class="error"></div>
+      <button class="btn" id="send-btn" onclick="sendCode()">Send Code</button>
+    </div>
+
+    <!-- State 2: Verify -->
+    <div id="verify" class="section">
+      <button class="back" onclick="show('sign-in')">&larr; Back</button>
+      <h1>CARAPACE</h1>
+      <h2>Enter verification code</h2>
+      <p class="sub">Check your email for a 6-digit code.</p>
+      <label for="code">Code</label>
+      <input type="text" id="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
+      <div id="verify-err" class="error"></div>
+      <button class="btn" id="verify-btn" onclick="verifyCode()">Verify</button>
+    </div>
+
+    <!-- State 3: Dashboard -->
+    <div id="dashboard" class="section">
+      <h1>CARAPACE</h1>
+      <h2>Your License</h2>
+      <div id="tier-info"></div>
+      <div id="expiry-info"></div>
+      <div id="upgrade-wrap"></div>
+      <div class="devices-label">Registered Devices</div>
+      <div id="devices"></div>
+      <button class="btn btn-outline" onclick="signOut()">Sign Out</button>
+      <a href="https://venmo.com/Mike-Paepke" target="_blank" rel="noopener" style="display:block;text-align:center;margin-top:0.75rem;font-size:0.75rem;color:#475569;text-decoration:none;" onmouseover="this.style.color='#94a3b8'" onmouseout="this.style.color='#475569'">☕ Tip the developer</a>
+    </div>
+  </div>
+
+  <script>
+    const API = 'https://api.carapace.info/api';
+    let state = { email: '', token: '', account: null };
+
+    function show(id) {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
+
+    function setErr(id, msg) { document.getElementById(id).textContent = msg; }
+    function setLoading(btn, loading) { btn.disabled = loading; btn.textContent = loading ? 'Loading...' : btn.dataset.label; }
+
+    document.getElementById('send-btn').dataset.label = 'Send Code';
+    document.getElementById('verify-btn').dataset.label = 'Verify';
+
+    async function sendCode() {
+      const email = document.getElementById('email').value.trim();
+      if (!email) return setErr('send-err', 'Please enter your email.');
+      setErr('send-err', '');
+      const btn = document.getElementById('send-btn');
+      setLoading(btn, true);
+      try {
+        const res = await fetch(`${API}/email/send-code`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to send code');
+        state.email = email;
+        show('verify');
+        document.getElementById('code').focus();
+      } catch (e) { setErr('send-err', e.message); }
+      setLoading(btn, false);
+    }
+
+    async function verifyCode() {
+      const code = document.getElementById('code').value.trim();
+      if (!code) return setErr('verify-err', 'Please enter the code.');
+      setErr('verify-err', '');
+      const btn = document.getElementById('verify-btn');
+      setLoading(btn, true);
+      try {
+        const res = await fetch(`${API}/email/verify`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: state.email, code, machineId: 'web-dashboard' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Verification failed');
+        state.customerID = data.customerID || '';
+        state.tier = data.tier || 'free';
+        state.expiresAt = data.expiresAt || null;
+        state.maxDevices = data.maxDevices || 1;
+        await loadDashboard();
+      } catch (e) { setErr('verify-err', e.message); }
+      setLoading(btn, false);
+    }
+
+    async function apiFetch(path, body) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+      const res = await fetch(`${API}${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      return data;
+    }
+
+    async function loadDashboard() {
+      try {
+        const res = await fetch(`${API}/license/machines`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customerID: state.customerID })
+        });
+        const data = await res.json();
+        state.account = {
+          machines: data.machines || [],
+          tier: data.tier || state.tier || 'free',
+          expiresAt: data.expiresAt || state.expiresAt || null,
+          maxDevices: data.maxDevices || state.maxDevices || 1
+        };
+      } catch (e) {
+        state.account = { tier: state.tier || 'free', expiresAt: state.expiresAt, maxDevices: state.maxDevices || 1, machines: [] };
+      }
+      renderDashboard();
+      show('dashboard');
+    }
+
+    function renderDashboard() {
+      const a = state.account || {};
+      const tier = a.tier || a.plan || 'free';
+      const isPro = tier === 'pro' || tier === 'lifetime' || tier === 'paid';
+      const isPersonal = tier === 'personal';
+      const isPaid = isPro || isPersonal;
+      const tierEl = document.getElementById('tier-info');
+      tierEl.innerHTML = isPro
+        ? '<span class="badge badge-pro">Pro</span>'
+        : isPersonal
+          ? '<span class="badge badge-personal">Personal</span>'
+          : '<span class="badge badge-free">Free</span>';
+
+      const expiryEl = document.getElementById('expiry-info');
+      expiryEl.innerHTML = '';
+
+      const upgradeWrap = document.getElementById('upgrade-wrap');
+      if (isPro) {
+        upgradeWrap.innerHTML = '';
+      } else if (isPersonal) {
+        upgradeWrap.innerHTML = '<button class="btn btn-upgrade" onclick="upgradePro()">Upgrade to Pro &mdash; $24.99</button>';
+      } else {
+        upgradeWrap.innerHTML = '<button class="btn btn-upgrade" onclick="upgradePersonal()" style="margin-bottom:0.5rem">Go Personal &mdash; $9.99</button>' +
+          '<button class="btn btn-upgrade" onclick="upgradePro()">Go Pro &mdash; $24.99</button>';
+      }
+
+      const devices = a.machines || a.devices || [];
+      const devEl = document.getElementById('devices');
+      if (!devices.length) {
+        devEl.innerHTML = '<p class="sub" style="margin:0">No devices registered.</p>';
+      } else {
+        devEl.innerHTML = devices.map(d => {
+          const id = typeof d === 'string' ? d : (d.machineId || d.id || '');
+          const short = id.length > 16 ? id.slice(0, 16) + '...' : id;
+          return `<div class="device"><code>${esc(short)}</code><button onclick="removeMachine('${esc(id)}')">Remove</button></div>`;
+        }).join('');
+      }
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    async function removeMachine(machineId) {
+      if (!confirm(`Remove device ${machineId.slice(0, 16)}...?`)) return;
+      try {
+        await apiFetch('/license/remove-machine', { customerID: state.customerID, machineId });
+        await loadDashboard();
+      } catch (e) { alert(e.message); }
+    }
+
+    async function upgradePersonal() {
+      try {
+        const data = await apiFetch('/license/checkout-personal', { email: state.email });
+        if (data.url) window.location.href = data.url;
+        else throw new Error('No checkout URL returned');
+      } catch (e) { alert(e.message); }
+    }
+
+    async function upgradePro() {
+      try {
+        const data = await apiFetch('/license/checkout-pro', { email: state.email });
+        if (data.url) window.location.href = data.url;
+        else throw new Error('No checkout URL returned');
+      } catch (e) { alert(e.message); }
+    }
+
+    function signOut() {
+      state = { email: '', token: '', account: null };
+      document.getElementById('email').value = '';
+      document.getElementById('code').value = '';
+      show('sign-in');
+    }
+
+    // Allow Enter to submit
+    document.getElementById('email').addEventListener('keydown', e => { if (e.key === 'Enter') sendCode(); });
+    document.getElementById('code').addEventListener('keydown', e => { if (e.key === 'Enter') verifyCode(); });
+  </script>
+</body>
+</html>

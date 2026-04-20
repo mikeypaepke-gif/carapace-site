@@ -1,0 +1,1874 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# CARAPACE Headless Connector — Linux/VPS Install Script
+# Usage: curl -fsSL https://carapace.info/install.sh | bash
+#        curl -fsSL https://carapace.info/install.sh | bash -s -- --verbose
+#
+# Installs OpenClaw gateway on a Linux server and generates a QR code
+# for pairing with the CARAPACE iOS app.
+
+# ── Verbose mode ─────────────────────────────────────────
+VERBOSE=false
+if [[ "${1:-}" == "--verbose" ]]; then VERBOSE=true; fi
+LOGFILE="/tmp/carapace-install.log"
+: > "$LOGFILE"
+
+# ── Pre-clean: remove stale .npmrc prefix that conflicts with nvm ─────────
+# This persists across reboots from partial installs and silently kills nvm
+if [[ -f "$HOME/.npmrc" ]]; then
+  sed -i '/^prefix=/d' "$HOME/.npmrc" 2>/dev/null || true
+  sed -i '/^globalconfig=/d' "$HOME/.npmrc" 2>/dev/null || true
+fi
+unset npm_config_prefix 2>/dev/null || true
+
+# ── Colors ───────────────────────────────────────────────
+BOLD="\033[1m"
+DIM="\033[2m"
+TEAL="\033[36m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+RED="\033[31m"
+RESET="\033[0m"
+
+STEP_CURRENT=0
+STEP_TOTAL=10
+
+trap 'echo ""; echo -e "${RED}✗ Install failed at line $LINENO. Check $LOGFILE for details.${RESET}"; exit 1' ERR
+
+# ── Helpers ──────────────────────────────────────────────
+step() {
+  STEP_CURRENT=$((STEP_CURRENT + 1))
+  echo ""
+  echo -e "${TEAL}${BOLD}━━━ Step ${STEP_CURRENT}/${STEP_TOTAL}: $1 ━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+}
+ok()    { echo -e "  ${GREEN}✓${RESET} $*"; }
+warn()  { echo -e "  ${YELLOW}⚠${RESET} $*"; }
+fail()  { echo -e "  ${RED}✗${RESET} $*"; exit 1; }
+
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+# Retry a command up to N times with exponential backoff
+retry() {
+  local max_attempts="$1"; shift
+  local attempt=1 delay=5
+  while (( attempt <= max_attempts )); do
+    if "$@"; then return 0; fi
+    if (( attempt == max_attempts )); then return 1; fi
+    warn "Attempt $attempt/$max_attempts failed, retrying in ${delay}s..."
+    sleep "$delay"
+    delay=$(( delay * 2 ))
+    attempt=$(( attempt + 1 ))
+  done
+  return 1
+}
+
+# Run a command, logging output. Show on screen only in verbose mode.
+run() {
+  if $VERBOSE; then
+    "$@" 2>&1 | tee -a "$LOGFILE"
+  else
+    "$@" >> "$LOGFILE" 2>&1
+  fi
+}
+
+# ── Privilege check ──────────────────────────────────────
+IS_ROOT=false
+SUDO=""
+if [[ $EUID -eq 0 ]]; then
+  IS_ROOT=true
+else
+  if command -v sudo &>/dev/null; then
+    SUDO="sudo"
+  else
+    echo -e "${RED}✗ This installer requires root or sudo access.${RESET}"
+    echo "  Run as root: curl -fsSL https://carapace.info/install.sh | bash"
+    echo "  Or with sudo: curl -fsSL https://carapace.info/install.sh | sudo bash"
+    exit 1
+  fi
+fi
+
+# Suppress needrestart interactive prompts on Ubuntu
+export NEEDRESTART_MODE=a
+export DEBIAN_FRONTEND=noninteractive
+
+# ── Banner ───────────────────────────────────────────────
+echo ""
+echo -e "${TEAL}${BOLD}  ╔══════════════════════════════════════════════════╗${RESET}"
+echo -e "${TEAL}${BOLD}  ║           CARAPACE — Headless Setup  🐚         ║${RESET}"
+echo -e "${TEAL}${BOLD}  ║        Your AI, your server, always free.       ║${RESET}"
+echo -e "${TEAL}${BOLD}  ╚══════════════════════════════════════════════════╝${RESET}"
+echo ""
+
+# ── Prerequisites ────────────────────────────────────
+echo -e "\n${DIM}Checking prerequisites...${RESET}"
+
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+if [[ "$OS" == "Darwin" ]]; then
+  echo -e "  ${YELLOW}This script is for Linux servers.${RESET}"
+  echo "  For macOS, download the CARAPACE app: https://carapace.info"
+  exit 1
+fi
+[[ "$OS" == "Linux" ]] || fail "Unsupported OS: $OS. This script supports Linux only."
+ok "Platform: $OS $ARCH"
+
+# The install blocks below all trail `|| true` on the `run` call. Rationale:
+# install.sh runs under `set -euo pipefail`, and `run` hides output in the
+# logfile by default, so a silent non-zero exit from apt/dnf would kill
+# bash without any user-visible message (classic "curl: (23)" mystery).
+# Tolerating the install-step failure lets the downstream `have_cmd X` check
+# produce a clear, actionable error pointing at /tmp/carapace-install.log.
+
+# Refresh package metadata once up front — Rocky/Alma cloud minimals often
+# ship with empty or stale dnf caches, which makes the first install fail.
+if have_cmd apt-get; then
+  run $SUDO apt-get update || true
+elif have_cmd dnf; then
+  run $SUDO dnf makecache --refresh || true
+elif have_cmd yum; then
+  run $SUDO yum makecache || true
+fi
+
+# curl (required for downloads)
+if ! have_cmd curl; then
+  if have_cmd apt-get; then
+    run $SUDO apt-get install -y curl || true
+  elif have_cmd dnf; then
+    run $SUDO dnf install -y curl || true
+  elif have_cmd yum; then
+    run $SUDO yum install -y curl || true
+  fi
+  have_cmd curl || fail "curl is required but could not be installed. See /tmp/carapace-install.log for details."
+fi
+ok "curl available"
+
+# python3
+if ! have_cmd python3; then
+  if have_cmd apt-get; then
+    run $SUDO apt-get install -y python3 || true
+  elif have_cmd dnf; then
+    run $SUDO dnf install -y python3 || true
+  elif have_cmd yum; then
+    run $SUDO yum install -y python3 || true
+  fi
+  have_cmd python3 || fail "python3 is required but could not be installed. See /tmp/carapace-install.log for details."
+fi
+ok "python3 available"
+
+# git (npm pulls git-url deps during `npm install -g openclaw`;
+# fresh Debian/Ubuntu cloud images don't ship it)
+if ! have_cmd git; then
+  if have_cmd apt-get; then
+    run $SUDO apt-get install -y git || true
+  elif have_cmd dnf; then
+    run $SUDO dnf install -y git || true
+  elif have_cmd yum; then
+    run $SUDO yum install -y git || true
+  fi
+  have_cmd git || fail "git is required but could not be installed. See /tmp/carapace-install.log for details."
+fi
+ok "git available"
+
+# build tools (gcc + make) — some npm deps (esp. on ARM like Raspberry Pi)
+# fall back to compiling native modules from source if no prebuilt binary
+# exists for the arch. Without these, `npm install -g openclaw` can fail
+# mid-install on node-gyp invocations.
+if ! have_cmd make || ! have_cmd gcc; then
+  if have_cmd apt-get; then
+    run $SUDO apt-get install -y build-essential || true
+  elif have_cmd dnf; then
+    run $SUDO dnf install -y gcc gcc-c++ make || true
+  elif have_cmd yum; then
+    run $SUDO yum install -y gcc gcc-c++ make || true
+  fi
+  { have_cmd make && have_cmd gcc; } || fail "build tools (gcc, make) are required but could not be installed. See /tmp/carapace-install.log for details."
+fi
+ok "build tools available"
+
+# jq (install.sh uses jq in 4 places to read/sort OpenClaw session keys
+# during the post-install AI probe cleanup; fresh Debian 13 cloud images
+# don't ship it, which breaks Step 10/Connect at line ~1611)
+if ! have_cmd jq; then
+  if have_cmd apt-get; then
+    run $SUDO apt-get install -y jq || true
+  elif have_cmd dnf; then
+    run $SUDO dnf install -y jq || true
+  elif have_cmd yum; then
+    run $SUDO yum install -y jq || true
+  fi
+  have_cmd jq || fail "jq is required but could not be installed. See /tmp/carapace-install.log for details."
+fi
+ok "jq available"
+
+# cron (tracker sync installs a 2-min crontab entry; fresh Debian 13
+# cloud images ship without the cron daemon)
+if ! have_cmd crontab; then
+  if have_cmd apt-get; then
+    run $SUDO apt-get install -y cron || true
+    $SUDO systemctl enable --now cron >/dev/null 2>&1 || true
+  elif have_cmd dnf; then
+    run $SUDO dnf install -y cronie || true
+    $SUDO systemctl enable --now crond >/dev/null 2>&1 || true
+  elif have_cmd yum; then
+    run $SUDO yum install -y cronie || true
+    $SUDO systemctl enable --now crond >/dev/null 2>&1 || true
+  fi
+  have_cmd crontab || fail "cron is required but could not be installed. See /tmp/carapace-install.log for details."
+fi
+ok "cron available"
+
+# Swap check (prevent OOM during npm install)
+ensure_swap() {
+  local mem_total_kb swap_total_kb mem_total_mb swap_total_mb total_available
+  mem_total_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+  mem_total_mb=$(( mem_total_kb / 1024 ))
+  swap_total_kb=$(awk '/SwapTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+  swap_total_mb=$(( swap_total_kb / 1024 ))
+  total_available=$(( mem_total_mb + swap_total_mb ))
+
+  # Always create swap if none exists — npm postinstall needs headroom even on 2GB RAM
+  if (( swap_total_mb < 512 )); then
+    if [[ -f /swapfile ]]; then
+      if ! swapon --show | grep -q /swapfile; then
+        $SUDO swapon /swapfile 2>/dev/null || true
+      fi
+    else
+      echo -e "  ${DIM}Low memory (${mem_total_mb}MB) — creating 2GB swapfile...${RESET}"
+      $SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+      $SUDO chmod 600 /swapfile
+      $SUDO mkswap /swapfile >/dev/null
+      $SUDO swapon /swapfile
+      # Set swappiness high so kernel actually uses swap before OOM-killing processes
+      $SUDO sysctl -w vm.swappiness=80 >/dev/null 2>&1 || true
+      if ! grep -q '/swapfile' /etc/fstab 2>/dev/null; then
+        echo '/swapfile none swap sw 0 0' | $SUDO tee -a /etc/fstab >/dev/null
+      fi
+      ok "2GB swapfile created"
+    fi
+  else
+    ok "Memory OK (${mem_total_mb}MB RAM, ${swap_total_mb}MB swap)"
+  fi
+}
+ensure_swap
+
+# Disable needrestart config
+if [[ -f /etc/needrestart/needrestart.conf ]]; then
+  $SUDO sed -i "s/^#\?\s*\$nrconf{restart}.*/\$nrconf{restart} = 'a';/" /etc/needrestart/needrestart.conf 2>/dev/null || true
+fi
+
+# Repair interrupted dpkg state
+if have_cmd dpkg && dpkg --audit 2>/dev/null | grep -q .; then
+  echo -e "  ${DIM}Repairing interrupted dpkg state...${RESET}"
+  DEBIAN_FRONTEND=noninteractive dpkg --configure -a 2>/dev/null || true
+fi
+
+# Free apt lock if held
+if have_cmd apt-get; then
+  if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+    echo -e "  ${DIM}Waiting for apt lock...${RESET}"
+    systemctl stop unattended-upgrades 2>/dev/null || true
+    lsof /var/lib/dpkg/lock-frontend 2>/dev/null | awk 'NR>1{print $2}' | xargs -r kill 2>/dev/null || true
+    sleep 3
+    for _i in $(seq 1 6); do
+      fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || break
+      sleep 5
+    done
+  fi
+fi
+
+# Source NVM if available
+if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
+  source "$HOME/.nvm/nvm.sh" 2>/dev/null
+fi
+for nvmbin in "$HOME"/.nvm/versions/node/*/bin; do
+  [[ -d "$nvmbin" ]] && export PATH="$nvmbin:$PATH"
+done
+
+# ══════════════════════════════════════════════════════════
+# Pre-flight: detect existing OpenClaw installation
+# ══════════════════════════════════════════════════════════
+SKIP_OPENCLAW_SETUP=false
+export PATH="$HOME/.npm-global/bin:$PATH"
+OC_EXISTING=""
+if command -v openclaw >/dev/null 2>&1; then
+  OC_EXISTING="$(command -v openclaw)"
+elif [[ -x "$HOME/.npm-global/bin/openclaw" ]]; then
+  OC_EXISTING="$HOME/.npm-global/bin/openclaw"
+fi
+
+if [[ -n "$OC_EXISTING" ]] && curl -sf --max-time 3 http://127.0.0.1:18789/health >/dev/null 2>&1; then
+  OC_VER=$("$OC_EXISTING" --version 2>/dev/null || echo "unknown")
+  AUTH_EXISTS=false
+  [[ -s "$HOME/.openclaw/agents/main/agent/auth-profiles.json" ]] && AUTH_EXISTS=true
+
+  echo ""
+  echo -e "  ${GREEN}${BOLD}✓ OpenClaw detected${RESET} ($OC_VER)"
+  echo -e "  ${DIM}Gateway running, health OK${RESET}"
+  $AUTH_EXISTS && echo -e "  ${DIM}AI keys configured${RESET}"
+  echo ""
+  echo -e "  ${TEAL}${BOLD}Skip OpenClaw setup and just install CARAPACE support tools?${RESET}"
+  echo -e "  ${DIM}(Tailscale serve, status server, QR pairing, helper commands)${RESET}"
+  echo -e "  ${DIM}Your existing OpenClaw config will not be modified.${RESET}"
+  echo ""
+
+  if [ -t 0 ]; then
+    read -rp "  Skip to support tools? [Y/n]: " SKIP_CHOICE
+  else
+    read -rp "  Skip to support tools? [Y/n]: " SKIP_CHOICE < /dev/tty || SKIP_CHOICE="y"
+  fi
+
+  case "$SKIP_CHOICE" in
+    [nN]*)
+      # Destructive path — show the explicit list of state that will be
+      # replaced and require a clear "yes" before proceeding. Default is
+      # NO so a stray Enter won't nuke someone's working setup.
+      echo ""
+      echo -e "  ${YELLOW}${BOLD}⚠  WARNING — this will OVERWRITE your existing OpenClaw setup${RESET}"
+      echo -e "  ${DIM}The full install will replace:${RESET}"
+      echo -e "  ${DIM}  • ~/.openclaw/openclaw.json          (gateway config, default model)${RESET}"
+      echo -e "  ${DIM}  • ~/.openclaw/agents/main/...        (auth profiles may be rewritten)${RESET}"
+      echo -e "  ${DIM}  • systemd units for gateway + status server${RESET}"
+      echo -e "  ${DIM}  • tailscale serve routes${RESET}"
+      echo -e "  ${DIM}  • gateway auth token (iOS devices will need to re-pair via QR)${RESET}"
+      echo ""
+      echo -e "  ${DIM}If you just want Carapace's support tools (QR, status server, Tailscale${RESET}"
+      echo -e "  ${DIM}serve) layered on top of your existing OpenClaw, answer ${BOLD}N${RESET}${DIM} below.${RESET}"
+      echo ""
+      if [ -t 0 ]; then
+        read -rp "  Type 'yes' to overwrite, anything else to go back: " CONFIRM_OVERWRITE
+      else
+        read -rp "  Type 'yes' to overwrite, anything else to go back: " CONFIRM_OVERWRITE < /dev/tty || CONFIRM_OVERWRITE=""
+      fi
+      case "$CONFIRM_OVERWRITE" in
+        [yY][eE][sS])
+          echo -e "  ${DIM}Running full install — your existing OpenClaw will be replaced.${RESET}"
+          ;;
+        *)
+          SKIP_OPENCLAW_SETUP=true
+          echo -e "  ${GREEN}✓ Keeping your OpenClaw intact — installing support tools only${RESET}"
+          ;;
+      esac
+      ;;
+    *)     SKIP_OPENCLAW_SETUP=true; echo -e "  ${GREEN}✓ Skipping OpenClaw setup — installing support tools only${RESET}" ;;
+  esac
+  echo ""
+fi
+
+if ! $SKIP_OPENCLAW_SETUP; then
+# ══════════════════════════════════════════════════════════
+# Step 1: Node.js
+# ══════════════════════════════════════════════════════════
+step "Node.js"
+
+if have_cmd node && have_cmd npm && [[ "$(node --version | cut -d. -f1 | tr -d 'v')" -ge 22 ]]; then
+  ok "Node.js $(node --version) (npm $(npm --version))"
+else
+  # Remove any conflicting npmrc prefix/globalconfig before nvm install
+  if [[ -f "$HOME/.npmrc" ]]; then
+    sed -i '/^prefix=/d' "$HOME/.npmrc"
+    sed -i '/^globalconfig=/d' "$HOME/.npmrc"
+  fi
+  # Also remove any existing npm-global prefix from env
+  unset npm_config_prefix 2>/dev/null || true
+
+  echo -e "  ${DIM}Installing Node.js via nvm...${RESET}"
+  if have_cmd apt-get; then
+    # Download and run nvm installer directly (not via run() — must stay in current shell)
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash >> "$LOGFILE" 2>&1
+    export NVM_DIR="$HOME/.nvm"
+    # Source nvm directly — must be in current shell for nvm commands to work
+    if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+      # Temporarily disable errexit so prefix warnings don't abort
+      set +e
+      source "$NVM_DIR/nvm.sh"
+      set -e
+    else
+      fail "nvm install failed — check $LOGFILE"
+    fi
+    # Clear any prefix conflict
+    nvm use --delete-prefix 22 --silent 2>/dev/null || true
+    # Install node directly (not via run() — nvm must be in current shell)
+    nvm install 22 >> "$LOGFILE" 2>&1 || fail "nvm install 22 failed"
+    nvm use --delete-prefix 22 --silent 2>/dev/null || true
+    nvm use 22 >> "$LOGFILE" 2>&1
+    nvm alias default 22 >> "$LOGFILE" 2>&1
+  elif have_cmd dnf; then
+    run $SUDO dnf install -y nodejs npm
+  elif have_cmd yum; then
+    run curl -fsSL https://rpm.nodesource.com/setup_22.x | $SUDO bash -
+    run $SUDO yum install -y nodejs
+  elif have_cmd pacman; then
+    run $SUDO pacman -Sy --noconfirm nodejs npm
+  elif have_cmd apk; then
+    run $SUDO apk add --no-cache nodejs npm
+  else
+    fail "Could not install Node.js. Install Node.js 22+ manually and re-run."
+  fi
+
+  # Re-source nvm
+  if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
+    source "$HOME/.nvm/nvm.sh" 2>/dev/null
+  fi
+
+  if have_cmd node && have_cmd npm; then
+    ok "Node.js $(node --version) installed (npm $(npm --version))"
+  else
+    fail "Node.js installation failed. Install manually: https://nodejs.org"
+  fi
+fi
+
+# ══════════════════════════════════════════════════════════
+# Step 2: OpenClaw
+# ══════════════════════════════════════════════════════════
+step "OpenClaw"
+
+find_openclaw() {
+  if have_cmd openclaw; then command -v openclaw; return 0; fi
+  for nvmdir in "$HOME"/.nvm/versions/node/*/bin; do
+    [[ -x "$nvmdir/openclaw" ]] && { echo "$nvmdir/openclaw"; return 0; }
+  done
+  for p in /usr/local/bin/openclaw /usr/bin/openclaw "$HOME/.npm-global/bin/openclaw"; do
+    [[ -x "$p" ]] && { echo "$p"; return 0; }
+  done
+  local npmbin
+  npmbin="$(npm prefix -g 2>/dev/null)/bin/openclaw"
+  [[ -x "$npmbin" ]] && { echo "$npmbin"; return 0; }
+  return 1
+}
+
+# Clean dirty install state (ENOTEMPTY fix)
+clean_dirty_install() {
+  local oc_lib="$HOME/.openclaw/lib/node_modules/openclaw"
+  if [[ -d "$oc_lib" ]]; then
+    if [[ ! -x "$oc_lib/bin/openclaw.js" ]] && [[ ! -x "$oc_lib/dist/cli/index.js" ]]; then
+      warn "Incomplete OpenClaw install — clearing broken package..."
+      rm -rf "$oc_lib"
+      rm -rf "$HOME/.openclaw/lib/node_modules/.openclaw-"* 2>/dev/null || true
+      ok "Cleared broken package (config preserved)"
+    fi
+  fi
+}
+
+OC_PATH="$(find_openclaw 2>/dev/null || echo "")"
+if [[ -n "$OC_PATH" ]]; then
+  export PATH="$(dirname "$OC_PATH"):$PATH"
+  OC_VER="$(openclaw --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo 'installed')"
+  ok "OpenClaw ${OC_VER} at $OC_PATH"
+else
+  clean_dirty_install
+  echo -e "  ${DIM}Installing OpenClaw...${RESET}"
+  [[ -s "$HOME/.nvm/nvm.sh" ]] && source "$HOME/.nvm/nvm.sh" 2>/dev/null
+  # Set user-local prefix to avoid permission issues
+  npm config set prefix "$HOME/.npm-global" 2>/dev/null || true
+  export PATH="$HOME/.npm-global/bin:$PATH"
+  # Limit node memory during install to avoid OOM on low-RAM VPS
+  # Install without postinstall first to avoid OOM on low-RAM VPS
+  # The postinstall-bundled-plugins.mjs script uses too much memory on first pass
+  export NODE_OPTIONS="--max-old-space-size=768"
+  retry 3 timeout 240 npm install -g openclaw --no-fund --loglevel=error --ignore-scripts
+  # Run postinstall separately with explicit memory cap and swap already active
+  if [ -f "$HOME/.npm-global/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs" ]; then
+    echo -e "  ${DIM}Running openclaw postinstall...${RESET}"
+    retry 3 timeout 180 node --max-old-space-size=768 \
+      "$HOME/.npm-global/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs" >> "$LOGFILE" 2>&1 || true
+  fi
+  unset NODE_OPTIONS
+
+  OC_PATH="$(find_openclaw 2>/dev/null || echo "")"
+  if [[ -n "$OC_PATH" ]]; then
+    export PATH="$(dirname "$OC_PATH"):$PATH"
+    OC_DIR="$(dirname "$OC_PATH")"
+
+    # Persist PATH in shell rc
+    SHELL_RC="$HOME/.bashrc"
+    [[ -f "$HOME/.zshrc" ]] && SHELL_RC="$HOME/.zshrc"
+    grep -qF "$OC_DIR" "$SHELL_RC" 2>/dev/null || echo "export PATH=\"$OC_DIR:\$PATH\"" >> "$SHELL_RC"
+    if [[ -f "$HOME/.profile" ]]; then
+      grep -qF "$OC_DIR" "$HOME/.profile" 2>/dev/null || echo "export PATH=\"$OC_DIR:\$PATH\"" >> "$HOME/.profile"
+    fi
+    # Ensure nvm sourced in .bashrc
+    if [[ -s "$HOME/.nvm/nvm.sh" ]] && ! grep -q 'NVM_DIR' "$SHELL_RC" 2>/dev/null; then
+      echo 'export NVM_DIR="$HOME/.nvm"' >> "$SHELL_RC"
+      echo '[ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"' >> "$SHELL_RC"
+    fi
+    # /etc/profile.d for all shells
+    if [[ -d /etc/profile.d ]]; then
+      NVM_ACTIVE_BIN="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1 || true)"
+      cat > /etc/profile.d/openclaw.sh << PROFEOF
+export NVM_DIR="$HOME/.nvm"
+[ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
+# Explicit nvm node bin path for non-interactive shells
+export PATH="${NVM_ACTIVE_BIN}:$HOME/.npm-global/bin:\$PATH"
+PROFEOF
+      chmod 644 /etc/profile.d/openclaw.sh
+      # Also add to /etc/environment for system services
+      if [[ -n "$NVM_ACTIVE_BIN" ]] && ! grep -qF "$NVM_ACTIVE_BIN" /etc/environment 2>/dev/null; then
+        # Remove any prior PATH= line we wrote, then add fresh one
+        $SUDO sed -i '/\.nvm\/versions\/node/d' /etc/environment 2>/dev/null || true
+        echo "PATH=\"${NVM_ACTIVE_BIN}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"" >> /etc/environment || true
+      fi
+      # Also write to /etc/bash.bashrc for non-interactive SSH sessions
+      if [[ -f /etc/bash.bashrc ]] && ! grep -q 'openclaw nvm' /etc/bash.bashrc 2>/dev/null; then
+        cat >> /etc/bash.bashrc << BASHEOF
+# openclaw nvm
+export NVM_DIR="$HOME/.nvm"
+[ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
+export PATH="${NVM_ACTIVE_BIN}:\$PATH"
+BASHEOF
+      fi
+    fi
+
+    OC_VER="$(openclaw --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo 'installed')"
+    ok "OpenClaw ${OC_VER}"
+  else
+    fail "OpenClaw installation failed. Install manually: npm install -g openclaw"
+  fi
+fi
+
+fi  # end SKIP_OPENCLAW_SETUP block (Steps 1-2)
+
+# ── Steps 3+ always run (support tools) ──
+
+# ══════════════════════════════════════════════════════════
+# Step 3: Tailscale
+# ══════════════════════════════════════════════════════════
+step "Tailscale"
+
+TAILSCALE_INSTALLED=false
+TAILSCALE_CONNECTED=false
+TS_HOSTNAME=""
+GATEWAY_UP=false
+
+if have_cmd tailscale; then
+  ok "Tailscale already installed"
+  TAILSCALE_INSTALLED=true
+else
+  echo -e "  ${DIM}Installing Tailscale (secure remote access)...${RESET}"
+  if have_cmd apt-get; then
+    run apt-get install -y curl apt-transport-https || true
+  fi
+  install_tailscale() {
+    # Method 1: official install script
+    if curl -fsSL --connect-timeout 10 https://tailscale.com/install.sh | sh >> "$LOGFILE" 2>&1; then
+      return 0
+    fi
+    # Method 2: direct apt repo setup
+    curl -fsSL --connect-timeout 10 https://pkgs.tailscale.com/stable/ubuntu/noble.gpg \
+      | $SUDO tee /usr/share/keyrings/tailscale-archive-keyring.gpg > /dev/null 2>&1 || true
+    echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main" \
+      | $SUDO tee /etc/apt/sources.list.d/tailscale.list > /dev/null 2>&1 || true
+    $SUDO apt-get update -qq >> "$LOGFILE" 2>&1 || true
+    $SUDO apt-get install -y tailscale >> "$LOGFILE" 2>&1 && return 0
+    # Method 3: snap
+    if have_cmd snap; then
+      $SUDO snap install tailscale >> "$LOGFILE" 2>&1 && return 0
+    fi
+    # Method 4: direct .deb download (works when repos are blocked)
+    ARCH=$(dpkg --print-architecture 2>/dev/null || echo amd64)
+    TS_VERSION=$(curl -fsSL --connect-timeout 10 "https://pkgs.tailscale.com/stable/" 2>/dev/null | grep -oP 'tailscale_[0-9._]+_${ARCH}\.deb' | sort -V | tail -1 || echo "")
+    if [ -n "$TS_VERSION" ]; then
+      curl -fsSL --connect-timeout 15 "https://pkgs.tailscale.com/stable/$TS_VERSION" -o /tmp/tailscale.deb >> "$LOGFILE" 2>&1 && \
+        $SUDO dpkg -i /tmp/tailscale.deb >> "$LOGFILE" 2>&1 && rm -f /tmp/tailscale.deb && return 0
+    fi
+    return 1
+  }
+  if install_tailscale; then
+    ok "Tailscale installed"
+    TAILSCALE_INSTALLED=true
+  else
+    warn "Tailscale install failed — continuing without it. Run: curl -fsSL https://tailscale.com/install.sh | sh"
+  fi
+fi
+
+# ── Tailscale authentication ────────────────────────────
+if $TAILSCALE_INSTALLED; then
+  ts_is_running() {
+    local state
+    state="$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('BackendState',''))" 2>/dev/null || echo "")"
+    [[ "$state" == "Running" ]]
+  }
+
+  ts_hostname() {
+    tailscale status --json 2>/dev/null | python3 -c \
+      "import sys,json; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null || echo ""
+  }
+
+  if ts_is_running; then
+    TS_HOSTNAME="$(ts_hostname)"
+    ok "Tailscale connected as ${TS_HOSTNAME}"
+    TAILSCALE_CONNECTED=true
+  else
+    echo ""
+    echo -e "  ${DIM}Tailscale needs authentication.${RESET}"
+
+    TS_UP_TMPFILE="$(mktemp /tmp/ts-up-XXXXXX)"
+    chmod 600 "$TS_UP_TMPFILE"
+    $SUDO tailscale up > "$TS_UP_TMPFILE" 2>&1 &
+    TS_UP_PID=$!
+
+    # Poll for the auth URL
+    URL_PRINTED=false
+    for _i in $(seq 1 15); do
+      sleep 1
+      TS_URL="$(grep -oE 'https://[a-zA-Z0-9./?=_-]+' "$TS_UP_TMPFILE" 2>/dev/null | grep -E 'login\.tailscale|tailscale\.com/a/' | head -1 || true)"
+      if [[ -n "$TS_URL" ]]; then
+        echo ""
+        echo -e "  ${TEAL}┌─────────────────────────────────────────────────────┐${RESET}"
+        echo -e "  ${TEAL}│${RESET}  Open this URL in your browser to authenticate:     ${TEAL}│${RESET}"
+        echo -e "  ${TEAL}│${RESET}                                                     ${TEAL}│${RESET}"
+        echo -e "  ${TEAL}│${RESET}  ${BOLD}${TS_URL}${RESET}"
+        echo -e "  ${TEAL}│${RESET}                                                     ${TEAL}│${RESET}"
+        echo -e "  ${TEAL}│${RESET}  ${DIM}Waiting... (press Ctrl+C to cancel)${RESET}               ${TEAL}│${RESET}"
+        echo -e "  ${TEAL}└─────────────────────────────────────────────────────┘${RESET}"
+        echo ""
+        URL_PRINTED=true
+        break
+      fi
+    done
+
+    if ! $URL_PRINTED; then
+      if [[ -s "$TS_UP_TMPFILE" ]]; then
+        echo -e "  ${DIM}Tailscale output:${RESET}"
+        cat "$TS_UP_TMPFILE"
+      else
+        echo -e "  ${DIM}No output from tailscale up — run manually: tailscale up${RESET}"
+      fi
+      echo ""
+    fi
+
+    echo -e "  ${DIM}Waiting for authentication (up to 3 minutes)...${RESET}"
+    WAIT_COUNT=0
+    WAIT_MAX=120
+    while (( WAIT_COUNT < WAIT_MAX )); do
+      if ! kill -0 "$TS_UP_PID" 2>/dev/null; then
+        wait "$TS_UP_PID" 2>/dev/null && TAILSCALE_CONNECTED=true || true
+        break
+      fi
+      if ts_is_running; then
+        TAILSCALE_CONNECTED=true
+        break
+      fi
+      sleep 3
+      WAIT_COUNT=$(( WAIT_COUNT + 3 ))
+      if (( WAIT_COUNT % 15 == 0 )); then
+        if ! $URL_PRINTED; then
+          TS_URL="$(grep -oE 'https://login\.tailscale\.com/[^ \n]+' "$TS_UP_TMPFILE" 2>/dev/null | head -1 || true)"
+          if [[ -n "$TS_URL" ]]; then
+            echo -e "  Auth URL: ${BOLD}${TS_URL}${RESET}"
+            URL_PRINTED=true
+          fi
+        fi
+        echo -ne "${DIM}.${RESET}"
+      fi
+    done
+    echo ""
+
+    kill "$TS_UP_PID" 2>/dev/null || true
+    wait "$TS_UP_PID" 2>/dev/null || true
+    rm -f "$TS_UP_TMPFILE"
+
+    if $TAILSCALE_CONNECTED; then
+      TS_HOSTNAME="$(ts_hostname)"
+      ok "Tailscale connected as ${TS_HOSTNAME}"
+    else
+      warn "Tailscale authentication timed out — skipping. Run manually: $SUDO tailscale up"
+      TAILSCALE_CONNECTED=false
+    fi
+  fi
+fi
+
+# ══════════════════════════════════════════════════════════
+# Step 4: HTTPS
+# ══════════════════════════════════════════════════════════
+step "HTTPS"
+
+TAILSCALE_HTTPS_OK=false
+
+if $TAILSCALE_CONNECTED && [[ -n "$TS_HOSTNAME" ]]; then
+  # HTTPS certs are verified after Tailscale serve is configured (Step 6).
+  # Just mark that we have the prerequisites for HTTPS.
+  TAILSCALE_HTTPS_OK=true
+  ok "Tailscale connected — HTTPS will be verified after serve setup"
+else
+  echo -e "  ${DIM}Skipped (Tailscale not connected)${RESET}"
+fi
+
+# ══════════════════════════════════════════════════════════
+# Step 5: Gateway
+# ══════════════════════════════════════════════════════════
+step "Gateway"
+
+echo -e "  ${DIM}Setting gateway configuration...${RESET}"
+timeout 10 openclaw config set gateway.mode local >/dev/null 2>&1 || true
+timeout 10 openclaw config set gateway.http.endpoints.chatCompletions.enabled true >/dev/null 2>&1 || true
+# Open DM policy so CARAPACE iOS app and TUI connect without pairing approval
+timeout 10 openclaw config set channels.webchat.dmPolicy open >/dev/null 2>&1 || true
+timeout 10 openclaw config set channels.webchat.allowFrom '["*"]' >/dev/null 2>&1 || true
+if $TAILSCALE_CONNECTED; then
+  timeout 10 openclaw config set gateway.bind loopback >/dev/null 2>&1 || true
+else
+  timeout 10 openclaw config set gateway.bind lan >/dev/null 2>&1 || true
+fi
+if $TAILSCALE_HTTPS_OK && [[ -n "$TS_HOSTNAME" ]]; then
+  timeout 10 openclaw config set gateway.remote.url "https://${TS_HOSTNAME}" >/dev/null 2>&1 || true
+fi
+ok "Gateway configured"
+
+# ── Install & start gateway daemon ──────────────────────
+echo -e "  ${DIM}Installing gateway service...${RESET}"
+if $IS_ROOT && have_cmd systemctl; then
+  OC_BIN="$(command -v openclaw 2>/dev/null || true)"
+  if [[ -z "$OC_BIN" ]]; then
+    for _d in "$HOME"/.nvm/versions/node/*/bin; do
+      [[ -x "$_d/openclaw" ]] && OC_BIN="$_d/openclaw" && break
+    done
+  fi
+
+  # Write a wrapper script so systemd doesn't mangle shell variables
+  cat > /usr/local/bin/openclaw-gateway-run << 'GWWRAPPER'
+#!/bin/bash
+export HOME=/root
+export NVM_DIR="$HOME/.nvm"
+NVM_BIN=$(ls -d /root/.nvm/versions/node/*/bin 2>/dev/null | tail -1)
+if [ -n "$NVM_BIN" ]; then
+  export PATH="$NVM_BIN:$HOME/.npm-global/bin:$PATH"
+else
+  export PATH="$HOME/.npm-global/bin:$PATH"
+fi
+exec openclaw gateway run --allow-unconfigured
+GWWRAPPER
+  chmod +x /usr/local/bin/openclaw-gateway-run
+
+  cat > /etc/systemd/system/openclaw-gateway.service << 'EOF'
+[Unit]
+Description=OpenClaw Gateway
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=root
+WorkingDirectory=/root
+ExecStart=/usr/local/bin/openclaw-gateway-run
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable openclaw-gateway >/dev/null 2>&1 || true
+  systemctl restart openclaw-gateway >/dev/null 2>&1 || true
+  # Clean up any conflicting user-mode service created by openclaw gateway install
+  systemctl --user stop openclaw-gateway 2>/dev/null || true
+  systemctl --user disable openclaw-gateway 2>/dev/null || true
+  rm -f "$HOME/.config/systemd/user/openclaw-gateway.service" 2>/dev/null || true
+  systemctl --user daemon-reload 2>/dev/null || true
+  ok "Gateway system service installed"
+else
+  # Only call `openclaw gateway install` if we don't already have a token.
+  # Otherwise it rotates the token and breaks any already-paired iOS apps
+  # (classic 401 after re-run bug).
+  if ! jq -e '.gateway.auth.token != null and .gateway.auth.token != ""' "$HOME/.openclaw/openclaw.json" >/dev/null 2>&1; then
+    timeout 30 openclaw gateway install >/dev/null 2>&1 || true
+  fi
+  timeout 15 openclaw gateway start >/dev/null 2>&1 || true
+fi
+
+echo -e "  ${DIM}Waiting for gateway to start...${RESET}"
+sleep 3  # Brief pause to let systemd fully initialize
+GATEWAY_UP=false
+for i in $(seq 1 20); do
+  if curl -sf http://127.0.0.1:18789/health >/dev/null 2>&1; then
+    GATEWAY_UP=true
+    break
+  fi
+  sleep 1
+done
+
+if $GATEWAY_UP; then
+  ok "Gateway running on port 18789"
+else
+  # Retry
+  timeout 15 openclaw gateway start >/dev/null 2>&1 || true
+  for i in $(seq 1 10); do
+    if curl -sf http://127.0.0.1:18789/health >/dev/null 2>&1; then
+      GATEWAY_UP=true
+      break
+    fi
+    sleep 1
+  done
+  if $GATEWAY_UP; then
+    ok "Gateway running on port 18789"
+  else
+    warn "Gateway not responding — check: systemctl status openclaw-gateway"
+  fi
+fi
+
+# Don't clear model/provider if already configured (idempotency)
+EXISTING_MODEL=$(timeout 10 openclaw config get agents.defaults.model 2>/dev/null | head -1 | tr -d '"{ ' || echo "")
+if [[ -z "$EXISTING_MODEL" || "$EXISTING_MODEL" == "null" ]]; then
+  # No model set yet — will be configured during onboard
+  timeout 10 openclaw config set agents.defaults.model "" >/dev/null 2>&1 || true
+  timeout 10 openclaw config set agents.defaults.provider "" >/dev/null 2>&1 || true
+else
+  ok "Existing model preserved: $EXISTING_MODEL"
+fi
+
+# ══════════════════════════════════════════════════════════
+# Step 6: Status Server
+# ══════════════════════════════════════════════════════════
+step "Status Server"
+
+mkdir -p ~/.carapace
+
+# Tracker files (create if missing)
+[[ -f ~/.carapace/carapace-project-tracker.json ]] || cat > ~/.carapace/carapace-project-tracker.json << 'PROJECTJSON'
+{"version":1,"updated":"","projects":[{"id":"setup-ios","name":"Get CARAPACE on your iPhone","description":"Step 1: Download CARAPACE from the App Store\nhttps://apps.apple.com/us/app/carapace/id6760282881\n\nStep 2: Open the app, tap Connect Server, then scan the QR code in the Settings tab.","status":"green","progress":0,"workstreams":[]}]}
+PROJECTJSON
+[[ -f ~/.carapace/carapace-agent-tracker.json ]] || echo '{"agents":{"main":{"name":"Main","status":"idle","detail":"Ready","updated":""}},"completions":[]}' > ~/.carapace/carapace-agent-tracker.json
+[[ -f ~/.carapace/carapace-cron-tracker.json ]] || echo '{"version":1,"updated":"","jobs":[]}' > ~/.carapace/carapace-cron-tracker.json
+
+NODE_BIN="$(command -v node)"
+
+# Write status server and sync script via python3 (avoids heredoc quote-stripping)
+python3 - << 'PYEOF'
+import os, textwrap
+
+status_server = r"""
+const http = require("http"), fs = require("fs"), path = require("path"), os = require("os"); const DIR = path.join(os.homedir(), ".carapace"); const OC_DIR = path.join(os.homedir(), ".openclaw"); const TRACKER_PORT = 18795; function writePromptLocally(pathname, body, res) { try { const m = pathname.match(/^\/projects\/([^/]+)\/(?:workstreams\/([^/]+)\/)?prompt\/?$/); if (!m) { res.writeHead(400); res.end(JSON.stringify({ error: "bad path" })); return; } const pid = decodeURIComponent(m[1]); const wid = m[2] ? decodeURIComponent(m[2]) : null; const payload = JSON.parse(body || "{}"); const fp = path.join(DIR, "carapace-project-tracker.json"); const data = JSON.parse(fs.readFileSync(fp, "utf8")); const proj = (data.projects || []).find(p => p.id === pid); if (!proj) { res.writeHead(404); res.end(JSON.stringify({ error: "project not found" })); return; } const now = new Date().toISOString(); if (wid) { const ws = (proj.workstreams || []).find(w => w.id === wid); if (!ws) { res.writeHead(404); res.end(JSON.stringify({ error: "workstream not found" })); return; } if ("focusPrompt" in payload) ws.focusPrompt = payload.focusPrompt; ws.promptVersion = (ws.promptVersion || 0) + 1; ws.promptUpdatedAt = now; } else { if ("divePrompt" in payload) proj.divePrompt = payload.divePrompt; proj.promptVersion = (proj.promptVersion || 0) + 1; proj.promptUpdatedAt = now; } data.updated = now; fs.writeFileSync(fp, JSON.stringify(data)); res.end(JSON.stringify({ ok: true, id: pid, wid, promptVersion: wid ? (proj.workstreams.find(w => w.id === wid).promptVersion) : proj.promptVersion, promptUpdatedAt: now })); } catch(e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); } } function proxyToTracker(method, pathname, body, res) { const opts = { hostname: "127.0.0.1", port: TRACKER_PORT, path: pathname, method, headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body || "") } }; const proxyReq = http.request(opts, (proxyRes) => { let chunks = ""; proxyRes.on("data", d => { chunks += d; }); proxyRes.on("end", () => { res.writeHead(proxyRes.statusCode || 502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }); res.end(chunks || "{}"); }); }); proxyReq.on("error", (err) => { /* Tracker unreachable (Linux headless): write directly to status-server file */ writePromptLocally(pathname, body, res); }); if (body) proxyReq.write(body); proxyReq.end(); } function loadHistory(limit, token, agent) { try { if (token) { try { const cfg = JSON.parse(fs.readFileSync(path.join(OC_DIR, "openclaw.json"), "utf8")); const gwToken = cfg && cfg.gateway && cfg.gateway.auth && cfg.gateway.auth.token; if (gwToken && token !== gwToken) { return { error: "Unauthorized", messages: [], count: 0 }; } } catch(e) {} } const agentName = (agent && /^[a-zA-Z0-9_-]+$/.test(agent)) ? agent : "main"; const sessDir = path.join(OC_DIR, "agents", agentName, "sessions"); if (!fs.existsSync(sessDir)) return { messages: [], count: 0 }; let targetFile = null; try { const sessionsIndex = JSON.parse(fs.readFileSync(path.join(sessDir, "sessions.json"), "utf8")); const mainKey = `agent:${agentName}:main`; const entry = sessionsIndex[mainKey]; if (entry && entry.sessionId) { const candidate = entry.sessionId + ".jsonl"; if (fs.existsSync(path.join(sessDir, candidate))) { targetFile = candidate; } } } catch(e) {} if (!targetFile) { const files = fs.readdirSync(sessDir) .filter(f => f.endsWith(".jsonl") && f !== "sessions.json") .map(f => ({ f, mtime: fs.statSync(path.join(sessDir, f)).mtime })) .sort((a, b) => b.mtime - a.mtime); if (!files.length) return { messages: [], count: 0 }; targetFile = files[0].f; } const lines = fs.readFileSync(path.join(sessDir, targetFile), "utf8").split("\n").filter(Boolean); const messages = []; for (const line of lines) { try { const entry = JSON.parse(line); if (entry.type !== "message") continue; const msg = entry.message; if (!msg || !msg.role) continue; if (!["user", "assistant"].includes(msg.role)) continue; let text = ""; if (typeof msg.content === "string") { text = msg.content; } else if (Array.isArray(msg.content)) { text = msg.content.filter(c => c.type === "text").map(c => c.text).join(""); } text = text.replace(/<final>/g, "").replace(/<\/final>/g, "").trim(); if (!text) continue; if (text === "HEARTBEAT_OK" || text === "NO_REPLY") continue; if (text.includes("Read HEARTBEAT.md if it exists")) continue; if (text.startsWith("Exec completed")) continue; if (text.startsWith("System:")) continue; if (text.match(/^\[\d{4}-\d{2}-\d{2}.*\] Exec (completed|started|failed)/)) continue; if (text.includes("[system event]")) continue; if (text.includes("openclaw system event")) continue; if (text.startsWith("HEARTBEAT_OK")) continue; if (text.startsWith("[[reply_to")) continue; if (text.startsWith("[[ reply_to")) continue; if (text.includes("BEGIN_OPENCLAW_INTERNAL_CONTEXT")) continue; if (text.includes("Inter-session message")) continue; if (text.includes("[Internal task completion event]")) continue; if (text.includes("Continue where you left off. The previous model attempt failed or timed out")) continue; if (text.includes("previous model attempt failed or timed out")) continue; if (text.includes("HEARTBEAT_OK")) continue; if (text.includes("Handle the result internally")) continue; if (text.includes("System (untrusted)")) continue; if (text.includes("Exec completed")) continue; if (text.includes("openclaw doctor")) continue; if (text.includes("async command you ran earlier")) continue; if (text.includes("Current time:") && text.includes("UTC")) continue; if (text.includes("Tracker is running")) continue; if (text.includes("spawn a refresh")) continue; if (text.includes("I'll spawn")) continue; if (text.includes("queue is empty")) continue; if (text.includes("Do not relay it to the user")) continue; if (text.startsWith("An async command")) continue; if (msg.role === "user" && text.includes("System (untrusted)")) continue; if (msg.role === "user" && text.includes("Sender (untrusted metadata)")) { const match = text.match(/\[.*?\]\s+([\s\S]+)$/); if (match) text = match[1].trim(); else continue; } if (!text) continue; messages.push({ role: msg.role, content: text, timestamp: entry.timestamp ? String(entry.timestamp) : "" }); } catch(e) {} } const result = messages.slice(-limit); return { messages: result, count: result.length }; } catch(e) { return { messages: [], count: 0 }; } } function extractBearer(req) { const authLine = req.split("\r\n").find(l => l.toLowerCase().startsWith("authorization:")); if (!authLine) return null; const parts = authLine.split("Bearer "); return parts.length > 1 ? parts[1].trim() : null; } const fileMap = { "/projects": "carapace-project-tracker.json", "/tracker": "carapace-project-tracker.json", "/cron": "carapace-cron-tracker.json" }; function isTierPaid() { try { const tierFile = path.join(DIR, "tier.json"); if (!fs.existsSync(tierFile)) return true; const data = JSON.parse(fs.readFileSync(tierFile, "utf8")); return data.tier && data.tier !== "free"; } catch { return true; } } const EMPTY_PROJECTS = JSON.stringify({version:1,updated:"",projects:[]}); const EMPTY_CRON = JSON.stringify({version:1,updated:"",jobs:[]}); const EMPTY_AGENTS = JSON.stringify({agents:{},updated:""}); function getLiveAgentStatus() { try { const agentsRoot = path.join(OC_DIR, "agents"); if (!fs.existsSync(agentsRoot)) return buildFallbackStatus("idle", "No agents directory"); const agents = {}; const agentDirs = fs.readdirSync(agentsRoot).filter(a => { try { return fs.statSync(path.join(agentsRoot, a)).isDirectory(); } catch { return true; } }); for (const agent of agentDirs) { const sessDir = path.join(agentsRoot, agent, "sessions"); if (!fs.existsSync(sessDir)) continue; const indexPath = path.join(sessDir, "sessions.json"); if (!fs.existsSync(indexPath)) continue; const index = JSON.parse(fs.readFileSync(indexPath, "utf8")); for (const [sessionKey, entry] of Object.entries(index)) { const isSubagent = sessionKey.includes(":subagent:"); const agentId = isSubagent ? sessionKey.split(":subagent:")[1]?.slice(0, 8) || "sub" : agent; const updatedAt = entry.updatedAt || 0; const ageMs = Date.now() - updatedAt; const isRunning = entry.status === "running"; const twoHours = 2 * 60 * 60 * 1000; if (!isSubagent) { const canonicalKey = `agent:${agent}:main`; if (sessionKey !== canonicalKey) continue; if (ageMs > 30 * 60 * 1000) continue; const agentLabel = agent === "main" ? "Main" : agent.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()); const agentKey = agent === "main" ? "main" : agent; agents[agentKey] = { name: agentLabel, status: isRunning ? "active" : "idle", detail: isRunning ? "Processing" : "Ready", updated: new Date(updatedAt).toLocaleTimeString() }; } else if (isSubagent) { if (ageMs > twoHours) continue; if (!isRunning && ageMs > 20000) continue; agents[agentId] = { name: `Subagent ${agentId}`, status: "active", detail: entry.lastChannel || "isolated task", parent: "main", updated: new Date(updatedAt).toLocaleTimeString() }; } } } if (!agents["main"]) { agents["main"] = { name: "Main", status: "idle", detail: "Ready", updated: new Date().toLocaleTimeString() }; } return { agents, updated: new Date().toLocaleTimeString() }; } catch(e) { return buildFallbackStatus("idle", "Status unavailable"); } } function buildFallbackStatus(status, detail) { return { agents: { main: { name: "Main", status, detail, updated: new Date().toLocaleTimeString() } }, updated: new Date().toLocaleTimeString() }; } http.createServer((req, res) => { let body = ""; req.on("data", d => { body += d; }); req.on("end", () => { res.setHeader("Access-Control-Allow-Origin", "*"); res.setHeader("Content-Type", "application/json"); if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; } const rawPath = req.url || "/"; const p = rawPath.split("?")[0]; const qs = new URLSearchParams(rawPath.includes("?") ? rawPath.split("?")[1] : ""); const limit = parseInt(qs.get("limit") || "50"); const token = (req.headers["authorization"] || "").replace("Bearer ", "").trim() || null; if (p === "/health") { res.end(JSON.stringify({ ok: true })); return; } if (p === "/history") { const agent = qs.get("agent") || "main"; res.end(JSON.stringify(loadHistory(Math.min(limit, 200), token, agent))); return; } if (p === "/sessions") { const agentsRoot = path.join(OC_DIR, "agents"); let sessions = []; try { const agentDirs = fs.readdirSync(agentsRoot).filter(a => { try { return fs.statSync(path.join(agentsRoot, a)).isDirectory(); } catch { return true; } }).sort(); for (const agent of agentDirs) { const sessDir = path.join(agentsRoot, agent, "sessions"); let lastActive = 0; try { const files = fs.readdirSync(sessDir) .filter(f => f.endsWith(".jsonl") && !f.includes(".deleted.") && !f.includes(".reset.") && f !== "sessions.json"); for (const f of files) { try { const mtime = fs.statSync(path.join(sessDir, f)).mtime.getTime() / 1000; if (mtime > lastActive) lastActive = mtime; } catch {} } } catch {} const label = agent === "main" ? "Main" : agent.replace(/-/g, " ").replace(/_/g, " ") .replace(/\b\w/g, c => c.toUpperCase()); sessions.push({ key: `agent:${agent}:main`, agent, label, lastActive }); } sessions.sort((a, b) => { if (a.agent === "main") return -1; if (b.agent === "main") return 1; return b.lastActive - a.lastActive; }); } catch {} res.end(JSON.stringify({ sessions })); return; } if ((p === "/" || p === "") && qs.has("limit")) { const agent = qs.get("agent") || "main"; res.end(JSON.stringify(loadHistory(Math.min(limit, 200), token, agent))); return; } if (p === "/" || p === "") { const fp = path.join(DIR, "carapace-agent-tracker.json"); try { res.end(fs.readFileSync(fp, "utf8")); } catch { res.writeHead(404); res.end(JSON.stringify({ error: "not found" })); } return; } if (req.method === "DELETE" && p.startsWith("/cron/")) { const id = decodeURIComponent(p.slice("/cron/".length)); if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "missing id" })); return; } let deleted = false; try { const ocfp = path.join(OC_DIR, "cron", "jobs.json"); if (fs.existsSync(ocfp)) { const data = JSON.parse(fs.readFileSync(ocfp, "utf8")); const before = (data.jobs || []).length; data.jobs = (data.jobs || []).filter(j => j.id !== id); if (data.jobs.length < before) { fs.writeFileSync(ocfp, JSON.stringify(data)); deleted = true; } } } catch (e) {} try { const tfp = path.join(DIR, "carapace-cron-tracker.json"); if (fs.existsSync(tfp)) { const data = JSON.parse(fs.readFileSync(tfp, "utf8")); const before = (data.jobs || []).length; data.jobs = (data.jobs || []).filter(j => j.id !== id); if (data.jobs.length < before) { fs.writeFileSync(tfp, JSON.stringify(data)); deleted = true; } } } catch (e) {} try { const tombfp = path.join(DIR, "deleted-cron-ids.json"); const tomb = fs.existsSync(tombfp) ? JSON.parse(fs.readFileSync(tombfp, "utf8")) : { ids: [] }; if (!tomb.ids.includes(id)) tomb.ids.push(id); fs.writeFileSync(tombfp, JSON.stringify(tomb)); } catch(e) {} if (!deleted) { res.writeHead(404); res.end(JSON.stringify({ error: "job not found" })); return; } res.end(JSON.stringify({ ok: true, deleted: id })); return; } if (req.method === "PUT" && /^\/projects\/[^/]+\/(prompt|workstreams\/[^/]+\/prompt)\/?$/.test(p)) { proxyToTracker("PUT", p, body, res); return; } if (req.method === "DELETE" && p.startsWith("/projects/")) { const id = decodeURIComponent(p.slice("/projects/".length)); if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "missing id" })); return; } const fp = path.join(DIR, "carapace-project-tracker.json"); try { const data = JSON.parse(fs.readFileSync(fp, "utf8")); const before = data.projects.length; data.projects = data.projects.filter(proj => proj.id !== id); if (data.projects.length === before) { res.writeHead(404); res.end(JSON.stringify({ error: "project not found" })); return; } data.updated = new Date().toISOString(); fs.writeFileSync(fp, JSON.stringify(data)); res.end(JSON.stringify({ ok: true, deleted: id })); } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); } return; } if (p === "/status" || p === "/agents") { res.end(JSON.stringify(getLiveAgentStatus())); return; } const filePath = fileMap[p] ? path.join(DIR, fileMap[p]) : null; if (filePath) { if (!isTierPaid()) { if (p === "/projects" || p === "/tracker") { res.end(EMPTY_PROJECTS); return; } if (p === "/cron") { res.end(EMPTY_CRON); return; } } try { res.end(fs.readFileSync(filePath, "utf8")); } catch { res.writeHead(404); res.end(JSON.stringify({ error: "not found" })); } return; } res.writeHead(404); res.end(JSON.stringify({ error: "not found" })); }); }).listen(18794, "127.0.0.1", () => console.log("CARAPACE Status Server on :18794"));
+""".lstrip()
+
+sync_script = textwrap.dedent("""
+    #!/usr/bin/env bash
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+    # openclaw is installed to ~/.npm-global/bin via `npm config set prefix`. nvm's
+    # own node/*/bin ONLY contains node/npm/npx/corepack, so the npm-global prefix
+    # must come first on PATH for `command -v openclaw` to resolve.
+    export PATH="$HOME/.npm-global/bin:$PATH"
+    for d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$d" ] && export PATH="$d:$PATH"; done
+    OC=$(command -v openclaw 2>/dev/null)
+    if [ -z "$OC" ]; then
+      # Log loudly so broken PATH configs surface in syslog (previous silent exit
+      # hid this bug for hours at a time).
+      logger -t carapace-sync "openclaw not on PATH; skipping tracker sync"
+      exit 1
+    fi
+    $OC cron list --json --all 2>/dev/null | python3 -c "
+    import json, sys
+    from datetime import datetime, timezone
+    def fmt_ms(ms):
+        if not ms: return ''
+        try: return datetime.fromtimestamp(ms/1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        except: return ''
+    d = json.load(sys.stdin)
+    jobs = []
+    for j in d.get('jobs', []):
+        s = j.get('schedule', {})
+        if s.get('kind') == 'every':
+            mins = s.get('everyMs', 0) // 60000
+            sched = 'every {}m'.format(mins)
+        elif s.get('kind') == 'cron':
+            sched = s.get('expr', '')
+        else:
+            sched = s.get('kind', '')
+        state = j.get('state', {})
+        jobs.append({'id': j.get('id',''), 'name': j.get('name', j.get('id','')), 'schedule': sched,
+            'enabled': j.get('enabled', True),
+            'status': 'idle' if j.get('enabled', True) else 'disabled',
+            'lastRun': fmt_ms(state.get('lastRunAtMs')),
+            'nextRun': fmt_ms(state.get('nextRunAtMs')),
+            'payload': (j.get('payload',{}) or {}).get('message','')[:120]})
+    import os
+    json.dump({'version':1,'updated':datetime.now(timezone.utc).isoformat(),'jobs':jobs},
+        open(os.path.expanduser('~/.carapace/carapace-cron-tracker.json'),'w'),indent=2)
+    "
+    # Sync projects from workspace or seed default
+    python3 - << 'PYEOF2'
+    import json, os, socket
+    from datetime import datetime, timezone
+    proj_file = os.path.expanduser('~/.carapace/carapace-project-tracker.json')
+    ws_tracker = os.path.expanduser('~/.openclaw/workspace/projects/tracker.json')
+    try:
+        data = json.load(open(proj_file))
+    except:
+        data = {'version': 1, 'updated': '', 'projects': []}
+    if os.path.exists(ws_tracker):
+        try:
+            ws = json.load(open(ws_tracker))
+            if ws.get('projects'):
+                data['projects'] = ws['projects']
+                data['updated'] = datetime.now(timezone.utc).isoformat()
+                json.dump(data, open(proj_file, 'w'), indent=2)
+        except:
+            pass
+    elif not data.get('projects'):
+        data['projects'] = [{'id': 'my-server', 'name': 'My Server',
+            'description': 'CARAPACE running on ' + socket.gethostname(),
+            'status': 'green', 'progress': 100, 'workstreams': []}]
+        data['updated'] = datetime.now(timezone.utc).isoformat()
+        json.dump(data, open(proj_file, 'w'), indent=2)
+    PYEOF2
+""").lstrip()
+
+home = os.path.expanduser("~")
+with open(home + "/.carapace/status-server.js", "w") as f:
+    f.write(status_server)
+with open(home + "/.carapace/sync-trackers.sh", "w") as f:
+    f.write(sync_script)
+os.chmod(home + "/.carapace/sync-trackers.sh", 0o755)
+PYEOF
+
+cat > /etc/systemd/system/carapace-status.service << EOF
+[Unit]
+Description=CARAPACE Status Server
+After=network.target
+[Service]
+Type=simple
+ExecStart=$NODE_BIN $HOME/.carapace/status-server.js
+Restart=always
+RestartSec=5
+User=$(whoami)
+Environment=HOME=$HOME
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable carapace-status >/dev/null 2>&1
+systemctl restart carapace-status
+sleep 2
+if curl -sf --max-time 3 http://127.0.0.1:18794/health >/dev/null 2>&1; then
+  ok "Status server running on :18794"
+else
+  warn "Status server failed to start — run: systemctl status carapace-status"
+fi
+
+# ── Status Server (port 18794) ──────────────────────────
+# iOS dashboard (chat history, sessions, projects, cron, agents) hits
+# endpoints on 18794. Without this, Tailscale Serve routes for
+# /carapace/* forward to nothing → iPhone sees empty tabs. We install a
+# tiny standalone Node.js server (~.carapace/status-server.js) and a
+# systemd unit so it starts at boot.
+echo -e "  ${DIM}Installing status server on port 18794...${RESET}"
+mkdir -p "$HOME/.carapace"
+# Preserve any user customizations to an existing status-server.js before
+# we overwrite with the Carapace-managed version. `.user-backup.<ts>` so
+# the user can diff + reapply custom edits on top of bug fixes.
+if [[ -f "$HOME/.carapace/status-server.js" ]]; then
+  # Check if it matches the current upstream version — if not, back up
+  BACKUP="$HOME/.carapace/status-server.js.user-backup.$(date +%s)"
+  cp "$HOME/.carapace/status-server.js" "$BACKUP"
+fi
+# Download the canonical status-server.js from the site. Ships alongside
+# install.sh so it's always in sync with the installer.
+if curl -fsSL --max-time 20 -o "$HOME/.carapace/status-server.js.new" \
+      "https://carapace.info/status-server.js" 2>/dev/null; then
+  mv "$HOME/.carapace/status-server.js.new" "$HOME/.carapace/status-server.js"
+  # Status server binds 127.0.0.1 by default; Tailscale Serve proxies to
+  # it from the public HTTPS interface so that's the right default.
+  ok "status-server.js installed"
+else
+  echo -e "  ${YELLOW}⚠ Could not download status-server.js — iOS dashboard will be empty${RESET}"
+fi
+
+# Empty project tracker skeleton so /projects returns valid JSON.
+[[ -f "$HOME/.carapace/carapace-project-tracker.json" ]] || \
+  echo '{"version":1,"updated":"","projects":[]}' > "$HOME/.carapace/carapace-project-tracker.json"
+
+# systemd unit — runs as root like the gateway unit above.
+if $IS_ROOT && have_cmd systemctl && [[ -f "$HOME/.carapace/status-server.js" ]]; then
+  # Evict any stale process on 18794 before starting
+  STALE_PID=$(ss -lntp 2>/dev/null | awk '/127.0.0.1:18794/ {print}' | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
+  [[ -n "$STALE_PID" ]] && kill -9 "$STALE_PID" 2>/dev/null || true
+
+  NODE_PATH="$(command -v node 2>/dev/null)"
+  [[ -z "$NODE_PATH" ]] && for _d in "$HOME"/.nvm/versions/node/*/bin; do
+    [[ -x "$_d/node" ]] && NODE_PATH="$_d/node" && break
+  done
+
+  cat > /etc/systemd/system/carapace-status-server.service <<EOF
+[Unit]
+Description=Carapace Status Server (port 18794)
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=root
+WorkingDirectory=/root
+Environment=HOME=/root
+ExecStart=$NODE_PATH $HOME/.carapace/status-server.js
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable carapace-status-server >/dev/null 2>&1 || true
+  systemctl restart carapace-status-server >/dev/null 2>&1 || true
+
+  # Wait for bind
+  for _ss in $(seq 1 10); do
+    curl -sf --max-time 1 http://127.0.0.1:18794/health >/dev/null 2>&1 && \
+      { ok "Status server running on 18794"; break; }
+    sleep 1
+  done
+fi
+
+# ── Tailscale Serve ─────────────────────────────────────
+SERVE_OK=false
+if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
+  echo -e "  ${DIM}Connecting Tailscale Serve...${RESET}"
+  # Always run tailscale serve for gateway
+  tailscale serve --bg http://127.0.0.1:18789 >/dev/null 2>&1 || true
+  ok "Tailscale serve → gateway connected"
+  SERVE_OK=true
+
+  # Expose status server paths (include path in backend URL — Tailscale strips the prefix)
+  tailscale serve --bg --set-path /health http://127.0.0.1:18794/health >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /history http://127.0.0.1:18794/history >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /carapace http://127.0.0.1:18794/carapace >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /carapace/projects http://127.0.0.1:18794/projects >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /carapace/cron http://127.0.0.1:18794/cron >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /carapace/agents http://127.0.0.1:18794/agents >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /carapace/status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /carapace/history http://127.0.0.1:18794/history >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /sessions http://127.0.0.1:18794/sessions >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /carapace/sessions http://127.0.0.1:18794/sessions >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /projects http://127.0.0.1:18794/projects >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /cron http://127.0.0.1:18794/cron >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /agents http://127.0.0.1:18794/agents >/dev/null 2>&1 || true
+  tailscale serve --bg --set-path /status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
+  ok "Tailscale serve → status server paths"
+
+  # Verify HTTPS endpoint
+  if [[ -n "$TS_HOSTNAME" ]]; then
+    sleep 2
+    if curl -sf --max-time 5 "https://${TS_HOSTNAME}/health" >/dev/null 2>&1; then
+      ok "HTTPS verified: https://${TS_HOSTNAME}"
+    else
+      echo -e "  ${DIM}HTTPS endpoint may take a moment to propagate — this is normal${RESET}"
+    fi
+  fi
+fi
+
+# ── Tailscale serve persistence (survives reboot) ───
+if $SERVE_OK && have_cmd systemctl; then
+  cat > /etc/systemd/system/carapace-tailscale-serve.service << 'TSEOF'
+[Unit]
+Description=CARAPACE Tailscale Serve
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/sleep 5
+ExecStart=/usr/bin/tailscale serve --bg http://127.0.0.1:18789
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /health http://127.0.0.1:18794/health
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /history http://127.0.0.1:18794/history
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace http://127.0.0.1:18794/carapace
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/projects http://127.0.0.1:18794/projects
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/cron http://127.0.0.1:18794/cron
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/agents http://127.0.0.1:18794/agents
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/status http://127.0.0.1:18794/status
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/history http://127.0.0.1:18794/history
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /sessions http://127.0.0.1:18794/sessions
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/sessions http://127.0.0.1:18794/sessions
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /projects http://127.0.0.1:18794/projects
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /cron http://127.0.0.1:18794/cron
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /agents http://127.0.0.1:18794/agents
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /status http://127.0.0.1:18794/status
+
+[Install]
+WantedBy=multi-user.target
+TSEOF
+  systemctl daemon-reload
+  systemctl enable carapace-tailscale-serve >/dev/null 2>&1
+  ok "Tailscale serve persistence enabled"
+fi
+
+# ── Tracker sync cron ───────────────────────────────────
+bash ~/.carapace/sync-trackers.sh 2>/dev/null || true
+SYNC_CRON="*/2 * * * * bash $HOME/.carapace/sync-trackers.sh >/dev/null 2>&1"
+( crontab -l 2>/dev/null | grep -v "sync-trackers" || true; echo "$SYNC_CRON" ) | sort -u | crontab -
+ok "Tracker sync running every 2 minutes"
+
+# ══════════════════════════════════════════════════════════
+# Step 7: Helper Commands
+# ══════════════════════════════════════════════════════════
+step "Helper Commands"
+
+# Ensure qrencode is installed
+if ! have_cmd qrencode; then
+  if have_cmd apt-get; then
+    $SUDO apt-get install -y qrencode >/dev/null 2>&1 || true
+  elif have_cmd dnf; then
+    $SUDO dnf install -y qrencode >/dev/null 2>&1 || true
+  fi
+fi
+have_cmd qrencode && ok "qrencode ready" || true
+
+# carapace-qr command
+cat > /usr/local/bin/carapace-qr << 'QRCMD'
+#!/usr/bin/env bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+for _d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$_d" ] && export PATH="$_d:$PATH"; done
+export PATH="$HOME/.npm-global/bin:$PATH"
+TOKEN=$(python3 -c "import json,os; c=json.load(open(os.path.expanduser('~/.openclaw/openclaw.json'))); print(c.get('gateway',{}).get('auth',{}).get('token',''))" 2>/dev/null)
+TS=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null)
+[[ -n "$TS" ]] && GW="https://$TS" || GW="http://$(hostname -I 2>/dev/null | awk '{print $1}' || ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v 127.0.0.1 | head -1 || echo '127.0.0.1'):18789"
+ENC_GW=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$GW")
+ENC_TOKEN=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$TOKEN")
+# Optional Gemini key — fold into pair URL so Vision mode is ready immediately
+# post-pair. iOS SettingsManager picks it up and writes to Keychain on import.
+GEMINI_PARAM=""
+if [[ -n "${GEMINI_API_KEY:-}" ]]; then
+  ENC_GEMINI=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$GEMINI_API_KEY")
+  GEMINI_PARAM="&geminiAPIKey=${ENC_GEMINI}"
+fi
+LINK="carapace://config?gatewayBaseURL=${ENC_GW}&token=${ENC_TOKEN}${GEMINI_PARAM}"
+echo ""
+echo "  Gateway: $GW"
+echo "  Token:   ${TOKEN:0:16}..."
+echo ""
+if ! command -v qrencode >/dev/null 2>&1; then
+  apt-get install -y qrencode >/dev/null 2>&1 || true
+fi
+if command -v qrencode >/dev/null 2>&1; then
+  echo "  Scan with CARAPACE iOS app:"
+  echo ""
+  qrencode -t ANSIUTF8 -m 2 "$LINK"
+else
+  echo "  Pair URL: $LINK"
+fi
+echo ""
+QRCMD
+chmod +x /usr/local/bin/carapace-qr
+ok "carapace-qr command installed"
+
+# carapace-onboard wrapper (runs openclaw onboard, then restarts system service)
+cat > /usr/local/bin/carapace-onboard << 'ONBOARDCMD'
+#!/usr/bin/env bash
+# Silence nvm/npmrc conflict warning
+sed -i '/^prefix=/d' "$HOME/.npmrc" 2>/dev/null || true
+sed -i '/^globalconfig=/d' "$HOME/.npmrc" 2>/dev/null || true
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+for _d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$_d" ] && export PATH="$_d:$PATH"; done
+# Also add npm-global bin where openclaw is installed
+export PATH="$HOME/.npm-global/bin:$PATH"
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+# Run onboard with stderr suppressed to hide cosmetic TypeErrors from openclaw
+openclaw onboard "$@" 2>/dev/null
+ONBOARD_EXIT=$?
+# Onboard installs a user service that may conflict — clean it up
+systemctl --user stop openclaw-gateway 2>/dev/null || true
+systemctl --user disable openclaw-gateway 2>/dev/null || true
+rm -f "$HOME/.config/systemd/user/openclaw-gateway.service" 2>/dev/null
+systemctl daemon-reload 2>/dev/null
+# Let config flush to disk before restarting
+sleep 2
+systemctl restart openclaw-gateway 2>/dev/null
+# Wait for gateway health endpoint
+for _gw_wait in $(seq 1 15); do
+  curl -s --max-time 1 http://127.0.0.1:18789/health >/dev/null 2>&1 && break
+  sleep 1
+done
+# Gateway health passes before model is fully loaded — wait for full init
+sleep 5
+echo ""
+# Verify model was configured by onboard — set default if missing
+MODEL=$(openclaw config get agents.defaults.model 2>/dev/null | head -1 | tr -d '"{ ')
+if [ -n "$MODEL" ] && [ "$MODEL" != "null" ]; then
+  echo "  ✓ Gateway running with model: $MODEL"
+else
+  echo "  Setting default model: google/gemini-2.5-flash"
+  openclaw config set agents.defaults.model google/gemini-2.5-flash 2>/dev/null || true
+  echo "  ✓ Default model set: google/gemini-2.5-flash"
+fi
+
+# Validate auth-profiles format (must have type field, key not apiKey)
+AUTH_FILE="$HOME/.openclaw/agents/main/agent/auth-profiles.json"
+if [ -f "$AUTH_FILE" ]; then
+  python3 -c "
+import json, sys, os
+fp = os.path.expanduser('~/.openclaw/agents/main/agent/auth-profiles.json')
+try:
+    d = json.load(open(fp))
+    changed = False
+    profiles = d.get('profiles', {})
+    for k, v in profiles.items():
+        # Fix apiKey -> key
+        if 'apiKey' in v and 'key' not in v:
+            v['key'] = v.pop('apiKey')
+            changed = True
+        # Add missing type field
+        if 'type' not in v:
+            v['type'] = 'api_key'
+            changed = True
+        # Add missing provider field
+        if 'provider' not in v and ':' in k:
+            v['provider'] = k.split(':')[0]
+            changed = True
+    # Ensure version field
+    if 'version' not in d:
+        d['version'] = 1
+        changed = True
+    if changed:
+        json.dump(d, open(fp, 'w'))
+        print('  Fixed auth-profiles format')
+except:
+    pass
+" 2>/dev/null || true
+fi
+
+# Restart gateway to pick up any auth-profiles changes
+sleep 1
+systemctl restart openclaw-gateway 2>/dev/null || openclaw gateway restart 2>/dev/null || true
+for _gw_wait2 in $(seq 1 10); do
+  curl -s --max-time 1 http://127.0.0.1:18789/health >/dev/null 2>&1 && break
+  sleep 1
+done
+ONBOARDCMD
+chmod +x /usr/local/bin/carapace-onboard
+ok "carapace-onboard command installed"
+
+# ── Nightly maintenance cron ────────────────────────────
+# Resolve the real openclaw binary (npm-global takes precedence — nvm's node/bin
+# only contains node/npm/npx/corepack, NOT openclaw). Falls back through other
+# canonical install paths.
+OC_BIN=""
+for _candidate in "$HOME/.npm-global/bin/openclaw" "/usr/local/bin/openclaw" "/usr/bin/openclaw"; do
+  if [[ -x "$_candidate" ]]; then OC_BIN="$_candidate"; break; fi
+done
+if [[ -z "$OC_BIN" ]] && have_cmd openclaw; then
+  OC_BIN="$(command -v openclaw)"
+fi
+if [[ -z "$OC_BIN" ]]; then
+  warn "Could not resolve openclaw binary for nightly cron; skipping restart schedule."
+  CRON_LINE=""
+else
+  CRON_LINE="0 3 * * * export TZ=UTC; export NVM_DIR=\"\$HOME/.nvm\"; [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"; export PATH=\"\$HOME/.npm-global/bin:\$PATH\"; $OC_BIN gateway restart >/dev/null 2>&1"
+fi
+( crontab -l 2>/dev/null | grep -v 'openclaw gateway restart' | grep -v 'sync-trackers' || true; echo "$SYNC_CRON"; echo "$CRON_LINE" ) | crontab -
+ok "Nightly gateway restart scheduled (3am UTC)"
+
+# Reload shell profile
+if [[ -f /etc/profile.d/openclaw.sh ]]; then
+  source /etc/profile.d/openclaw.sh 2>/dev/null || true
+fi
+
+# ══════════════════════════════════════════════════════════
+# Final Health Check
+# ══════════════════════════════════════════════════════════
+step "Health Check"
+echo -e "  ${DIM}Running final health checks...${RESET}"
+FINAL_GW=false
+FINAL_STATUS=false
+if curl -sf --max-time 5 http://127.0.0.1:18789/health >/dev/null 2>&1; then
+  FINAL_GW=true
+  ok "Gateway health check passed"
+else
+  warn "Gateway health check failed — check: systemctl status openclaw-gateway"
+fi
+if curl -sf --max-time 5 http://127.0.0.1:18794/health >/dev/null 2>&1; then
+  FINAL_STATUS=true
+  ok "Status server health check passed"
+else
+  warn "Status server health check failed — check: systemctl status carapace-status"
+fi
+
+# ══════════════════════════════════════════════════════════
+# Step 9: Configure Your AI (auto-onboard) — skip if user chose to skip OpenClaw setup
+# ══════════════════════════════════════════════════════════
+if ! $SKIP_OPENCLAW_SETUP; then
+step "Configure Your AI"
+
+export PATH="$HOME/.npm-global/bin:$PATH"
+
+AUTH_FILE="$HOME/.openclaw/agents/main/agent/auth-profiles.json"
+CONFIG_FILE="$HOME/.openclaw/openclaw.json"
+
+# Already configured? Skip.
+if [[ -s "$AUTH_FILE" ]] && python3 -c "
+import json, sys
+try:
+  d = json.load(open(sys.argv[1]))
+  sys.exit(0 if d.get('profiles') else 1)
+except: sys.exit(1)
+" "$AUTH_FILE" 2>/dev/null; then
+  ok "AI already configured — skipping"
+elif [[ -n "${GEMINI_API_KEY:-}" ]]; then
+  # ── One-shot install path: env-var Gemini key configures BOTH sides ──
+  # `GEMINI_API_KEY=AIzaSy... curl | bash` should zero-interaction
+  # provision OpenClaw with Gemini as the chat provider AND bake the
+  # same key into the iOS pair URL as the Vision key. Skip the
+  # interactive provider picker entirely; user already made their
+  # choice by setting the env var.
+  echo -e "  ${DIM}GEMINI_API_KEY detected — auto-configuring OpenClaw with Gemini...${RESET}"
+  PROVIDER="google"
+  MODEL="google/gemini-2.5-flash"
+  API_KEY="$GEMINI_API_KEY"
+  # Validate the key once here — cheaper than baking it in and
+  # finding out later the model probe fails.
+  VAL_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 \
+    "https://generativelanguage.googleapis.com/v1beta/models?key=$API_KEY" 2>/dev/null)
+  if [[ "$VAL_CODE" != "200" ]]; then
+    warn "GEMINI_API_KEY was rejected by Google AI Studio (HTTP $VAL_CODE)."
+    echo -e "  ${DIM}  Check the key at: https://aistudio.google.com/apikey${RESET}"
+    echo -e "  ${DIM}  Falling through to interactive setup.${RESET}"
+    unset API_KEY
+  fi
+  if [[ -n "${API_KEY:-}" ]]; then
+    mkdir -p "$(dirname "$AUTH_FILE")"
+    python3 <<PYEOF
+import json, os
+fp = os.path.expanduser('$AUTH_FILE')
+try: d = json.load(open(fp))
+except Exception: d = {'version': 1, 'profiles': {}}
+d.setdefault('profiles', {})['$PROVIDER:default'] = {
+  'type': 'api_key', 'provider': '$PROVIDER', 'key': '$API_KEY'
+}
+if 'version' not in d: d['version'] = 1
+json.dump(d, open(fp, 'w'))
+PYEOF
+    chmod 600 "$AUTH_FILE"
+    python3 <<PYEOF
+import json, os
+fp = os.path.expanduser('$CONFIG_FILE')
+try: cfg = json.load(open(fp))
+except Exception: cfg = {}
+cfg.setdefault('agents', {}).setdefault('defaults', {})['model'] = {'primary': '$MODEL'}
+json.dump(cfg, open(fp, 'w'), indent=2)
+PYEOF
+    systemctl restart openclaw-gateway 2>/dev/null || true
+    for _w in $(seq 1 10); do
+      curl -sf --max-time 1 http://127.0.0.1:18789/health >/dev/null 2>&1 && break
+      sleep 1
+    done
+    ok "OpenClaw auto-configured with Gemini — chat + Vision share one key"
+  fi
+fi
+
+# Interactive picker — only if we didn't already configure via env var
+if [[ ! -s "$AUTH_FILE" ]] || ! python3 -c "
+import json, sys
+try:
+  d = json.load(open(sys.argv[1]))
+  sys.exit(0 if d.get('profiles') else 1)
+except: sys.exit(1)
+" "$AUTH_FILE" 2>/dev/null; then
+  echo ""
+  echo -e "  ${BOLD}Pick your AI provider:${RESET}"
+  echo -e "    ${DIM}1)${RESET} Google Gemini    ${DIM}(free tier, recommended)${RESET}"
+  echo -e "    ${DIM}2)${RESET} OpenAI Codex     ${DIM}(ChatGPT OAuth — Plus/Pro subscription)${RESET}"
+  echo -e "    ${DIM}3)${RESET} Anthropic Claude ${DIM}(API key — pay-as-you-go)${RESET}"
+  echo -e "    ${DIM}4)${RESET} OpenAI API       ${DIM}(API key — pay-as-you-go)${RESET}"
+  echo -e "    ${DIM}5)${RESET} xAI Grok         ${DIM}(API key — pay-as-you-go)${RESET}"
+  echo -e "    ${DIM}6)${RESET} Skip             ${DIM}(I'll do this myself later)${RESET}"
+  echo ""
+  PROV_CHOICE=""
+  if [ -t 0 ]; then
+    read -rp "  Choice [1]: " PROV_CHOICE
+  else
+    read -rp "  Choice [1]: " PROV_CHOICE < /dev/tty || PROV_CHOICE="1"
+  fi
+  PROV_CHOICE="${PROV_CHOICE:-1}"
+
+  # Default models: picked for safe / cheap / stable.
+  # - Haiku over Sonnet/Opus (cheapest Claude tier, dated stable rev)
+  # - gpt-5-mini over gpt-5 (much cheaper, same family)
+  # - openai-codex/gpt-5.4 (the model OpenClaw itself recommends for
+  #   ChatGPT OAuth — capability-list publishes more variants like
+  #   gpt-5.2-codex but OpenAI's server-side gate rejects them for
+  #   ChatGPT accounts with "model not supported when using Codex
+  #   with a ChatGPT account".)
+  # - grok-4-fast (fast/cheap tier of flagship family, big context)
+  # Users can always switch later via `openclaw onboard` or the dashboard.
+  SKIP_AI=false
+  case "$PROV_CHOICE" in
+    2) PROVIDER="openai-codex"; MODEL="openai-codex/gpt-5.4";         KEY_HINT="(OAuth — no key needed)" ;;
+    3) PROVIDER="anthropic";    MODEL="anthropic/claude-haiku-4-5";   KEY_HINT="sk-ant-..." ;;
+    4) PROVIDER="openai";       MODEL="openai/gpt-5-mini";            KEY_HINT="sk-..." ;;
+    5) PROVIDER="xai";          MODEL="xai/grok-4-fast";              KEY_HINT="xai-..." ;;
+    6) SKIP_AI=true ;;
+    *) PROVIDER="google";       MODEL="google/gemini-2.5-flash";      KEY_HINT="AIza..." ;;
+  esac
+
+  if $SKIP_AI; then
+    echo ""
+    warn "Skipping AI provider setup."
+    warn "OpenClaw will fall back to OpenAI defaults until you configure a provider."
+    warn "Run 'carapace-onboard' later to pick a provider and paste your key."
+  fi
+
+  # Codex uses ChatGPT OAuth, not an API key. We invoke the direct
+  # non-TUI login command `openclaw capability model auth login`, which
+  # prints the OAuth URL to stdout. Setting BROWSER=echo prevents any
+  # auto-open attempt from swallowing it — on headless boxes xdg-open
+  # would fail silently; `echo` just reprints it.
+  #
+  # `capability model auth login` checks isatty(stdin) and refuses to
+  # run if false. Under `curl | bash`, stdin is the pipe from curl, so
+  # we must redirect its stdin/stdout/stderr to /dev/tty to give it a
+  # real TTY. Same pattern as the `read < /dev/tty` prompts elsewhere.
+  IS_CODEX=false
+  if ! $SKIP_AI && [ "$PROVIDER" = "openai-codex" ]; then
+    IS_CODEX=true
+    echo ""
+    echo -e "  ${BOLD}Codex uses ChatGPT OAuth.${RESET}"
+    echo -e "  ${DIM}An auth URL will print below. Open it on any device with a browser,${RESET}"
+    echo -e "  ${DIM}sign in with your ChatGPT Plus/Pro account, and approve. Control${RESET}"
+    echo -e "  ${DIM}returns here automatically when auth completes.${RESET}"
+    echo ""
+    if [ -e /dev/tty ]; then
+      BROWSER=echo openclaw capability model auth login --provider openai-codex < /dev/tty > /dev/tty 2>&1
+      CODEX_EXIT=$?
+    else
+      # No controlling terminal (e.g. some cloud-init contexts). Defer.
+      CODEX_EXIT=1
+    fi
+    if [ "$CODEX_EXIT" = "0" ]; then
+      # OAuth succeeded. Set the default model AFTER OAuth — the auth
+      # login command overwrites openclaw.json, so any prior write would
+      # be clobbered. Writing it here avoids orphaning a model default
+      # if OAuth fails (and before a valid auth profile exists).
+      python3 <<PYEOF
+import json, os
+fp = os.path.expanduser('$CONFIG_FILE')
+try: cfg = json.load(open(fp))
+except Exception: cfg = {}
+cfg.setdefault('agents', {}).setdefault('defaults', {})['model'] = {'primary': '$MODEL'}
+json.dump(cfg, open(fp, 'w'), indent=2)
+PYEOF
+      systemctl restart openclaw-gateway 2>/dev/null || true
+      for _w in $(seq 1 10); do
+        curl -sf --max-time 1 http://127.0.0.1:18789/health >/dev/null 2>&1 && break
+        sleep 1
+      done
+      ok "OpenAI Codex configured via ChatGPT OAuth ($MODEL)"
+      CODEX_OAUTH_NEEDED=false
+    else
+      warn "Codex OAuth didn't complete. Run 'openclaw capability model auth login --provider openai-codex' manually."
+      CODEX_OAUTH_NEEDED=true
+    fi
+  fi
+
+  # API-key-paste branch — all providers EXCEPT Codex (and only if not skipped).
+  if ! $IS_CODEX && ! $SKIP_AI; then
+
+  echo ""
+  echo -e "  ${BOLD}Paste your ${PROVIDER} API key${RESET} ${DIM}(${KEY_HINT})${RESET}"
+  echo -e "  ${DIM}(each character echoes as * — paste + press Enter)${RESET}"
+  API_KEY=""
+  # Char-by-char read so the user gets visual feedback on paste. Without
+  # this, `read -s` is completely silent and users legitimately can't
+  # tell whether their paste landed. Echo '*' per character, handle
+  # backspace/delete, handle Enter as submit.
+  read_masked() {
+    local prompt="$1" input="" char
+    local tty_src="${2:-}"
+    printf "%b" "$prompt"
+    while true; do
+      if [[ -n "$tty_src" ]]; then
+        IFS= read -rs -n1 char < "$tty_src" || break
+      else
+        IFS= read -rs -n1 char || break
+      fi
+      if [[ -z "$char" ]]; then
+        # Empty read = Enter pressed (or EOF)
+        echo
+        break
+      elif [[ "$char" == $'\177' || "$char" == $'\b' ]]; then
+        # Backspace / delete
+        if [[ -n "$input" ]]; then
+          input="${input%?}"
+          printf '\b \b'
+        fi
+      else
+        input+="$char"
+        printf '*'
+      fi
+    done
+    API_KEY="$input"
+  }
+  # Read the key, show a masked preview, let the user confirm or re-enter.
+  # One bad paste shouldn't mean re-running the whole installer — loop here
+  # until they say the masked preview looks right (or submit blank to skip).
+  while true; do
+    API_KEY=""
+    if [ -t 0 ]; then
+      read_masked "  Key: "
+    else
+      read_masked "  Key: " /dev/tty
+    fi
+
+    # Blank submission = bailing out. Don't keep re-prompting.
+    [ -z "$API_KEY" ] && break
+
+    # Masked preview: first 6 + ••• + last 4.
+    KEY_LEN=${#API_KEY}
+    if [[ $KEY_LEN -gt 10 ]]; then
+      MASKED="${API_KEY:0:6}•••${API_KEY: -4}"
+    else
+      MASKED="(${KEY_LEN} chars)"
+    fi
+    echo -e "  ${DIM}  → captured: ${MASKED}${RESET}"
+
+    # Prefix sanity check — KEY_HINT looks like "AIza..." / "sk-ant-..." /
+    # "sk-..." / "xai-...". If the paste doesn't match, flag it loudly so
+    # they catch typos or wrong-provider paste before we commit to disk.
+    EXPECTED_PREFIX="${KEY_HINT%...}"
+    EXPECTED_PREFIX="${EXPECTED_PREFIX// /}"
+    if [[ -n "$EXPECTED_PREFIX" && "$EXPECTED_PREFIX" != "(OAuth"* && "$API_KEY" != "$EXPECTED_PREFIX"* ]]; then
+      echo -e "  ${YELLOW}⚠  That doesn't start with '${EXPECTED_PREFIX}' — ${PROVIDER} keys usually do. Double-check.${RESET}"
+    fi
+
+    # Confirm. Default = yes (just press Enter). Anything else re-prompts.
+    CONFIRM=""
+    if [ -t 0 ]; then
+      read -rp "  Does that look right? [Y/n] " CONFIRM
+    else
+      read -rp "  Does that look right? [Y/n] " CONFIRM < /dev/tty || CONFIRM="y"
+    fi
+    case "${CONFIRM:-y}" in
+      [Yy]*) break ;;
+      *)     echo -e "  ${DIM}  OK — paste it again:${RESET}" ;;
+    esac
+  done
+
+  if [ -z "$API_KEY" ]; then
+    warn "No key entered. OpenClaw will fall back to OpenAI defaults —"
+    warn "you'll need to configure your ${PROVIDER} key later via 'carapace-onboard'."
+  else
+    mkdir -p "$(dirname "$AUTH_FILE")"
+    python3 <<PYEOF
+import json, os
+fp = os.path.expanduser('$AUTH_FILE')
+try:
+  d = json.load(open(fp))
+except Exception:
+  d = {'version': 1, 'profiles': {}}
+d.setdefault('profiles', {})['$PROVIDER:default'] = {
+  'type': 'api_key', 'provider': '$PROVIDER', 'key': '$API_KEY'
+}
+if 'version' not in d: d['version'] = 1
+json.dump(d, open(fp, 'w'))
+PYEOF
+    chmod 600 "$AUTH_FILE"
+
+    python3 <<PYEOF
+import json, os
+fp = os.path.expanduser('$CONFIG_FILE')
+try: cfg = json.load(open(fp))
+except Exception: cfg = {}
+cfg.setdefault('agents', {}).setdefault('defaults', {})['model'] = {'primary': '$MODEL'}
+json.dump(cfg, open(fp, 'w'), indent=2)
+PYEOF
+
+    systemctl restart openclaw-gateway 2>/dev/null || true
+    for _w in $(seq 1 10); do
+      curl -sf --max-time 1 http://127.0.0.1:18789/health >/dev/null 2>&1 && break
+      sleep 1
+    done
+    ok "AI configured: $MODEL"
+  fi
+  fi   # end IS_CODEX gate around the api-key-paste branch
+fi
+else
+  ok "OpenClaw already configured — skipping AI setup"
+fi  # end Step 9 skip block
+
+# ══════════════════════════════════════════════════════════
+# Step 10: Connect
+# ══════════════════════════════════════════════════════════
+step "Connect"
+
+# Wait for gateway + model to be fully ready before showing anything
+echo -e "  ${DIM}Waiting for gateway to be fully ready...${RESET}"
+for _tw in $(seq 1 20); do
+  curl -s --max-time 2 http://127.0.0.1:18789/health >/dev/null 2>&1 && break
+  sleep 1
+done
+
+# Verify model can actually respond (not just health OK)
+TOKEN=$(python3 -c 'import json; print(json.load(open("'"$HOME"'/.openclaw/openclaw.json"))["gateway"]["auth"]["token"])' 2>/dev/null || echo "")
+if [ -n "$TOKEN" ]; then
+  # Snapshot the sessions.json BEFORE the probe so we can identify + delete
+  # any ghost session the probe creates. Without this cleanup, the
+  # "confirmed" checkpoint survives as a second session record that iOS
+  # can pick up during reconnect as a competing history feed.
+  SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
+  PROBE_SNAPSHOT_KEYS="/tmp/carapace-probe-keys-pre.txt"
+  if [[ -f "$SESSIONS_DIR/sessions.json" ]]; then
+    jq -r "keys[]" "$SESSIONS_DIR/sessions.json" 2>/dev/null | sort > "$PROBE_SNAPSHOT_KEYS"
+  else
+    : > "$PROBE_SNAPSHOT_KEYS"
+  fi
+  PROBE_SNAPSHOT_FILES=$(ls "$SESSIONS_DIR"/*.jsonl 2>/dev/null | sort || true)
+
+  # Skip the deterministic probe if user picked Codex — there's no auth yet
+  # (OAuth is completed by the user after install), so the probe would fail.
+  if [ "${CODEX_OAUTH_NEEDED:-false}" = "true" ]; then
+    echo -e "  ${DIM}Skipping AI probe (Codex OAuth not yet completed — see end of install).${RESET}"
+    ALIVE=true
+  else
+
+  echo -e "  ${DIM}Verifying AI is actually alive (deterministic probe)...${RESET}"
+  # Deterministic liveness check — the model must reply with the literal
+  # word "confirmed" (case-insensitive) and nothing else. A hung or
+  # misrouted agent can still return JSON with empty content, which is
+  # why the old "any response counts" check wasn't trustworthy. This
+  # forces the model to prove it's actually reading + following the
+  # prompt end-to-end.
+  ALIVE=false
+  for _mv in $(seq 1 20); do
+    RESPONSE=$(curl -s -X POST http://127.0.0.1:18789/v1/chat/completions \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"model":"openclaw","messages":[{"role":"user","content":"Respond with exactly the word confirmed and nothing else. No punctuation, no explanation, no formatting."}],"stream":false,"max_tokens":8}' \
+      --max-time 90 2>/dev/null)
+    # Extract the assistant content and normalize (lowercase, strip whitespace + punctuation)
+    CONTENT=$(echo "$RESPONSE" | python3 -c '
+import json, sys, re
+try:
+  d = json.load(sys.stdin)
+  c = d["choices"][0]["message"]["content"]
+  # Strip whitespace + punctuation, lowercase
+  print(re.sub(r"[^a-z]", "", c.lower()))
+except Exception:
+  print("")
+' 2>/dev/null)
+    if [ "$CONTENT" = "confirmed" ]; then
+      ok "AI verified — model replied 'confirmed' on demand"
+      ALIVE=true
+      break
+    fi
+    sleep 2
+  done
+  if ! $ALIVE; then
+    warn "AI probe did not return 'confirmed' — gateway is up but model may be misrouted."
+    echo -e "  ${DIM}  Debug: check ~/.openclaw/agents/main/auth-profiles.json + check 'openclaw gateway logs'${RESET}"
+  fi
+  fi  # end CODEX_OAUTH_NEEDED gate
+
+  # ── Clean up probe artifacts ──
+  # The probe created a session (to prove the gateway can actually route
+  # a chat turn end-to-end), but we don't want that artifact polluting
+  # the user's feed. Delete any session keys + jsonl files that appeared
+  # AFTER the pre-probe snapshot. We never touch agent:main:main — that
+  # stays intact even if the probe happened to write into it.
+  if [[ -f "$SESSIONS_DIR/sessions.json" ]]; then
+    CURRENT_KEYS=$(jq -r "keys[]" "$SESSIONS_DIR/sessions.json" 2>/dev/null | sort)
+    NEW_KEYS=$(comm -13 "$PROBE_SNAPSHOT_KEYS" <(echo "$CURRENT_KEYS") | grep -v "^agent:main:main$" || true)
+    if [[ -n "$NEW_KEYS" ]]; then
+      # Remove new keys from sessions.json (never touches agent:main:main)
+      python3 - <<PYEOF
+import json, os
+fp = os.path.expanduser('$SESSIONS_DIR/sessions.json')
+try:
+  d = json.load(open(fp))
+  to_drop = '''$NEW_KEYS'''.strip().splitlines()
+  for k in to_drop:
+    d.pop(k, None)
+  json.dump(d, open(fp, 'w'))
+except Exception as e:
+  pass
+PYEOF
+    fi
+    # Delete jsonl files that didn't exist before the probe AND aren't the
+    # file that sessions.json[agent:main:main] points at.
+    MAIN_FILE=$(jq -r '."agent:main:main".sessionFile // ("agent:main:main" | split(":")[0] + "/sessions/" + ."agent:main:main".sessionId + ".jsonl")' "$SESSIONS_DIR/sessions.json" 2>/dev/null | xargs -I{} basename "{}" 2>/dev/null || true)
+    CURRENT_FILES=$(ls "$SESSIONS_DIR"/*.jsonl 2>/dev/null | sort || true)
+    for f in $(comm -13 <(echo "$PROBE_SNAPSHOT_FILES") <(echo "$CURRENT_FILES") 2>/dev/null); do
+      name=$(basename "$f")
+      if [[ "$name" != "$MAIN_FILE" ]]; then
+        rm -f "$f"
+      fi
+    done
+  fi
+  rm -f "$PROBE_SNAPSHOT_KEYS"
+fi
+
+# ── Gemini Vision key resolution ────────────────────────
+# Rules (in priority order):
+#   1. If the user passed GEMINI_API_KEY as env var, use it (highest priority —
+#      explicit user intent).
+#   2. If OpenClaw's chat provider is already Gemini, REUSE that key for
+#      Vision automatically. No need to ask twice.
+#   3. Otherwise, if stdin is a terminal, prompt: "Want to add a free Gemini
+#      key for Vision mode? (y/n)". If yes, collect + validate against
+#      Google AI Studio's models endpoint.
+#   4. Unset → print a hint and leave Vision unconfigured. User can paste
+#      it in iOS Settings later.
+AUTH_FILE="$HOME/.openclaw/agents/main/agent/auth-profiles.json"
+if [[ -z "${GEMINI_API_KEY:-}" ]] && [[ -f "$AUTH_FILE" ]]; then
+  # Scan the configured provider list for a Gemini key. Keys shape:
+  #   profiles: { "google:<something>": { "key": "AIza...", "provider": "google", "type": "api_key" } }
+  AUTO_GEMINI_KEY=$(python3 -c "
+import json, sys
+try:
+  d = json.load(open('$AUTH_FILE'))
+  for k, v in (d.get('profiles') or {}).items():
+    prov = (v.get('provider') or k.split(':')[0]).lower()
+    if prov in ('google', 'gemini', 'google-ai', 'aistudio'):
+      key = v.get('key') or v.get('apiKey')
+      if key and key.startswith('AIzaSy'):
+        print(key); break
+except Exception:
+  pass
+" 2>/dev/null)
+  if [[ -n "$AUTO_GEMINI_KEY" ]]; then
+    export GEMINI_API_KEY="$AUTO_GEMINI_KEY"
+    ok "Gemini key from OpenClaw provider config — reusing for Vision mode"
+  fi
+fi
+
+# Validate any Gemini key we have (env var OR auto-detected) by hitting
+# Google's models endpoint. If the call fails, null out the key so we
+# don't bake a broken one into the pair URL.
+validate_gemini_key() {
+  local key="$1"
+  [[ -z "$key" ]] && return 1
+  local code
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 \
+    "https://generativelanguage.googleapis.com/v1beta/models?key=$key" 2>/dev/null)
+  [[ "$code" = "200" ]]
+}
+
+if [[ -n "${GEMINI_API_KEY:-}" ]]; then
+  echo -e "  ${DIM}Validating Gemini API key...${RESET}"
+  if validate_gemini_key "$GEMINI_API_KEY"; then
+    ok "Gemini key validated — Vision mode ready"
+  else
+    warn "Gemini key rejected by Google AI Studio. Unsetting — Vision will be unconfigured."
+    echo -e "  ${DIM}  Get a free valid key at: https://aistudio.google.com/apikey${RESET}"
+    unset GEMINI_API_KEY
+  fi
+fi
+
+# Interactive prompt ONLY when stdin is a TTY AND we still don't have a
+# key. curl-piped installs (no terminal) skip this branch cleanly.
+if [[ -z "${GEMINI_API_KEY:-}" ]] && { [ -t 0 ] || [ -e /dev/tty ]; }; then
+  echo ""
+  echo -e "  ${TEAL}Add a free Gemini API key for Vision mode (camera + live visual AI)?${RESET}"
+  echo -e "  ${DIM}Free at: https://aistudio.google.com/apikey — or skip and add later in iOS Settings${RESET}"
+  if [ -t 0 ]; then
+    read -rp "  Paste key (blank to skip): " _gemini_in
+  else
+    read -rp "  Paste key (blank to skip): " _gemini_in < /dev/tty || _gemini_in=""
+  fi
+  if [[ -n "$_gemini_in" ]]; then
+    # Trim whitespace + validate
+    _gemini_in="$(echo "$_gemini_in" | tr -d '[:space:]')"
+    if validate_gemini_key "$_gemini_in"; then
+      export GEMINI_API_KEY="$_gemini_in"
+      ok "Gemini key validated — Vision mode ready"
+    else
+      warn "That key was rejected by Google. Skipping Vision setup."
+      echo -e "  ${DIM}  Double-check at: https://aistudio.google.com/apikey${RESET}"
+    fi
+  fi
+fi
+
+echo ""
+echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
+echo -e "  ${GREEN}${BOLD}  ✓ CARAPACE is ready!${RESET}"
+echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
+echo ""
+
+# Always show QR code first — this is the primary way to connect
+echo -e "  ${TEAL}${BOLD}Scan this QR code with the CARAPACE iOS app to connect:${RESET}"
+echo ""
+carapace-qr 2>/dev/null || {
+  # Fallback: build QR inline if carapace-qr not available
+  TS=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null)
+  [[ -n "$TS" ]] && GW="https://$TS" || GW="http://127.0.0.1:18789"
+  ENC_GW=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$GW")
+  ENC_TOKEN=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$TOKEN")
+  GEMINI_PARAM=""
+  if [[ -n "${GEMINI_API_KEY:-}" ]]; then
+    ENC_GEMINI=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$GEMINI_API_KEY")
+    GEMINI_PARAM="&geminiAPIKey=${ENC_GEMINI}"
+  fi
+  LINK="carapace://config?gatewayBaseURL=${ENC_GW}&token=${ENC_TOKEN}${GEMINI_PARAM}"
+  echo "  Gateway: $GW"
+  echo "  Token:   ${TOKEN:0:16}..."
+  echo ""
+  if have_cmd qrencode; then
+    qrencode -t ANSIUTF8 -m 2 "$LINK"
+  else
+    echo "  Pair URL: $LINK"
+  fi
+}
+
+echo ""
+echo -e "  ${DIM}Download CARAPACE for iPhone: https://apps.apple.com/us/app/carapace/id6760282881${RESET}"
+echo ""
+
+# Vision mode requires a separate Gemini key. If the user didn't pass one
+# via env var, point them to where to get one so Vision isn't a dead tile.
+if [[ -z "${GEMINI_API_KEY:-}" ]]; then
+  echo -e "  ${DIM}💡 Vision mode (camera + Gemini Live) needs a free Gemini API key.${RESET}"
+  echo -e "  ${DIM}   Get one at: https://aistudio.google.com/apikey${RESET}"
+  echo -e "  ${DIM}   Re-run with: GEMINI_API_KEY=<key> curl -fsSL https://carapace.info/install.sh | bash${RESET}"
+  echo -e "  ${DIM}   Or paste it in Carapace iOS → Settings → Gemini API Key.${RESET}"
+  echo ""
+else
+  echo -e "  ${GREEN}✓ Gemini API key baked into the pair URL — Vision mode ready.${RESET}"
+  echo ""
+fi
+
+echo -e "  ${BOLD}Other options:${RESET}"
+echo -e "    ${BOLD}openclaw tui${RESET}    — Terminal chat interface"
+echo -e "    ${BOLD}carapace-qr${RESET}     — Show this QR code again"
+echo -e "    ${BOLD}carapace-onboard${RESET} — Re-run AI setup"
+echo ""
+echo -e "  ${DIM}Full install log: ${LOGFILE}${RESET}"
+echo ""
+
+# ── Codex OAuth fallback ──
+# If the inline `capability model auth login` above didn't complete,
+# just tell the user the exact command to re-run. No TUI hand-off — the
+# direct command already prints the OAuth URL to stdout.
+if [ "${CODEX_OAUTH_NEEDED:-false}" = "true" ]; then
+  echo -e "  ${YELLOW}${BOLD}⚠ Codex OAuth not yet completed${RESET}"
+  echo -e "  ${DIM}Run this command — it prints the OAuth URL to the terminal:${RESET}"
+  echo ""
+  echo -e "    ${BOLD}BROWSER=echo openclaw capability model auth login --provider openai-codex${RESET}"
+  echo ""
+  echo -e "  ${DIM}Open the URL on any device with a browser, sign in with your${RESET}"
+  echo -e "  ${DIM}ChatGPT Plus/Pro account, and approve. Then scan the QR above.${RESET}"
+  echo ""
+fi
+
+# Offer TUI launch as optional
+if [ -t 0 ] || [ -e /dev/tty ]; then
+  echo -e "  ${TEAL}Want to also launch the terminal chat? [y/N]${RESET}"
+  if [ -t 0 ]; then
+    read -rp "  " LAUNCH_TUI
+  else
+    read -rp "  " LAUNCH_TUI < /dev/tty || LAUNCH_TUI="n"
+  fi
+  case "$LAUNCH_TUI" in
+    [yY]*)
+      echo ""
+      if [ -t 0 ]; then
+        exec openclaw tui
+      else
+        exec openclaw tui < /dev/tty
+      fi
+      ;;
+  esac
+fi
