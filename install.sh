@@ -778,7 +778,21 @@ else
   # Otherwise it rotates the token and breaks any already-paired iOS apps
   # (classic 401 after re-run bug).
   if ! jq -e '.gateway.auth.token != null and .gateway.auth.token != ""' "$HOME/.openclaw/openclaw.json" >/dev/null 2>&1; then
-    timeout 30 openclaw gateway install >/dev/null 2>&1 || true
+    timeout 30 openclaw gateway install >> "$LOGFILE" 2>&1 || true
+    # Verify the token actually got written. Observed on fresh Rocky 9
+    # cloud images that `openclaw gateway install` can succeed-ish (exit 0)
+    # without writing gateway.auth.token, which silently produces a pair
+    # URL with &token= (empty). Retry once, then warn loudly if still
+    # missing so the user isn't left wondering why iOS can't pair.
+    if ! jq -e '.gateway.auth.token != null and .gateway.auth.token != ""' "$HOME/.openclaw/openclaw.json" >/dev/null 2>&1; then
+      sleep 2
+      timeout 30 openclaw gateway install >> "$LOGFILE" 2>&1 || true
+      if ! jq -e '.gateway.auth.token != null and .gateway.auth.token != ""' "$HOME/.openclaw/openclaw.json" >/dev/null 2>&1; then
+        warn "Gateway auth token did not get written to openclaw.json."
+        warn "Pair URL will be incomplete — iOS won't be able to connect until this is fixed."
+        warn "After install finishes, run: openclaw gateway install && carapace-qr"
+      fi
+    fi
   fi
   timeout 15 openclaw gateway start >/dev/null 2>&1 || true
 fi
@@ -1608,6 +1622,15 @@ done
 
 # Verify model can actually respond (not just health OK)
 TOKEN=$(python3 -c 'import json; print(json.load(open("'"$HOME"'/.openclaw/openclaw.json"))["gateway"]["auth"]["token"])' 2>/dev/null || echo "")
+# Final token-recovery attempt. If we still have no token here, the pair
+# URL will end up with an empty &token= field and iOS can't connect. Try
+# one more gateway install now that everything else is up and retry the
+# read. This is idempotent — if a token already exists in another path
+# we haven't noticed, the install is a no-op.
+if [ -z "$TOKEN" ]; then
+  timeout 30 openclaw gateway install >> "$LOGFILE" 2>&1 || true
+  TOKEN=$(python3 -c 'import json; print(json.load(open("'"$HOME"'/.openclaw/openclaw.json"))["gateway"]["auth"]["token"])' 2>/dev/null || echo "")
+fi
 if [ -n "$TOKEN" ]; then
   # Snapshot the sessions.json BEFORE the probe so we can identify + delete
   # any ghost session the probe creates. Without this cleanup, the
@@ -1868,6 +1891,16 @@ if [ -t 0 ] || [ -e /dev/tty ]; then
   case "$LAUNCH_TUI" in
     [yY]*)
       echo ""
+      # Re-source nvm + pin the PATH order so openclaw resolves to the
+      # Node version we just installed. Observed on Rocky 9: the base
+      # repos ship Node 16 (v16.20.2), which openclaw rejects (requires
+      # v22.12+). Without this, `exec openclaw tui` can land on the
+      # system node. The carapace-qr / carapace-onboard wrappers do the
+      # same thing — match them here.
+      export NVM_DIR="$HOME/.nvm"
+      [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+      for _d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$_d" ] && export PATH="$_d:$PATH"; done
+      export PATH="$HOME/.npm-global/bin:$PATH"
       if [ -t 0 ]; then
         exec openclaw tui
       else
