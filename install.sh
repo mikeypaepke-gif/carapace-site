@@ -327,8 +327,10 @@ if [[ -n "$OC_EXISTING" ]] && curl -sf --max-time 3 http://127.0.0.1:18789/healt
 
   if [ -t 0 ]; then
     read -rp "  Skip to support tools? [Y/n]: " SKIP_CHOICE
-  else
+  elif [ -e /dev/tty ]; then
     read -rp "  Skip to support tools? [Y/n]: " SKIP_CHOICE < /dev/tty || SKIP_CHOICE="y"
+  else
+    SKIP_CHOICE="y"  # No TTY anywhere (ssh -T, ansible, CI) — default yes, skip silently
   fi
 
   case "$SKIP_CHOICE" in
@@ -350,8 +352,10 @@ if [[ -n "$OC_EXISTING" ]] && curl -sf --max-time 3 http://127.0.0.1:18789/healt
       echo ""
       if [ -t 0 ]; then
         read -rp "  Type 'yes' to overwrite, anything else to go back: " CONFIRM_OVERWRITE
-      else
+      elif [ -e /dev/tty ]; then
         read -rp "  Type 'yes' to overwrite, anything else to go back: " CONFIRM_OVERWRITE < /dev/tty || CONFIRM_OVERWRITE=""
+      else
+        CONFIRM_OVERWRITE=""  # No TTY — treat as "don't overwrite" (safer default)
       fi
       case "$CONFIRM_OVERWRITE" in
         [yY][eE][sS])
@@ -1415,8 +1419,10 @@ except: sys.exit(1)
   PROV_CHOICE=""
   if [ -t 0 ]; then
     read -rp "  Choice [1]: " PROV_CHOICE
+  elif [ -e /dev/tty ]; then
+    read -rp "  Choice [1]: " PROV_CHOICE < /dev/tty || PROV_CHOICE="6"
   else
-    read -rp "  Choice [1]: " PROV_CHOICE < /dev/tty || PROV_CHOICE="1"
+    PROV_CHOICE="6"  # No TTY — default to Skip instead of Gemini (no way to paste a key)
   fi
   PROV_CHOICE="${PROV_CHOICE:-1}"
 
@@ -1542,9 +1548,13 @@ PYEOF
   # until they say the masked preview looks right (or submit blank to skip).
   while true; do
     API_KEY=""
+    # If neither stdin nor /dev/tty is available (pure-piped `cat | bash`
+    # with no allocated TTY), skip the masked read entirely. API_KEY stays
+    # empty and the "No key entered" branch below handles it cleanly —
+    # without printing "/dev/tty: No such device" errors from the redirect.
     if [ -t 0 ]; then
       read_masked "  Key: "
-    else
+    elif [ -e /dev/tty ]; then
       read_masked "  Key: " /dev/tty
     fi
 
@@ -1573,8 +1583,10 @@ PYEOF
     CONFIRM=""
     if [ -t 0 ]; then
       read -rp "  Does that look right? [Y/n] " CONFIRM
-    else
+    elif [ -e /dev/tty ]; then
       read -rp "  Does that look right? [Y/n] " CONFIRM < /dev/tty || CONFIRM="y"
+    else
+      CONFIRM="y"  # No TTY — auto-confirm whatever was piped (else the loop would spin)
     fi
     case "${CONFIRM:-y}" in
       [Yy]*) break ;;
