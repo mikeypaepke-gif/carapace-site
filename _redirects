@@ -5,6 +5,7 @@ https://carapace.pages.dev/* https://carapace.info/:splat 301
 # Old DMGs — redirect any lingering bookmarks to the current release.
 # We no longer host unsupported versions publicly; see the Releases
 # page on GitHub for historical changelogs.
-/Carapace-1.9.0.dmg /Carapace-1.9.4.dmg 301
-/Carapace-1.9.2.dmg /Carapace-1.9.4.dmg 301
-/Carapace-1.9.3.dmg /Carapace-1.9.4.dmg 301
+/Carapace-1.9.0.dmg /Carapace-1.9.5.dmg 301
+/Carapace-1.9.2.dmg /Carapace-1.9.5.dmg 301
+/Carapace-1.9.3.dmg /Carapace-1.9.5.dmg 301
+/Carapace-1.9.4.dmg /Carapace-1.9.5.dmg 301

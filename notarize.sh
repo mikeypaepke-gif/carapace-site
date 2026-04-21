@@ -104,7 +104,7 @@ if echo "$CODESIGN_OUT" | grep -q "code object is not signed at all"; then
     | grep "Developer ID Application" | head -1 \
     | sed -E 's/.*"(Developer ID Application: [^"]+)".*/\1/')
   if [[ -n "$IDENTITY" ]]; then
-    info "DMG was unsigned; auto-signing with: ${IDENTITY}"
+    step "DMG was unsigned; auto-signing with: ${IDENTITY}"
     codesign --force --sign "$IDENTITY" "$DMG" 2>&1 | sed 's/^/    /'
     CODESIGN_OUT=$(codesign -dv --verbose=4 "$DMG" 2>&1 || true)
   fi
