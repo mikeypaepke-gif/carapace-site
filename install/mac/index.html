@@ -153,40 +153,11 @@
     </div>
   </section>
 
-  <!-- STEP 2: APPROVE IN SYSTEM SETTINGS (Gatekeeper) -->
+  <!-- STEP 2: LOGIN -->
   <section class="py-12">
     <div class="max-w-4xl mx-auto px-6">
       <div class="flex items-center gap-4 mb-6">
         <div class="step-badge">2</div>
-        <div>
-          <h2 class="text-2xl font-bold tracking-tight">Approve it once in System Settings</h2>
-          <p class="text-sm text-white/40 mt-1">The app isn't yet notarized by Apple, so macOS Gatekeeper blocks it on first launch. Takes 20 seconds to clear.</p>
-        </div>
-      </div>
-
-      <div class="reveal glass rounded-2xl p-6 md:p-7 space-y-4">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-wider text-white/40 mb-3">When you see the "cannot be verified" dialog:</p>
-          <ol class="space-y-2.5 text-sm text-white/70 list-decimal list-inside">
-            <li>Click <span class="text-white font-medium">Done</span> on the dialog.</li>
-            <li>Open <span class="text-white font-medium">System Settings</span> → <span class="text-white font-medium">Privacy &amp; Security</span>.</li>
-            <li>Scroll down. You'll see "<em class="text-white/60">Carapace was blocked to protect your Mac.</em>"</li>
-            <li>Click <span class="text-white font-medium">Open Anyway</span>, authenticate with your Mac password.</li>
-            <li>Re-open Carapace — it launches normally from here on.</li>
-          </ol>
-        </div>
-        <div class="border-t border-white/[0.06] pt-4 text-xs text-white/35 leading-relaxed">
-          <span class="text-white/55 font-semibold">Why this happens:</span> Apple requires developers to submit apps for automated malware scanning ("notarization"). That's on the roadmap. Until then, the app is signed with a developer certificate but not notarized, so Gatekeeper asks for your one-time approval. Standard for open / indie Mac software.
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- STEP 3: LOGIN -->
-  <section class="py-12">
-    <div class="max-w-4xl mx-auto px-6">
-      <div class="flex items-center gap-4 mb-6">
-        <div class="step-badge">3</div>
         <div>
           <h2 class="text-2xl font-bold tracking-tight">Sign in</h2>
           <p class="text-sm text-white/40 mt-1">Email + password. Your account is what ties your Mac, your phone, and your VPS together.</p>
@@ -210,11 +181,11 @@
     </div>
   </section>
 
-  <!-- STEP 4: TAILSCALE -->
+  <!-- STEP 3: TAILSCALE -->
   <section class="py-12">
     <div class="max-w-4xl mx-auto px-6">
       <div class="flex items-center gap-4 mb-6">
-        <div class="step-badge">4</div>
+        <div class="step-badge">3</div>
         <div>
           <h2 class="text-2xl font-bold tracking-tight">Connect Tailscale</h2>
           <p class="text-sm text-white/40 mt-1">The wizard opens your browser, you approve, it comes back. That's it.</p>
@@ -241,11 +212,11 @@
     </div>
   </section>
 
-  <!-- STEP 5 (OPTIONAL): GEMINI FOR VISION -->
+  <!-- STEP 4 (OPTIONAL): GEMINI FOR VISION -->
   <section class="py-12">
     <div class="max-w-4xl mx-auto px-6">
       <div class="flex items-center gap-4 mb-6">
-        <div class="step-badge">5</div>
+        <div class="step-badge">4</div>
         <div>
           <h2 class="text-2xl font-bold tracking-tight">
             Gemini key for Vision

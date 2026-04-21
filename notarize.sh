@@ -62,7 +62,8 @@ ok "DMG: ${BOLD}${DMG}${RESET} ($(stat -f %z "$DMG" | awk '{printf "%.1f MB", $1
 # ──────────────────────────────────────────────────────────────────────
 command -v xcrun >/dev/null 2>&1 || die "xcrun not found. Install Xcode Command Line Tools: xcode-select --install"
 xcrun notarytool --version >/dev/null 2>&1 || die "notarytool not available. Update Xcode or CLI Tools (requires Xcode 13+)."
-xcrun stapler --help >/dev/null 2>&1 || die "stapler not available. Reinstall Xcode CLI Tools."
+# stapler has no --help at the top level; `xcrun -f` just resolves the path.
+xcrun -f stapler >/dev/null 2>&1 || die "stapler not available. Reinstall Xcode CLI Tools."
 ok "Xcode CLI Tools: notarytool + stapler present"
 
 # ──────────────────────────────────────────────────────────────────────
@@ -70,8 +71,10 @@ ok "Xcode CLI Tools: notarytool + stapler present"
 # ──────────────────────────────────────────────────────────────────────
 # notarytool doesn't have a dedicated "does this profile exist" command.
 # Probing with `history` returns success fast if the profile works, and
-# fails with a specific credentials error otherwise.
-if ! xcrun notarytool history --keychain-profile "$PROFILE" --max-results 1 >/dev/null 2>&1; then
+# fails with a specific "No Keychain password item found" error otherwise.
+# (notarytool history doesn't take --max-results — earlier attempt with
+# that flag failed its usage parser.)
+if ! xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
   echo ""
   die "Keychain profile '${PROFILE}' not found or its credentials are invalid.
 
@@ -88,19 +91,33 @@ fi
 ok "Keychain profile: ${PROFILE}"
 
 # ──────────────────────────────────────────────────────────────────────
-# 4. Verify DMG is signed with a Developer ID Application cert
+# 4. Verify (or self-sign) DMG with Developer ID Application
 # ──────────────────────────────────────────────────────────────────────
-# Notarization requires Developer ID Application, not just "Apple
-# Development". Catching this here saves a failed round-trip.
+# Notarization requires the DMG container itself to carry a Developer ID
+# signature (not just the .app inside). build.sh signs the .app but
+# package.sh doesn't sign the DMG it creates. If we find an unsigned DMG
+# and a Developer ID cert is present on this Mac, sign it here rather
+# than making the human go fight codesign flags.
 CODESIGN_OUT=$(codesign -dv --verbose=4 "$DMG" 2>&1 || true)
+if echo "$CODESIGN_OUT" | grep -q "code object is not signed at all"; then
+  IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep "Developer ID Application" | head -1 \
+    | sed -E 's/.*"(Developer ID Application: [^"]+)".*/\1/')
+  if [[ -n "$IDENTITY" ]]; then
+    info "DMG was unsigned; auto-signing with: ${IDENTITY}"
+    codesign --force --sign "$IDENTITY" "$DMG" 2>&1 | sed 's/^/    /'
+    CODESIGN_OUT=$(codesign -dv --verbose=4 "$DMG" 2>&1 || true)
+  fi
+fi
+
 if ! echo "$CODESIGN_OUT" | grep -q "Developer ID Application"; then
   echo ""
   echo "  Current signature:"
   echo "$CODESIGN_OUT" | grep -E "^(Authority|Identifier|TeamIdentifier)=" | sed 's/^/    /'
   echo ""
-  die "DMG isn't signed with a Developer ID Application certificate.
-     Re-sign the .app inside the DMG (and the DMG itself) with a Developer
-     ID cert before running this script. Apple won't notarize otherwise."
+  die "DMG isn't signed with a Developer ID Application certificate and
+     no Developer ID cert was found on this Mac. Install one in Keychain
+     Access (Apple Developer → Certificates) and re-run."
 fi
 ok "Signed with Developer ID Application"
 
