@@ -163,10 +163,39 @@ ensure_swap
 # Tolerating the install-step failure lets the downstream `have_cmd X` check
 # produce a clear, actionable error pointing at /tmp/carapace-install.log.
 
+# Wait for dpkg / apt lock to clear — Ubuntu's unattended-upgrades often
+# holds /var/lib/dpkg/lock-frontend for 5–10 minutes on first boot of a
+# fresh cloud image. If we try to apt-get install during that window, we
+# get "Could not get lock … it is held by process N". Poll up to 3 min.
+apt_wait_lock() {
+  have_cmd apt-get || return 0
+  local waited=0
+  while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
+    (( waited == 0 )) && echo -e "  ${DIM}Waiting for apt/dpkg lock (unattended-upgrades?)...${RESET}"
+    sleep 3
+    waited=$(( waited + 3 ))
+    (( waited >= 180 )) && { echo -e "  ${YELLOW}⚠ apt lock still held after 3 min — continuing anyway${RESET}"; break; }
+  done
+}
+
 # Refresh package metadata once up front — Rocky/Alma cloud minimals often
 # ship with empty or stale dnf caches, which makes the first install fail.
+# On Ubuntu/Debian, `apt-get update` can also silently fail on the first
+# boot if DNS to archive.ubuntu.com is still warming up; retry once.
 if have_cmd apt-get; then
-  run $SUDO apt-get update || true
+  apt_wait_lock
+  # Recover any previously-interrupted dpkg state. Common causes:
+  # reboot mid-install, OOM-killed apt, SIGINT during install. Until this
+  # is cleared, every subsequent `apt-get install` bails with
+  # "E: dpkg was interrupted, you must manually run 'dpkg --configure -a'".
+  # Safe no-op if dpkg is actually clean.
+  run $SUDO dpkg --configure -a || true
+  run $SUDO apt-get update || {
+    echo -e "  ${DIM}apt-get update failed; retrying in 5s...${RESET}"
+    sleep 5
+    apt_wait_lock
+    run $SUDO apt-get update || true
+  }
 elif have_cmd dnf; then
   run $SUDO dnf makecache --refresh || true
 elif have_cmd yum; then
