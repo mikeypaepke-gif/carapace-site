@@ -400,6 +400,19 @@ else
   nvm use 22 >> "$LOGFILE" 2>&1
   nvm alias default 22 >> "$LOGFILE" 2>&1
 
+  # SELinux on RHEL-family distros (Rocky / Alma / RHEL / Fedora) defaults
+  # to enforcing, and nvm drops node binaries under $HOME/.nvm/... which
+  # inherit the `cache_home_t` label. systemd refuses to exec binaries
+  # with that label, producing status=203/EXEC on services like our
+  # status-server unit that invokes the nvm node path directly. Relabel
+  # to `bin_t` so systemd services can launch it. Best-effort — silent on
+  # distros where chcon doesn't exist (Debian/Ubuntu/Alpine).
+  if have_cmd chcon; then
+    for _nb in "$HOME"/.nvm/versions/node/*/bin/node; do
+      [ -x "$_nb" ] && chcon -t bin_t "$_nb" >> "$LOGFILE" 2>&1 || true
+    done
+  fi
+
   # If the distro shipped a system node (Rocky 9 AppStream nodejs is v16),
   # leave it where it is — don't uninstall, just make sure nvm's bin wins
   # on PATH. The openclaw-gateway systemd wrapper searches nvm first, but
