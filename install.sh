@@ -378,38 +378,33 @@ else
   unset npm_config_prefix 2>/dev/null || true
 
   echo -e "  ${DIM}Installing Node.js via nvm...${RESET}"
-  if have_cmd apt-get; then
-    # Download and run nvm installer directly (not via run() — must stay in current shell)
-    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash >> "$LOGFILE" 2>&1
-    export NVM_DIR="$HOME/.nvm"
-    # Source nvm directly — must be in current shell for nvm commands to work
-    if [[ -s "$NVM_DIR/nvm.sh" ]]; then
-      # Temporarily disable errexit so prefix warnings don't abort
-      set +e
-      source "$NVM_DIR/nvm.sh"
-      set -e
-    else
-      fail "nvm install failed — check $LOGFILE"
-    fi
-    # Clear any prefix conflict
-    nvm use --delete-prefix 22 --silent 2>/dev/null || true
-    # Install node directly (not via run() — nvm must be in current shell)
-    nvm install 22 >> "$LOGFILE" 2>&1 || fail "nvm install 22 failed"
-    nvm use --delete-prefix 22 --silent 2>/dev/null || true
-    nvm use 22 >> "$LOGFILE" 2>&1
-    nvm alias default 22 >> "$LOGFILE" 2>&1
-  elif have_cmd dnf; then
-    run $SUDO dnf install -y nodejs npm
-  elif have_cmd yum; then
-    run curl -fsSL https://rpm.nodesource.com/setup_22.x | $SUDO bash -
-    run $SUDO yum install -y nodejs
-  elif have_cmd pacman; then
-    run $SUDO pacman -Sy --noconfirm nodejs npm
-  elif have_cmd apk; then
-    run $SUDO apk add --no-cache nodejs npm
+  # Use nvm on every distro. Previously we had per-distro branches that
+  # fell back to the system package manager on dnf/yum/pacman/apk, but
+  # Rocky 9 / Alma 9 AppStream ships Node 16 (openclaw requires 22.12+),
+  # so distro nodejs packages bricks the gateway service with a restart-
+  # loop. nvm is userspace, portable, and matches what openclaw expects.
+  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash >> "$LOGFILE" 2>&1
+  export NVM_DIR="$HOME/.nvm"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # Temporarily disable errexit so prefix warnings don't abort
+    set +e
+    source "$NVM_DIR/nvm.sh"
+    set -e
   else
-    fail "Could not install Node.js. Install Node.js 22+ manually and re-run."
+    fail "nvm install failed — check $LOGFILE"
   fi
+  # Clear any prefix conflict
+  nvm use --delete-prefix 22 --silent 2>/dev/null || true
+  nvm install 22 >> "$LOGFILE" 2>&1 || fail "nvm install 22 failed — check $LOGFILE"
+  nvm use --delete-prefix 22 --silent 2>/dev/null || true
+  nvm use 22 >> "$LOGFILE" 2>&1
+  nvm alias default 22 >> "$LOGFILE" 2>&1
+
+  # If the distro shipped a system node (Rocky 9 AppStream nodejs is v16),
+  # leave it where it is — don't uninstall, just make sure nvm's bin wins
+  # on PATH. The openclaw-gateway systemd wrapper searches nvm first, but
+  # any stray shell login that doesn't source nvm.sh will still see old
+  # node. That's fine; the gateway service is the one that matters.
 
   # Re-source nvm
   if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
