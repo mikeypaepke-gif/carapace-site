@@ -118,6 +118,44 @@ fi
 [[ "$OS" == "Linux" ]] || fail "Unsupported OS: $OS. This script supports Linux only."
 ok "Platform: $OS $ARCH"
 
+# Swap FIRST — creating it before any package-manager calls prevents
+# dnf/apt from SIGSEGV-ing on low-RAM VPSes (observed on fresh Rocky 9
+# micros: dnf install -y git crashes with status 139 when there's <1GB
+# RAM and no swap. Previously this function was defined below and ran
+# AFTER the prereq installs, which defeated its purpose).
+ensure_swap() {
+  local mem_total_kb swap_total_kb mem_total_mb swap_total_mb
+  mem_total_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+  mem_total_mb=$(( mem_total_kb / 1024 ))
+  swap_total_kb=$(awk '/SwapTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+  swap_total_mb=$(( swap_total_kb / 1024 ))
+
+  # Always create swap if none exists — npm postinstall AND dnf dep
+  # resolution both need headroom even on 2GB RAM.
+  if (( swap_total_mb < 512 )); then
+    if [[ -f /swapfile ]]; then
+      if ! swapon --show | grep -q /swapfile; then
+        $SUDO swapon /swapfile 2>/dev/null || true
+      fi
+    else
+      echo -e "  ${DIM}Low memory (${mem_total_mb}MB) — creating 2GB swapfile...${RESET}"
+      $SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+      $SUDO chmod 600 /swapfile
+      $SUDO mkswap /swapfile >/dev/null
+      $SUDO swapon /swapfile
+      # Set swappiness high so kernel actually uses swap before OOM-killing processes
+      $SUDO sysctl -w vm.swappiness=80 >/dev/null 2>&1 || true
+      if ! grep -q '/swapfile' /etc/fstab 2>/dev/null; then
+        echo '/swapfile none swap sw 0 0' | $SUDO tee -a /etc/fstab >/dev/null
+      fi
+      ok "2GB swapfile created"
+    fi
+  else
+    ok "Memory OK (${mem_total_mb}MB RAM, ${swap_total_mb}MB swap)"
+  fi
+}
+ensure_swap
+
 # The install blocks below all trail `|| true` on the `run` call. Rationale:
 # install.sh runs under `set -euo pipefail`, and `run` hides output in the
 # logfile by default, so a silent non-zero exit from apt/dnf would kill
@@ -223,39 +261,9 @@ if ! have_cmd crontab; then
 fi
 ok "cron available"
 
-# Swap check (prevent OOM during npm install)
-ensure_swap() {
-  local mem_total_kb swap_total_kb mem_total_mb swap_total_mb total_available
-  mem_total_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
-  mem_total_mb=$(( mem_total_kb / 1024 ))
-  swap_total_kb=$(awk '/SwapTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
-  swap_total_mb=$(( swap_total_kb / 1024 ))
-  total_available=$(( mem_total_mb + swap_total_mb ))
-
-  # Always create swap if none exists — npm postinstall needs headroom even on 2GB RAM
-  if (( swap_total_mb < 512 )); then
-    if [[ -f /swapfile ]]; then
-      if ! swapon --show | grep -q /swapfile; then
-        $SUDO swapon /swapfile 2>/dev/null || true
-      fi
-    else
-      echo -e "  ${DIM}Low memory (${mem_total_mb}MB) — creating 2GB swapfile...${RESET}"
-      $SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
-      $SUDO chmod 600 /swapfile
-      $SUDO mkswap /swapfile >/dev/null
-      $SUDO swapon /swapfile
-      # Set swappiness high so kernel actually uses swap before OOM-killing processes
-      $SUDO sysctl -w vm.swappiness=80 >/dev/null 2>&1 || true
-      if ! grep -q '/swapfile' /etc/fstab 2>/dev/null; then
-        echo '/swapfile none swap sw 0 0' | $SUDO tee -a /etc/fstab >/dev/null
-      fi
-      ok "2GB swapfile created"
-    fi
-  else
-    ok "Memory OK (${mem_total_mb}MB RAM, ${swap_total_mb}MB swap)"
-  fi
-}
-ensure_swap
+# Swap check moved to BEFORE prereq installs (see top of prereq block).
+# Low-RAM boxes need swap in place before dnf/apt runs, or dep resolution
+# can SIGSEGV mid-install.
 
 # Disable needrestart config
 if [[ -f /etc/needrestart/needrestart.conf ]]; then
