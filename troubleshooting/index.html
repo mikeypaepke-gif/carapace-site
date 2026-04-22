@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Troubleshooting — CARAPACE</title>
+  <meta name="description" content="Fixes for the most common CARAPACE setup problems: Tailscale, HTTPS, QR pairing, camera and mic, and gateway connectivity.">
+  <meta property="og:title" content="Troubleshooting — CARAPACE">
+  <meta property="og:description" content="Fixes for the most common CARAPACE setup problems.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://carapace.info/troubleshooting/">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="icon" href="/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'] },
+          colors: { teal: { 400: '#00DCC8', 500: '#00C4B4', 600: '#00A89A' } },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { background: #080A12; }
+    .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06); }
+    .gradient-text { background: linear-gradient(135deg, #00DCC8 0%, #00C4B4 50%, #2dd4bf 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+    .trouble h2 {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: rgba(255,255,255,0.95);
+      margin-top: 2.8rem;
+      margin-bottom: 0.4rem;
+      letter-spacing: -0.01em;
+    }
+    .trouble h2:first-of-type { margin-top: 0.5rem; }
+    .trouble .eyebrow {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      color: #00DCC8;
+      margin-bottom: 1.2rem;
+      display: block;
+    }
+
+    .issue {
+      background: rgba(255,255,255,0.025);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 1.25rem 1.3rem;
+      margin-bottom: 0.9rem;
+    }
+    .issue .symptom {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.9);
+      margin-bottom: 0.5rem;
+      display: flex;
+      gap: 0.5rem;
+      align-items: flex-start;
+    }
+    .issue .symptom::before {
+      content: "⚠";
+      color: #ff9c6b;
+      font-size: 1rem;
+      line-height: 1.3;
+      flex-shrink: 0;
+    }
+    .issue .cause {
+      font-size: 0.82rem;
+      color: rgba(255,255,255,0.42);
+      margin-bottom: 0.7rem;
+      line-height: 1.6;
+    }
+    .issue .cause strong { color: rgba(255,255,255,0.65); font-weight: 600; }
+    .issue .fix {
+      font-size: 0.82rem;
+      color: rgba(255,255,255,0.55);
+      line-height: 1.65;
+    }
+    .issue .fix strong { color: #00DCC8; font-weight: 600; }
+    .issue .fix ol, .issue .fix ul {
+      margin-top: 0.4rem;
+      margin-left: 1.2rem;
+    }
+    .issue .fix ol { list-style: decimal; }
+    .issue .fix ul { list-style: disc; }
+    .issue .fix li { margin-bottom: 0.3rem; }
+    .issue .fix code {
+      background: rgba(0, 220, 200, 0.08);
+      color: #00DCC8;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.78rem;
+      font-family: ui-monospace, SFMono-Regular, Monaco, monospace;
+    }
+    .issue .fix .cmd {
+      display: block;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255,255,255,0.06);
+      color: #00DCC8;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Monaco, monospace;
+      font-size: 0.78rem;
+      margin: 0.5rem 0;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    a { color: #00DCC8; }
+    a:hover { text-decoration: underline; }
+
+    .toc {
+      background: rgba(0, 220, 200, 0.04);
+      border-left: 2px solid rgba(0, 220, 200, 0.4);
+      padding: 1rem 1.2rem;
+      border-radius: 0 10px 10px 0;
+      margin-bottom: 2rem;
+    }
+    .toc h3 {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 0.6rem;
+    }
+    .toc a {
+      display: block;
+      font-size: 0.85rem;
+      color: rgba(255,255,255,0.7);
+      padding: 2px 0;
+      text-decoration: none;
+    }
+    .toc a:hover { color: #00DCC8; }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #080A12; }
+    ::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
+  </style>
+</head>
+<body class="text-white font-sans antialiased">
+
+  <nav class="fixed top-0 w-full z-50 backdrop-blur-xl bg-[#080A12]/80 border-b border-white/[0.05]">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-8 h-8 rounded-lg">
+        <span class="font-bold tracking-tight">CARAPACE</span>
+      </a>
+      <div class="hidden sm:flex items-center gap-8 text-sm">
+        <a href="/install/mac/" class="text-white/50 hover:text-white transition-colors">Mac</a>
+        <a href="/install/linux/" class="text-white/50 hover:text-white transition-colors">Linux</a>
+        <a href="/install/ios/" class="text-white/50 hover:text-white transition-colors">iOS</a>
+        <a href="/troubleshooting/" class="text-white hover:text-white transition-colors font-semibold">Help</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="text-white/50 hover:text-white transition-colors">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <section class="pt-32 pb-8 md:pt-40">
+    <div class="max-w-3xl mx-auto px-6">
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-teal-400 mb-4">Troubleshooting</p>
+      <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight mb-3">When CARAPACE misbehaves.</h1>
+      <p class="text-sm text-white/40 leading-relaxed max-w-2xl">
+        The problems below account for ~95% of "I can't get it working" messages. Skim the table of contents, find your symptom, do the fix. If nothing here matches, check the <a href="https://discord.com/invite/clawd">Discord</a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="pb-24">
+    <div class="max-w-3xl mx-auto px-6">
+      <div class="glass rounded-2xl p-6 md:p-10 trouble">
+
+        <div class="toc">
+          <h3>Table of Contents</h3>
+          <a href="#tailscale">→ Tailscale &amp; HTTPS (most common)</a>
+          <a href="#pairing">→ Pairing (iPhone ↔ gateway)</a>
+          <a href="#ios">→ iPhone app</a>
+          <a href="#voice-vision">→ Voice &amp; vision</a>
+          <a href="#mac">→ Mac app</a>
+          <a href="#linux">→ Linux / Raspberry Pi</a>
+          <a href="#iap">→ In-app purchases</a>
+        </div>
+
+        <!-- ================= TAILSCALE ================= -->
+        <h2 id="tailscale">Tailscale &amp; HTTPS</h2>
+        <span class="eyebrow">Start here — 70% of setup failures are one of these</span>
+
+        <div class="issue">
+          <div class="symptom">iPhone can't reach the gateway — pill is red or grey.</div>
+          <div class="cause"><strong>Most likely:</strong> Tailscale isn't running, or your phone isn't on the same tailnet.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ol>
+              <li>On the gateway machine (Mac / Linux / Pi), confirm Tailscale is connected: <code>tailscale status</code> should show <em>logged in</em>.</li>
+              <li>On your iPhone, open the Tailscale app and confirm the <strong>connection toggle is ON</strong>.</li>
+              <li>Make sure both devices are signed into the <strong>same Tailscale account</strong>. It's easy to have work + personal accounts and accidentally log the phone into the wrong one.</li>
+              <li>Inside CARAPACE → Settings → tap your gateway. The pill should turn teal within 5 seconds.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">"Invalid URL" or chat hangs on every message — HTTPS not enabled.</div>
+          <div class="cause"><strong>Most likely:</strong> You've paired using <code>http://</code> instead of <code>https://</code>. iOS App Transport Security blocks plaintext HTTP — your chat stream silently dies.</div>
+          <div class="fix">
+            <strong>Fix — enable Tailscale HTTPS (one-time setup):</strong>
+            <ol>
+              <li>On your gateway machine, run:<span class="cmd">tailscale cert &amp;&amp; tailscale serve https / http://localhost:PORT</span> where <code>PORT</code> is 1455 for macOS, 18789 for Linux.</li>
+              <li>Then open <a href="https://login.tailscale.com/admin/dns">login.tailscale.com/admin/dns</a> and enable <strong>HTTPS Certificates</strong> + <strong>MagicDNS</strong>.</li>
+              <li>Regenerate your pairing QR code in the Mac app (Settings → Show QR) or re-run the Linux install script. The new QR includes the <code>https://</code> URL.</li>
+              <li>Re-scan on your iPhone.</li>
+            </ol>
+            The Mac app's Setup Wizard step 3 handles this automatically — if you skipped it, re-run the wizard from Settings.
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">"Connection timed out" after the app was working fine.</div>
+          <div class="cause"><strong>Most likely:</strong> Your gateway machine went to sleep, lost network, or the daemon crashed.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ul>
+              <li><strong>Mac:</strong> Wake the machine, open System Settings → Battery → disable "Put hard disks to sleep when possible" for the Mac hosting CARAPACE. You can also plug it in so it never sleeps.</li>
+              <li><strong>VPS:</strong> SSH in and run <code>systemctl status openclaw-gateway</code>. If it's not <em>active</em>, restart it: <code>sudo systemctl restart openclaw-gateway</code>.</li>
+              <li><strong>Raspberry Pi:</strong> Pi SD cards fail under heavy write load. If the service won't start, check <code>dmesg</code> for I/O errors. Move to an SSD if this is recurring.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- ================= PAIRING ================= -->
+        <h2 id="pairing">Pairing iPhone to gateway</h2>
+
+        <div class="issue">
+          <div class="symptom">QR scan does nothing, or says "Invalid QR code".</div>
+          <div class="cause"><strong>Most likely:</strong> The QR is from an older install, the gateway URL changed, or HTTPS isn't enabled so the URL is <code>http://</code>.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ol>
+              <li>On the Mac app → Settings → <strong>Show QR Code</strong> regenerates a fresh QR from the current gateway URL + token.</li>
+              <li>On Linux: re-run <code>sudo carapace show-qr</code> (or the install script — it prints the QR at the end).</li>
+              <li>If the QR still doesn't work, use <strong>Enter Manually</strong> on iPhone and paste the URL + token directly.</li>
+              <li>Make sure the URL starts with <code>https://</code>. If not, go fix HTTPS (see section above).</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Paired, but after a minute the app says "No gateway saved".</div>
+          <div class="cause"><strong>Most likely:</strong> You're on the Solo (Free) tier and have hit the 1-gateway cap, so the new gateway wasn't persisted.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ol>
+              <li>Open iPhone Settings → Plan → you'll see "1 of 1 gateway slots used".</li>
+              <li>Either delete the existing saved gateway first, or tap <strong>Upgrade</strong> for $4.99 Household (5 gateways).</li>
+              <li>After upgrading, re-scan the QR — the gateway will now save.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Pill is orange / "degraded".</div>
+          <div class="cause"><strong>Most likely:</strong> Gateway is reachable but the AI provider behind it is down (no API key configured, quota hit, provider outage).</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ul>
+              <li>On the gateway machine, check <code>~/.openclaw/openclaw.json</code> — confirm your Anthropic / Gemini / OpenAI key is set and current.</li>
+              <li>Check the provider's dashboard for quota / billing alerts.</li>
+              <li>Try a manual <code>curl https://yourmac.your-tailnet.ts.net/health</code> — it'll tell you which provider is failing.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- ================= iOS ================= -->
+        <h2 id="ios">iPhone app</h2>
+
+        <div class="issue">
+          <div class="symptom">"No gateway saved" appears even though I just paired.</div>
+          <div class="cause"><strong>Most likely:</strong> You deleted the active profile and the app disconnected. Or you just re-installed and UserDefaults got wiped.</div>
+          <div class="fix">
+            <strong>Fix:</strong> Re-pair via QR or Manual Entry. Gateway list is stored per-install; deleting the app wipes it, but IAP unlocks survive.
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Pearl is grey and won't turn on.</div>
+          <div class="cause"><strong>Most likely:</strong> Microphone permission denied.</div>
+          <div class="fix">
+            <strong>Fix:</strong> iOS Settings → Carapace → Microphone → <strong>ON</strong>. Also make sure Camera is ON if you want vision mode.
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">App still shows "CarPlay" as the output after I get out of my car.</div>
+          <div class="cause"><strong>Most likely:</strong> Stale route-name display. Fixed as of iPhone app v1.6 — update if you're on an older TestFlight build.</div>
+          <div class="fix">
+            <strong>Fix:</strong> Update via TestFlight. If still seeing it, tap the AirPlay icon next to the output name and pick <strong>iPhone</strong> manually.
+          </div>
+        </div>
+
+        <!-- ================= VOICE + VISION ================= -->
+        <h2 id="voice-vision">Voice &amp; vision</h2>
+
+        <div class="issue">
+          <div class="symptom">Voice agent never responds after I speak.</div>
+          <div class="cause"><strong>Most likely:</strong> The gateway is unreachable or Tailscale dropped. Less likely: music is still playing and drowning the mic.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ol>
+              <li>Tap the pearl once to see the connection pill state. Red = fix Tailscale. Orange = fix provider. Grey = not paired yet.</li>
+              <li>Pause any music / podcasts before the first tap. We auto-pause, but AirPods with ANC sometimes resume on their own.</li>
+              <li>Make sure you said more than one syllable. The tap + release needs ~400ms of audio to trigger STT.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Music plays while the voice agent is listening.</div>
+          <div class="cause"><strong>Most likely:</strong> Older TestFlight build. Fixed in v1.6 build 31+.</div>
+          <div class="fix">
+            <strong>Fix:</strong> Update TestFlight.
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Camera shows "Starting camera…" forever.</div>
+          <div class="cause"><strong>Most likely:</strong> You backgrounded the app mid-session on an older build. Fixed in v1.6 build 24+.</div>
+          <div class="fix">
+            <strong>Fix:</strong> Update TestFlight. If it still happens, force-quit the app (swipe up in app switcher) and reopen.
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Camera is black, or only shows a preview but no AI response.</div>
+          <div class="cause"><strong>Most likely:</strong> Camera permission denied, or the Gemini Live key isn't configured on your gateway.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ul>
+              <li>iOS Settings → Carapace → Camera → <strong>ON</strong>.</li>
+              <li>On the gateway, set <code>GEMINI_API_KEY</code> in <code>~/.openclaw/openclaw.json</code>. Get a free key at <a href="https://aistudio.google.com">aistudio.google.com</a>.</li>
+              <li>Optionally paste the key into iPhone Settings → Advanced → Gemini API Key as a fallback.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- ================= MAC ================= -->
+        <h2 id="mac">Mac app</h2>
+
+        <div class="issue">
+          <div class="symptom">Mac app has a blank icon in /Applications.</div>
+          <div class="cause"><strong>Most likely:</strong> Launch Services' icon cache got stale, usually from installing as a different user.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ol>
+              <li>Make sure the app is owned by you:<span class="cmd">sudo chown -R $(whoami):admin /Applications/Carapace.app</span></li>
+              <li>Touch the bundle to bump its mtime:<span class="cmd">touch /Applications/Carapace.app</span></li>
+              <li>Log out + back in to flush the Launch Services icon cache. If it's still blank, re-download the DMG and drag a fresh copy.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Menu bar pearl is there, but Settings won't open.</div>
+          <div class="cause"><strong>Most likely:</strong> The app was launched without proper entitlements (e.g. you ran an unsigned build).</div>
+          <div class="fix">
+            <strong>Fix:</strong> Always install from the signed DMG on <a href="https://carapace.info">carapace.info</a>. Quit the app from the menu bar, drag the app to the Trash, re-download, re-install.
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Setup wizard keeps saying "Xcode CLI tools not found" after I installed them.</div>
+          <div class="cause"><strong>Most likely:</strong> Install completed but shell environment wasn't refreshed.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ol>
+              <li>Open Terminal and run <code>xcode-select -p</code>. It should print <code>/Library/Developer/CommandLineTools</code> or similar.</li>
+              <li>If it doesn't, manually run <code>xcode-select --install</code> and wait for the system dialog to finish.</li>
+              <li>Quit and reopen the Carapace menu bar app — the wizard re-checks on launch.</li>
+            </ol>
+          </div>
+        </div>
+
+        <!-- ================= LINUX ================= -->
+        <h2 id="linux">Linux / Raspberry Pi</h2>
+
+        <div class="issue">
+          <div class="symptom">Install script exits with "out of memory" or crashes midway.</div>
+          <div class="cause"><strong>Most likely:</strong> Low RAM on your VPS or Pi. CARAPACE needs ≥2GB RAM; 4GB is comfortable.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ol>
+              <li>Add a swapfile:<span class="cmd">sudo fallocate -l 2G /swapfile &amp;&amp; sudo chmod 600 /swapfile &amp;&amp; sudo mkswap /swapfile &amp;&amp; sudo swapon /swapfile</span></li>
+              <li>Re-run the install script. It auto-tunes Node's heap based on available RAM.</li>
+              <li>If you're on a $5/month VPS with 1GB RAM, consider bumping to the $10 tier — 1GB isn't enough for comfortable Claude / Gemini use.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">"Systemctl: command not found" during install (container / minimal Debian).</div>
+          <div class="cause"><strong>Most likely:</strong> You're running inside a container or on a distro that uses a different init system. The install script handles both cases as of v1.9.23 of the Mac app's bundled installer.</div>
+          <div class="fix">
+            <strong>Fix:</strong> Re-pull the latest installer:<span class="cmd">curl -fsSL https://carapace.info/install.sh | bash</span>
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Gateway service started but port 18789 isn't responding.</div>
+          <div class="cause"><strong>Most likely:</strong> Firewall blocking the port, or service bound to the wrong interface.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ol>
+              <li>Check the service is listening: <code>sudo ss -tlnp | grep 18789</code></li>
+              <li>If your VPS has UFW: <code>sudo ufw allow 18789/tcp</code> — but prefer Tailscale (no open ports needed).</li>
+              <li>On a DigitalOcean / Linode firewall, whitelist Tailscale's CGNAT range (<code>100.64.0.0/10</code>) rather than exposing the port to the public internet.</li>
+            </ol>
+          </div>
+        </div>
+
+        <!-- ================= IAP ================= -->
+        <h2 id="iap">In-app purchases</h2>
+
+        <div class="issue">
+          <div class="symptom">Paywall says "In-app purchases haven't loaded yet."</div>
+          <div class="cause"><strong>Most likely:</strong> Transient network issue, or you're on a TestFlight build while the IAPs are still in App Store review.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ul>
+              <li>Wait 10 seconds and tap the tier button again — StoreKit retries on each paywall open.</li>
+              <li>If it persists, pull the paywall closed and reopen it.</li>
+              <li>If you just installed: restart the app once so StoreKit picks up fresh entitlements.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Bought a tier on one iPhone — second iPhone still on free.</div>
+          <div class="cause"><strong>Most likely:</strong> The second phone hasn't synced your Apple ID purchases yet.</div>
+          <div class="fix">
+            <strong>Fix:</strong> On the second phone, open CARAPACE → Settings → Plan → <strong>Restore Purchases</strong>. If you're on a different Apple ID, enable Family Sharing in your primary account (Settings → [Your Name] → Family Sharing → Set up → iCloud &amp; App Store Purchases).
+          </div>
+        </div>
+
+        <div class="issue">
+          <div class="symptom">Purchase went through but tier still says Solo.</div>
+          <div class="cause"><strong>Most likely:</strong> Ask-to-Buy approval is pending (child Apple ID), or transaction is in SCA / 3D Secure review.</div>
+          <div class="fix">
+            <strong>Fix:</strong>
+            <ul>
+              <li>Check your email for a "pending approval" notification from Apple.</li>
+              <li>On the parent / paying device, approve the request in Messages or the Family Sharing settings.</li>
+              <li>After approval, CARAPACE's transaction listener picks it up within 30 seconds. If it doesn't, tap Restore Purchases.</li>
+            </ul>
+          </div>
+        </div>
+
+        <hr class="my-14 border-white/10">
+
+        <div class="text-center">
+          <p class="text-sm text-white/50 mb-3">Still stuck?</p>
+          <div class="flex flex-wrap justify-center gap-3">
+            <a href="https://discord.com/invite/clawd" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg glass text-sm hover:bg-white/[0.05] transition-colors">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028 14.09 14.09 0 001.226-1.994.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+              Discord community
+            </a>
+            <a href="https://github.com/mikeypaepke-gif/carapace-site/issues" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg glass text-sm hover:bg-white/[0.05] transition-colors">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .296c-6.627 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.385.6.11.793-.26.793-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.755-1.333-1.755-1.09-.744.082-.73.082-.73 1.205.086 1.838 1.238 1.838 1.238 1.07 1.834 2.807 1.304 3.492.997.108-.775.42-1.304.762-1.604-2.665-.304-5.466-1.334-5.466-5.933 0-1.31.47-2.381 1.235-3.221-.124-.304-.535-1.524.117-3.176 0 0 1.008-.323 3.3 1.23.957-.266 1.98-.4 3-.405 1.02.005 2.043.139 3 .405 2.29-1.553 3.297-1.23 3.297-1.23.653 1.652.242 2.872.118 3.176.77.84 1.234 1.911 1.234 3.221 0 4.61-2.806 5.625-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .319.192.694.8.576 4.765-1.589 8.2-6.085 8.2-11.385 0-6.627-5.373-12-12-12z"/></svg>
+              Report a bug on GitHub
+            </a>
+          </div>
+        </div>
+
+      </div>
+
+      <p class="mt-6 text-center text-xs text-white/25">
+        <a href="/" class="hover:text-white/60 transition-colors">← Back to carapace.info</a>
+      </p>
+    </div>
+  </section>
+
+  <footer class="border-t border-white/[0.05] py-10">
+    <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-white/30">
+      <div class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-6 h-6 rounded-md opacity-60">
+        <span>CARAPACE · <a href="/" class="hover:text-white/60 transition-colors">carapace.info</a></span>
+      </div>
+      <div class="flex items-center gap-5">
+        <a href="/install/mac/" class="hover:text-white/60 transition-colors">Mac</a>
+        <a href="/install/linux/" class="hover:text-white/60 transition-colors">Linux</a>
+        <a href="/install/ios/" class="hover:text-white/60 transition-colors">iOS</a>
+        <a href="/troubleshooting/" class="hover:text-white/60 transition-colors">Help</a>
+        <a href="/terms/" class="hover:text-white/60 transition-colors">Terms</a>
+        <a href="/privacy/" class="hover:text-white/60 transition-colors">Privacy</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="hover:text-white/60 transition-colors">GitHub</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

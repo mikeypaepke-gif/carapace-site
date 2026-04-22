@@ -3,3 +3,6 @@
 node_modules/
 *.log
 .dev.vars
+
+# DMGs are served via Cloudflare Pages uploads; don't bloat git with binaries
+Carapace-*.dmg

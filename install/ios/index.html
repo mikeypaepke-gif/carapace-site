@@ -3,13 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Install CARAPACE on iOS — ~2 min</title>
-  <meta name="description" content="Install the Carapace iOS app. Pair with your Mac or VPS gateway, sign in, start talking. Two minutes.">
-  <meta property="og:title" content="Install CARAPACE on iOS">
-  <meta property="og:description" content="Pair with your Mac or VPS gateway, sign in, start talking. Two minutes.">
+  <title>iPhone Setup — CARAPACE</title>
+  <meta name="description" content="Set up CARAPACE on your iPhone in two steps. Pick a plan, scan the QR code from your gateway, done.">
+  <meta property="og:title" content="iPhone Setup — CARAPACE">
+  <meta property="og:description" content="Two steps. Pick a plan, scan your gateway's QR, you're paired.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://carapace.info/install/ios/">
-  <meta property="og:image" content="https://carapace.info/assets/carapace-og.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
   <link rel="icon" href="/favicon.ico">
@@ -28,269 +27,295 @@
     }
   </script>
   <style>
+    html, body { overflow-x: clip; max-width: 100%; }
     body { background: #080A12; }
-    .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1); }
-    .reveal.visible { opacity: 1; transform: translateY(0); }
-    .reveal-delay-1 { transition-delay: 0.1s; }
-    .reveal-delay-2 { transition-delay: 0.2s; }
     .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06); }
-    .glass-elevated { background: rgba(255,255,255,0.05); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid rgba(255,255,255,0.08); }
+    .glass-elevated { background: rgba(255,255,255,0.05); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
     .gradient-text { background: linear-gradient(135deg, #00DCC8 0%, #00C4B4 50%, #2dd4bf 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-    .hero-glow { position: relative; overflow: hidden; }
-    .hero-glow::before {
-      content: ''; position: absolute; width: 700px; height: 700px; top: -200px; left: 50%;
-      transform: translateX(-50%);
-      background: radial-gradient(circle, rgba(0,220,200,0.08) 0%, rgba(0,220,200,0.03) 40%, transparent 70%);
-      pointer-events: none;
-    }
-    .step-badge {
-      width: 44px; height: 44px; border-radius: 12px;
-      background: linear-gradient(135deg, rgba(0,220,200,0.15), rgba(0,220,200,0.05));
-      border: 1px solid rgba(0,220,200,0.2);
-      display: inline-flex; align-items: center; justify-content: center;
-      font-weight: 700; color: #00DCC8; font-size: 18px;
-    }
 
-    /* iPhone frame */
-    .iphone-frame {
-      background: linear-gradient(165deg, #2a2a35 0%, #1a1a24 50%, #141420 100%);
-      border: 2.5px solid rgba(255,255,255,0.18);
-      border-radius: 2.4rem;
-      padding: 5px;
-      box-shadow: 0 40px 80px -20px rgba(0,0,0,0.7), 0 25px 50px -15px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
-      width: 100%;
-      max-width: 280px;
-      margin: 0 auto;
-    }
-    .iphone-screen {
-      border-radius: 2rem;
-      overflow: hidden;
-      background: #000;
-      aspect-ratio: 9/19.5;
-    }
-    .iphone-screen img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .iphone-placeholder {
-      width: 100%; height: 100%;
-      background:
-        linear-gradient(180deg, rgba(0,220,200,0.04) 0%, rgba(0,220,200,0.01) 100%),
-        repeating-linear-gradient(45deg, rgba(0,220,200,0.04) 0 10px, transparent 10px 20px);
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 10px;
-      color: rgba(0,220,200,0.6); text-align: center; padding: 20px;
-      font-size: 12px; font-weight: 600;
-    }
+    /* iPhone 17 Pro Max frame overlay — same percentages as the hero
+       mockup. Frame PNG sits on top of the screenshot; transparent
+       display cutout shows the screenshot through. Sliight outward
+       bleed (4.6% / 1.7%) so the screenshot edges tuck under the
+       bezel's AA rim instead of leaving a dark fringe. */
+    .iphone-mock { position: relative; aspect-ratio: 1470/3000; isolation: isolate;
+                   filter: drop-shadow(0 30px 60px rgba(0,0,0,0.55)) drop-shadow(0 12px 24px rgba(0,0,0,0.40)); }
+    .iphone-screen { position: absolute; left: 4.6%; top: 1.7%; right: 4.6%; bottom: 1.7%;
+                     overflow: hidden; border-radius: 8%; background: #000; z-index: 1; }
+    .iphone-frame-img { position: absolute; inset: 0; width: 100%; height: 100%;
+                        pointer-events: none; z-index: 10; }
 
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #080A12; }
-    ::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
+    /* Step numbering circle — big teal gradient disc, visually anchors
+       each step's copy against its screenshot. */
+    .step-num {
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, #00DCC8 0%, #00A89A 100%);
+      color: #000;
+      font-size: 22px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 10px 20px -5px rgba(0, 220, 200, 0.3);
+    }
   </style>
 </head>
 <body class="text-white font-sans antialiased">
 
-  <!-- NAV -->
   <nav class="fixed top-0 w-full z-50 backdrop-blur-xl bg-[#080A12]/80 border-b border-white/[0.05]">
     <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-      <a href="/" class="flex items-center gap-3"><img src="/assets/app-icon.png" alt="" class="w-8 h-8 rounded-lg"><span class="font-bold tracking-tight">CARAPACE</span></a>
+      <a href="/" class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-8 h-8 rounded-lg">
+        <span class="font-bold tracking-tight">CARAPACE</span>
+      </a>
       <div class="hidden sm:flex items-center gap-8 text-sm">
         <a href="/install/mac/" class="text-white/50 hover:text-white transition-colors">Mac</a>
         <a href="/install/linux/" class="text-white/50 hover:text-white transition-colors">Linux</a>
         <a href="/install/ios/" class="text-teal-400">iOS</a>
-        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="text-white/50 hover:text-white transition-colors inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .296c-6.627 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.385.6.11.793-.26.793-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.755-1.333-1.755-1.09-.744.082-.73.082-.73 1.205.086 1.838 1.238 1.838 1.238 1.07 1.834 2.807 1.304 3.492.997.108-.775.42-1.304.762-1.604-2.665-.304-5.466-1.334-5.466-5.933 0-1.31.47-2.381 1.235-3.221-.124-.304-.535-1.524.117-3.176 0 0 1.008-.323 3.3 1.23.957-.266 1.98-.4 3-.405 1.02.005 2.043.139 3 .405 2.29-1.553 3.297-1.23 3.297-1.23.653 1.652.242 2.872.118 3.176.77.84 1.234 1.911 1.234 3.221 0 4.61-2.806 5.625-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .319.192.694.8.576 4.765-1.589 8.2-6.085 8.2-11.385 0-6.627-5.373-12-12-12z"/></svg>
-          GitHub
-        </a>
+        <a href="/troubleshooting/" class="text-white/50 hover:text-white transition-colors">Help</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="text-white/50 hover:text-white transition-colors">GitHub</a>
       </div>
     </div>
   </nav>
 
   <!-- HERO -->
-  <section class="hero-glow pt-36 pb-16 md:pt-44 md:pb-20 relative">
-    <div class="max-w-4xl mx-auto px-6 text-center relative z-10">
-      <div class="reveal inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-elevated text-xs font-medium text-white/60 mb-8">
-        <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>
-        iOS 17 and later · iPhone &amp; iPad
-      </div>
-      <h1 class="reveal reveal-delay-1 text-[clamp(2rem,5vw,3.5rem)] font-extrabold leading-[1.05] tracking-tight mb-6">
-        Install CARAPACE on iOS.<br>
-        <span class="gradient-text">Scan. Sign in. Go.</span>
+  <section class="pt-32 pb-12 md:pt-40 md:pb-16">
+    <div class="max-w-3xl mx-auto px-6 text-center space-y-5">
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-teal-400">iPhone Setup</p>
+      <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight leading-tight">
+        Three steps. You're in.
       </h1>
-      <p class="reveal reveal-delay-2 text-lg text-white/45 max-w-2xl mx-auto leading-relaxed">
-        Download the app, scan the pair QR from your Mac or VPS, sign in. Two minutes. You'll be talking to your AI on the way out of the room.
+      <p class="text-base md:text-lg text-white/55 max-w-xl mx-auto leading-relaxed">
+        The iPhone app is a companion for the gateway you run on your Mac, Raspberry Pi, or VPS. Install that first, then:
       </p>
-      <p class="reveal reveal-delay-2 text-sm text-white/30 max-w-xl mx-auto mt-3">
-        Need a gateway first? <a href="/install/mac/" class="text-teal-400 hover:text-teal-300">Mac setup</a> · <a href="/install/linux/" class="text-teal-400 hover:text-teal-300">Linux setup</a>
-      </p>
-    </div>
-  </section>
 
-  <!-- STEP 1: DOWNLOAD -->
-  <section class="py-12">
-    <div class="max-w-4xl mx-auto px-6">
-      <div class="flex items-center gap-4 mb-6">
-        <div class="step-badge">1</div>
-        <div>
-          <h2 class="text-2xl font-bold tracking-tight">Download from the App Store</h2>
-          <p class="text-sm text-white/40 mt-1">$2.99, one-time. No subscription.</p>
-        </div>
-      </div>
-      <div class="reveal flex flex-wrap gap-4">
-        <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="inline-flex items-center gap-3 pl-4 pr-6 py-3 rounded-xl bg-white text-black hover:bg-white/90 transition-all duration-300 shadow-lg shadow-black/20 hover:-translate-y-0.5 group">
-          <svg class="w-7 h-7 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+      <div class="pt-4 flex flex-wrap justify-center gap-3">
+        <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="inline-flex items-center gap-3 pl-4 pr-6 py-3 rounded-xl bg-white text-black font-semibold text-sm hover:bg-white/90 transition-all duration-300 shadow-lg shadow-black/20 hover:-translate-y-0.5">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
           <div class="text-left">
             <div class="text-[10px] font-normal opacity-60 leading-none">Download on the</div>
-            <div class="text-[17px] font-semibold leading-tight -mt-0.5">App Store — $2.99</div>
+            <div class="text-[15px] font-semibold leading-tight -mt-0.5">App Store — Free</div>
           </div>
         </a>
       </div>
     </div>
   </section>
 
-  <!-- STEP 2: PAIR -->
-  <section class="py-12">
-    <div class="max-w-4xl mx-auto px-6">
-      <div class="flex items-center gap-4 mb-6">
-        <div class="step-badge">2</div>
-        <div>
-          <h2 class="text-2xl font-bold tracking-tight">Pair with your gateway</h2>
-          <p class="text-sm text-white/40 mt-1">Tap <span class="text-white/70 font-medium">Add Gateway → Scan QR</span>. Point the camera at the QR your Mac or VPS printed.</p>
+  <!-- STEPS -->
+  <section class="pb-24 md:pb-32">
+    <div class="max-w-5xl mx-auto px-6 space-y-20 md:space-y-28">
+
+      <!-- Step 1 — Install Tailscale. Prerequisite for the iPhone to
+           reach the gateway over the private mesh — no open ports,
+           no dynamic-DNS fussing, works behind any NAT. Critical that
+           both devices (phone + gateway machine) are signed into the
+           SAME Tailscale account; otherwise they can't see each
+           other and pair will hang. -->
+      <div class="grid md:grid-cols-2 gap-12 md:gap-16 items-center">
+        <div class="order-2 md:order-1">
+          <div class="flex items-center gap-4 mb-5">
+            <div class="step-num">1</div>
+            <div class="text-xs font-bold uppercase tracking-[0.18em] text-teal-400">Mesh your devices together</div>
+          </div>
+          <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-4">Install Tailscale.</h2>
+          <p class="text-base text-white/55 leading-relaxed mb-5">
+            Your iPhone talks to your gateway over a private Tailscale mesh — no open ports, no dynamic DNS, works behind any NAT. Install the Tailscale app on your iPhone and <span class="text-white/75">sign in with the same account you used on your gateway machine</span>.
+          </p>
+          <ul class="space-y-2.5 text-sm text-white/50">
+            <li class="flex items-start gap-2.5">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span>Download <strong class="text-white/75">Tailscale for iOS</strong> from the App Store (free)</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span>Sign in with the <strong class="text-white/75">same Google / Microsoft / GitHub account</strong> your gateway uses — not a different one</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span>Flip the Tailscale toggle <strong class="text-white/75">ON</strong> — your phone is now on your tailnet</span>
+            </li>
+          </ul>
+          <div class="mt-6 flex flex-wrap gap-3">
+            <a href="https://apps.apple.com/us/app/tailscale/id1470499037" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/[0.07] border border-white/10 hover:bg-white/[0.12] text-white/80 hover:text-white transition-all text-sm font-semibold">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+              Tailscale on the App Store
+            </a>
+            <!-- Official Tailscale iOS install doc — they own the how-to,
+                 we just point. Kept subtle (smaller, secondary styling)
+                 so the App Store link is still the primary action. -->
+            <a href="https://tailscale.com/kb/1020/install-ios" target="_blank" rel="noopener" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-white/55 hover:text-white/80 hover:border-white/20 transition-all text-sm">
+              Tailscale's iOS install guide →
+            </a>
+          </div>
+          <p class="text-xs text-white/35 mt-5">
+            If you skip this, CARAPACE will see "No gateways reachable" even after scanning the QR. Same account, both devices toggled ON — non-negotiable.
+          </p>
         </div>
-      </div>
-      <div class="reveal grid md:grid-cols-2 gap-8 items-center">
-        <div class="iphone-frame">
-          <div class="iphone-screen">
-            <!-- REPLACE: /assets/ios-install-pair.png -->
-            <div class="iphone-placeholder">
-              <svg class="w-10 h-10" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z"/></svg>
-              Pair / Scan QR<br><span class="text-white/40 text-[10px] font-normal">Screenshot coming soon</span>
+
+        <div class="order-1 md:order-2 flex justify-center">
+          <!-- Tailscale logo + "same account" visual. No iPhone
+               mockup here because this step is about a third-party
+               app, not CARAPACE itself — a simple conceptual
+               illustration (teal mesh / linked icons) reads cleaner
+               than shoehorning a screenshot of someone else's UI. -->
+          <div class="relative w-full max-w-sm aspect-square flex items-center justify-center">
+            <div class="absolute inset-0 rounded-3xl" style="background: radial-gradient(circle at center, rgba(0,220,200,0.14) 0%, rgba(0,220,200,0.03) 50%, transparent 75%); filter: blur(12px);"></div>
+            <div class="relative flex items-center justify-center gap-6">
+              <!-- Phone glyph -->
+              <div class="w-20 h-28 rounded-2xl bg-gradient-to-br from-white/10 to-white/5 border border-white/10 flex items-center justify-center">
+                <svg class="w-9 h-9 text-[#00DCC8]" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M10 18h4" stroke-linecap="round"/></svg>
+              </div>
+              <!-- Mesh line + dots -->
+              <div class="flex flex-col items-center gap-1">
+                <div class="flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#00DCC8] animate-pulse"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#00DCC8]/60"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#00DCC8]/40"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#00DCC8]/60"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#00DCC8] animate-pulse"></span>
+                </div>
+                <div class="text-[9px] font-bold tracking-[0.2em] text-[#00DCC8]/80 uppercase mt-1">Tailnet</div>
+              </div>
+              <!-- Server glyph -->
+              <div class="w-20 h-28 rounded-2xl bg-gradient-to-br from-white/10 to-white/5 border border-white/10 flex items-center justify-center">
+                <svg class="w-9 h-9 text-[#00DCC8]" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="5" rx="1"/><rect x="3" y="14" width="18" height="5" rx="1"/><circle cx="7" cy="7.5" r="0.5" fill="currentColor"/><circle cx="7" cy="16.5" r="0.5" fill="currentColor"/></svg>
+              </div>
             </div>
           </div>
         </div>
-        <div class="space-y-4 text-sm text-white/60 leading-relaxed">
-          <p>Your gateway prints a QR code during setup. Open it on your Mac or VPS terminal and point your phone at it.</p>
-          <p class="text-white/40">Can't scan? Tap <span class="text-white/70">Paste URL</span> and enter the <code class="font-mono text-teal-400 text-xs">carapace://</code> link instead. Either works.</p>
-          <p class="text-white/40">Pair tokens expire after 5 minutes for safety. If yours ran out, run <code class="font-mono text-teal-400 text-xs">carapace pair</code> on your gateway to get a fresh one.</p>
-        </div>
       </div>
-    </div>
-  </section>
 
-  <!-- STEP 3: SIGN IN -->
-  <section class="py-12">
-    <div class="max-w-4xl mx-auto px-6">
-      <div class="flex items-center gap-4 mb-6">
-        <div class="step-badge">3</div>
-        <div>
-          <h2 class="text-2xl font-bold tracking-tight">Sign in</h2>
-          <p class="text-sm text-white/40 mt-1">Same account as your Mac. Same brain, everywhere.</p>
+      <!-- Step 2 — Pick your plan -->
+      <div class="grid md:grid-cols-2 gap-12 md:gap-16 items-center">
+        <div class="order-2 md:order-1">
+          <div class="flex items-center gap-4 mb-5">
+            <div class="step-num">2</div>
+            <div class="text-xs font-bold uppercase tracking-[0.18em] text-teal-400">On first launch (or anytime)</div>
+          </div>
+          <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-4">Pick your plan.</h2>
+          <p class="text-base text-white/55 leading-relaxed mb-5">
+            Solo is free — one gateway, every feature. If you want to pair more machines (home + work + cabin, or a VPS fleet), tap a paid tier. <span class="text-white/75">One-time purchase, no subscription.</span>
+          </p>
+          <ul class="space-y-2.5 text-sm text-white/50">
+            <li class="flex items-start gap-2.5">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span><strong class="text-white/75">Solo</strong> — 1 gateway, free forever</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span><strong class="text-white/75">Household</strong> — 5 gateways, $4.99</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span><strong class="text-white/75">Power</strong> — 10 gateways, $7.99 · Meta Ray-Ban beta (if Meta opens their SDK)</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span><strong class="text-white/75">Corporate</strong> — 50 gateways, $24.99 · Meta Ray-Ban beta (if Meta opens their SDK)</span>
+            </li>
+          </ul>
+          <p class="text-xs text-white/35 mt-5">
+            Change your plan anytime from Settings → Plan.
+          </p>
         </div>
-      </div>
-      <div class="reveal grid md:grid-cols-2 gap-8 items-center">
-        <div class="iphone-frame">
-          <div class="iphone-screen">
-            <!-- REPLACE: /assets/ios-install-login.png -->
-            <div class="iphone-placeholder">
-              <svg class="w-10 h-10" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
-              Sign in<br><span class="text-white/40 text-[10px] font-normal">Screenshot coming soon</span>
+
+        <div class="order-1 md:order-2 flex justify-center">
+          <div class="iphone-mock w-full" style="max-width: 320px;">
+            <div class="iphone-screen">
+              <img src="/assets/ios-setup-plan.jpg" alt="CARAPACE Unlock More Gateways screen showing the Solo, Household, Power, and Corporate tiers with per-tier feature bullets" class="absolute inset-0 w-full h-full object-cover block" loading="eager">
             </div>
+            <img src="/assets/iphone-frame.png" alt="" class="iphone-frame-img" loading="eager">
           </div>
         </div>
-        <div class="space-y-4 text-sm text-white/60 leading-relaxed">
-          <p>If this is your first Carapace account, tap <span class="text-white/70">Create one</span>. Otherwise sign in with the credentials you used on Mac or VPS setup.</p>
-          <p class="text-white/40">Your account ties your devices to your gateway — it's not where your data lives. Conversations stay on your own hardware.</p>
-        </div>
       </div>
-    </div>
-  </section>
 
-  <!-- STEP 4 (OPTIONAL): GEMINI VISION KEY -->
-  <section class="py-12">
-    <div class="max-w-4xl mx-auto px-6">
-      <div class="flex items-center gap-4 mb-6">
-        <div class="step-badge">4</div>
-        <div>
-          <h2 class="text-2xl font-bold tracking-tight">
-            Gemini key for Vision
-            <span class="text-xs font-medium uppercase tracking-wider text-white/30 align-middle ml-2">Optional</span>
-          </h2>
-          <p class="text-sm text-white/40 mt-1">Skip if you picked Gemini as your chat provider — the same key powers Vision.</p>
-        </div>
-      </div>
-      <div class="reveal grid md:grid-cols-2 gap-8 items-center">
-        <div class="iphone-frame">
-          <div class="iphone-screen">
-            <!-- REPLACE: /assets/ios-install-gemini.png -->
-            <div class="iphone-placeholder">
-              <svg class="w-10 h-10" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-              Vision key paste<br><span class="text-white/40 text-[10px] font-normal">Screenshot coming soon</span>
+      <!-- Step 3 — Pair with gateway -->
+      <div class="grid md:grid-cols-2 gap-12 md:gap-16 items-center">
+        <div class="flex justify-center">
+          <div class="iphone-mock w-full" style="max-width: 320px;">
+            <div class="iphone-screen">
+              <img src="/assets/ios-setup-pair.jpg" alt="CARAPACE gateway pairing screen with Scan QR Code and Enter Manually options" class="absolute inset-0 w-full h-full object-cover block" loading="eager">
             </div>
+            <img src="/assets/iphone-frame.png" alt="" class="iphone-frame-img" loading="eager">
           </div>
         </div>
-        <div class="space-y-4 text-sm text-white/60 leading-relaxed">
-          <p>Settings → Vision → <span class="text-white/70">Paste Gemini key</span>. Vision hits Gemini Flash first because it's fast and cheap, then escalates to your main agent when needed.</p>
-          <p class="text-white/40">Grab a free key at <a href="https://aistudio.google.com/apikey" class="text-teal-400 hover:text-teal-300">aistudio.google.com/apikey</a>. No credit card. ~60 image requests/min on the free tier.</p>
+
+        <div>
+          <div class="flex items-center gap-4 mb-5">
+            <div class="step-num">3</div>
+            <div class="text-xs font-bold uppercase tracking-[0.18em] text-teal-400">Scan your gateway's QR</div>
+          </div>
+          <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-4">Scan the QR. Done.</h2>
+          <p class="text-base text-white/55 leading-relaxed mb-5">
+            Your gateway generates a pairing QR during setup (Mac Setup Wizard, Linux install script, or at any time from the Settings panel). Point the iPhone camera at it — the gateway URL + token land on your phone automatically.
+          </p>
+          <ul class="space-y-2.5 text-sm text-white/50">
+            <li class="flex items-start gap-2.5">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span><strong class="text-white/75">Mac:</strong> menu bar → Settings → Show QR Code</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span><strong class="text-white/75">Linux / Pi:</strong> printed at the end of <code class="text-[#00DCC8] bg-white/5 px-1.5 py-0.5 rounded">install.sh</code>, or run <code class="text-[#00DCC8] bg-white/5 px-1.5 py-0.5 rounded">carapace show-qr</code></span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <svg class="w-4 h-4 text-[#00DCC8] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span><strong class="text-white/75">No QR?</strong> Tap <em>Enter Manually</em> and paste the URL + token from your gateway's config</span>
+            </li>
+          </ul>
+          <p class="text-xs text-white/35 mt-5">
+            The pill on the home screen turns teal the moment the pair is healthy. If it stays red or orange, see <a href="/troubleshooting/" class="text-teal-400 hover:underline">troubleshooting</a>.
+          </p>
         </div>
       </div>
+
     </div>
   </section>
 
-  <!-- DONE -->
-  <section class="py-16">
-    <div class="max-w-4xl mx-auto px-6">
-      <div class="reveal glass-elevated rounded-2xl p-8 md:p-10 text-center relative overflow-hidden">
-        <div class="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-teal-400 to-transparent"></div>
-        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-400/20 to-teal-400/5 border border-teal-400/25 mb-5">
-          <svg class="w-8 h-8 text-teal-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+  <!-- DONE CARD -->
+  <section class="pb-24">
+    <div class="max-w-2xl mx-auto px-6">
+      <div class="glass rounded-3xl p-8 md:p-12 text-center space-y-5">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-teal-400 to-teal-600 text-black">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/>
+          </svg>
         </div>
-        <h2 class="text-2xl sm:text-3xl font-bold mb-3">Start talking.</h2>
-        <p class="text-white/50 max-w-lg mx-auto leading-relaxed">
-          Hold the mic to use voice mode. Tap the camera to use Vision. Swipe up from anywhere to kick off an agent. Everything runs on your hardware.
+        <h2 class="text-2xl sm:text-3xl font-bold tracking-tight">That's it.</h2>
+        <p class="text-white/55 leading-relaxed max-w-lg mx-auto">
+          Tap the pearl to open Voice, Vision, or Chat. Force-press the pearl to drop straight into a live camera stream.
         </p>
-        <div class="mt-7 flex flex-wrap justify-center gap-3">
-          <a href="/" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-black font-semibold text-sm hover:bg-white/90 transition-all">
+        <div class="flex flex-wrap justify-center gap-3 pt-2">
+          <a href="/install/mac/" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-black font-semibold text-sm hover:bg-white/90 transition-all">
+            Haven't set up a gateway yet?
+          </a>
+          <a href="/" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl glass-elevated border border-white/10 font-semibold text-sm text-white/80 hover:text-white transition-all">
             Back to home
           </a>
-          <a href="https://github.com/mikeypaepke-gif/carapace-site/issues" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl glass-elevated border border-white/10 font-semibold text-sm text-white/80 hover:text-white transition-all">
-            Report an issue
-          </a>
         </div>
       </div>
-    </div>
-  </section>
-
-  <!-- STUCK -->
-  <section class="py-16 border-t border-white/[0.05]">
-    <div class="max-w-4xl mx-auto px-6 text-center">
-      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-white/40 mb-4">Stuck?</p>
-      <h2 class="text-xl sm:text-2xl font-bold mb-3">Open an issue on GitHub.</h2>
-      <p class="text-sm text-white/45 max-w-md mx-auto leading-relaxed mb-6">
-        Bug reports, feature requests, and PRs welcome.
-      </p>
-      <a href="https://github.com/mikeypaepke-gif/carapace-site/issues" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl glass-elevated border border-white/10 font-semibold text-sm hover:bg-white/[0.08] transition-all">
-        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .296c-6.627 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.385.6.11.793-.26.793-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.755-1.333-1.755-1.09-.744.082-.73.082-.73 1.205.086 1.838 1.238 1.838 1.238 1.07 1.834 2.807 1.304 3.492.997.108-.775.42-1.304.762-1.604-2.665-.304-5.466-1.334-5.466-5.933 0-1.31.47-2.381 1.235-3.221-.124-.304-.535-1.524.117-3.176 0 0 1.008-.323 3.3 1.23.957-.266 1.98-.4 3-.405 1.02.005 2.043.139 3 .405 2.29-1.553 3.297-1.23 3.297-1.23.653 1.652.242 2.872.118 3.176.77.84 1.234 1.911 1.234 3.221 0 4.61-2.806 5.625-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .319.192.694.8.576 4.765-1.589 8.2-6.085 8.2-11.385 0-6.627-5.373-12-12-12z"/></svg>
-        Open an issue
-      </a>
     </div>
   </section>
 
   <!-- FOOTER -->
   <footer class="border-t border-white/[0.05] py-10">
     <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-white/30">
-      <div class="flex items-center gap-3"><img src="/assets/app-icon.png" alt="" class="w-6 h-6 rounded-md opacity-60"><span>CARAPACE · <a href="/" class="hover:text-white/60 transition-colors">carapace.info</a></span></div>
-      <div class="flex items-center gap-5">
+      <div class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-6 h-6 rounded-md opacity-60">
+        <span>CARAPACE · <a href="/" class="hover:text-white/60 transition-colors">carapace.info</a></span>
+      </div>
+      <div class="flex flex-wrap justify-center items-center gap-x-5 gap-y-2">
         <a href="/install/mac/" class="hover:text-white/60 transition-colors">Mac</a>
         <a href="/install/linux/" class="hover:text-white/60 transition-colors">Linux</a>
         <a href="/install/ios/" class="hover:text-white/60 transition-colors">iOS</a>
+        <a href="/troubleshooting/" class="hover:text-white/60 transition-colors">Help</a>
         <a href="/terms/" class="hover:text-white/60 transition-colors">Terms</a>
+        <a href="/privacy/" class="hover:text-white/60 transition-colors">Privacy</a>
         <a href="https://github.com/mikeypaepke-gif/carapace-site" class="hover:text-white/60 transition-colors">GitHub</a>
       </div>
     </div>
   </footer>
-
-  <script>
-    const obs = new IntersectionObserver((entries) => {
-      for (const e of entries) if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); }
-    }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
-    document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
-  </script>
 </body>
 </html>

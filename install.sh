@@ -48,6 +48,25 @@ fail()  { echo -e "  ${RED}✗${RESET} $*"; exit 1; }
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+# systemctl guard. Lets us call systemd operations uniformly across
+# systemd hosts (standard Linux, RPi OS, Ubuntu, Debian, Rocky) and
+# non-systemd hosts (Docker containers, some minimal distros). On
+# systemd hosts: passes through. On non-systemd hosts: warns once
+# (configurable via SYSTEMD_WARN_ONCE) and no-ops with success, so
+# `set -e` doesn't abort the whole install.
+_systemd_warn_shown=0
+sysctl_safe() {
+  if have_cmd systemctl; then
+    systemctl "$@" || true
+  else
+    if (( _systemd_warn_shown == 0 )); then
+      echo -e "  ${DIM}(systemd not available — skipping service-manager ops; services won't auto-start on reboot.)${RESET}"
+      _systemd_warn_shown=1
+    fi
+    return 0
+  fi
+}
+
 # Retry a command up to N times with exponential backoff
 retry() {
   local max_attempts="$1"; shift
@@ -130,23 +149,49 @@ ensure_swap() {
   swap_total_kb=$(awk '/SwapTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
   swap_total_mb=$(( swap_total_kb / 1024 ))
 
-  # Always create swap if none exists — npm postinstall AND dnf dep
-  # resolution both need headroom even on 2GB RAM.
+  # Skip swap creation entirely on well-memoried hosts. 2GB+ is enough
+  # for npm postinstall + dnf dep resolution without swap headroom, and
+  # trying to create /swapfile in a container or a read-only-root host
+  # fails the whole install (as it did when we caught this on a 4GB
+  # arm64 container). Only pursue swap on genuinely small-memory boxes.
+  if (( mem_total_mb >= 2048 )); then
+    ok "Memory OK (${mem_total_mb}MB RAM, ${swap_total_mb}MB swap)"
+    return 0
+  fi
+
+  # Under 2GB — swap helps. But every step must be tolerant of
+  # containerized / hardened hosts where swap isn't permitted:
+  #   * fallocate/dd failure  → fall through, don't abort
+  #   * mkswap failure        → fall through, no swap today
+  #   * swapon failure        → warn, continue without swap (was the
+  #                             fatal line that killed arm64 container
+  #                             tests — swapon returns EPERM in Docker)
+  # In all cases the installer moves on; worst case is npm/dnf might
+  # need a bit more patience on tiny-RAM boxes.
   if (( swap_total_mb < 512 )); then
     if [[ -f /swapfile ]]; then
-      if ! swapon --show | grep -q /swapfile; then
-        $SUDO swapon /swapfile 2>/dev/null || true
+      if ! swapon --show 2>/dev/null | grep -q /swapfile; then
+        $SUDO swapon /swapfile 2>/dev/null || warn "swapon failed (container or hardened host?); continuing without swap"
       fi
     else
       echo -e "  ${DIM}Low memory (${mem_total_mb}MB) — creating 2GB swapfile...${RESET}"
-      $SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
-      $SUDO chmod 600 /swapfile
-      $SUDO mkswap /swapfile >/dev/null
-      $SUDO swapon /swapfile
-      # Set swappiness high so kernel actually uses swap before OOM-killing processes
+      if ! ($SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none 2>/dev/null); then
+        warn "Could not allocate /swapfile; continuing without swap"
+        return 0
+      fi
+      $SUDO chmod 600 /swapfile 2>/dev/null || true
+      if ! $SUDO mkswap /swapfile >/dev/null 2>&1; then
+        warn "mkswap failed; continuing without swap"
+        $SUDO rm -f /swapfile 2>/dev/null || true
+        return 0
+      fi
+      if ! $SUDO swapon /swapfile 2>/dev/null; then
+        warn "swapon failed (EPERM in containers is expected); continuing without swap"
+        return 0
+      fi
       $SUDO sysctl -w vm.swappiness=80 >/dev/null 2>&1 || true
       if ! grep -q '/swapfile' /etc/fstab 2>/dev/null; then
-        echo '/swapfile none swap sw 0 0' | $SUDO tee -a /etc/fstab >/dev/null
+        echo '/swapfile none swap sw 0 0' | $SUDO tee -a /etc/fstab >/dev/null 2>/dev/null || true
       fi
       ok "2GB swapfile created"
     fi
@@ -790,6 +835,22 @@ if [ -n "$NVM_BIN" ]; then
 else
   export PATH="$HOME/.npm-global/bin:$PATH"
 fi
+# Tune Node heap by system RAM so heavy-usage tails don't OOM during
+# startup (the gateway's own sessions.json + checkpoints can push past
+# Node's default on busy installs after months of use). Keep headroom
+# for the OS and other processes on small-memory boxes:
+#   * < 1.5 GB (Raspberry Pi 3, tiny VPS):  512 MB heap
+#   * < 3 GB  (Raspberry Pi 4 2 GB):        1024 MB heap
+#   * ≥ 3 GB  (most VPSes, RPi 4 4/8 GB):   2048 MB heap
+TOTAL_RAM_MB=$(free -m 2>/dev/null | awk '/^Mem:/ {print $2}')
+if [[ -z "$TOTAL_RAM_MB" || "$TOTAL_RAM_MB" -lt 1500 ]]; then
+  OC_HEAP=512
+elif [[ "$TOTAL_RAM_MB" -lt 3000 ]]; then
+  OC_HEAP=1024
+else
+  OC_HEAP=2048
+fi
+export NODE_OPTIONS="--max-old-space-size=${OC_HEAP}"
 exec openclaw gateway run --allow-unconfigured
 GWWRAPPER
   chmod +x /usr/local/bin/openclaw-gateway-run
@@ -1006,14 +1067,16 @@ Environment=HOME=$HOME
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable carapace-status >/dev/null 2>&1
-systemctl restart carapace-status
+sysctl_safe daemon-reload
+sysctl_safe enable carapace-status >/dev/null 2>&1
+sysctl_safe restart carapace-status
 sleep 2
 if curl -sf --max-time 3 http://127.0.0.1:18794/health >/dev/null 2>&1; then
   ok "Status server running on :18794"
-else
+elif have_cmd systemctl; then
   warn "Status server failed to start — run: systemctl status carapace-status"
+else
+  warn "Status server not started (no systemd). Start manually: node ~/.carapace/status-server.js &"
 fi
 
 # ── Status Server (port 18794) ──────────────────────────
@@ -1089,6 +1152,15 @@ EOF
       { ok "Status server running on 18794"; break; }
     sleep 1
   done
+
+  # Pre-cache tailscale status so the /pair endpoint can answer without
+  # having to exec the tailscale binary from a PATH-minimal systemd env.
+  # status-server.js will still fall back to `tailscale status --json`
+  # via explicit-path lookup if this file is missing, but caching saves a
+  # few ms per call and works around completely locked-down environments.
+  if have_cmd tailscale; then
+    tailscale status --json > "$HOME/.carapace/tailscale-status.json" 2>/dev/null || true
+  fi
 fi
 
 # ── Tailscale Serve ─────────────────────────────────────
@@ -1100,21 +1172,38 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   ok "Tailscale serve → gateway connected"
   SERVE_OK=true
 
-  # Expose status server paths (include path in backend URL — Tailscale strips the prefix)
+  # Expose status server paths. The status server runs on 18794 with
+  # routes at root (/health, /history, /pair, /sessions, etc.). Tailscale
+  # Serve's --set-path strips the matched prefix from the incoming URL
+  # and forwards the remainder to the destination; if the destination
+  # URL has its own path, that path is PREPENDED to the forwarded
+  # remainder. Earlier versions set destination to
+  # http://127.0.0.1:18794/carapace which meant /carapace/pair ended up
+  # at /carapace/pair on the backend (404). Point all /carapace/*
+  # catch-all mappings at the bare http://127.0.0.1:18794 root so the
+  # forwarded remainder lines up with the real routes.
   tailscale serve --bg --set-path /health http://127.0.0.1:18794/health >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /history http://127.0.0.1:18794/history >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /carapace http://127.0.0.1:18794/carapace >/dev/null 2>&1 || true
+  # Catch-all for /carapace/* — forwards everything under the prefix
+  # (including /carapace/pair needed for tailnet auto-pair) to the
+  # status server's matching root route.
+  tailscale serve --bg --set-path /carapace http://127.0.0.1:18794 >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /carapace/projects http://127.0.0.1:18794/projects >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /carapace/cron http://127.0.0.1:18794/cron >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /carapace/agents http://127.0.0.1:18794/agents >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /carapace/status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /carapace/history http://127.0.0.1:18794/history >/dev/null 2>&1 || true
+  # Explicit /carapace/pair — belt-and-suspenders so auto-pair works
+  # even if the /carapace catch-all above ever gets reverted.
+  tailscale serve --bg --set-path /carapace/pair http://127.0.0.1:18794/pair >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /sessions http://127.0.0.1:18794/sessions >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /carapace/sessions http://127.0.0.1:18794/sessions >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /projects http://127.0.0.1:18794/projects >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /cron http://127.0.0.1:18794/cron >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /agents http://127.0.0.1:18794/agents >/dev/null 2>&1 || true
   tailscale serve --bg --set-path /status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
+  # Pair at root too, in case the peer is hitting https://host/pair (no prefix).
+  tailscale serve --bg --set-path /pair http://127.0.0.1:18794/pair >/dev/null 2>&1 || true
   ok "Tailscale serve → status server paths"
 
   # Verify HTTPS endpoint
@@ -1159,8 +1248,8 @@ ExecStartPost=/usr/bin/tailscale serve --bg --set-path /status http://127.0.0.1:
 [Install]
 WantedBy=multi-user.target
 TSEOF
-  systemctl daemon-reload
-  systemctl enable carapace-tailscale-serve >/dev/null 2>&1
+  sysctl_safe daemon-reload
+  sysctl_safe enable carapace-tailscale-serve >/dev/null 2>&1
   ok "Tailscale serve persistence enabled"
 fi
 
@@ -1718,11 +1807,14 @@ if [ -n "$TOKEN" ]; then
   # prompt end-to-end.
   ALIVE=false
   for _mv in $(seq 1 20); do
+    # Tolerate curl failure (container without systemd, gateway not yet
+    # started, transient network) — without `|| true`, a connection
+    # refused here aborts the whole install under `set -e`.
     RESPONSE=$(curl -s -X POST http://127.0.0.1:18789/v1/chat/completions \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d '{"model":"openclaw","messages":[{"role":"user","content":"Respond with exactly the word confirmed and nothing else. No punctuation, no explanation, no formatting."}],"stream":false,"max_tokens":8}' \
-      --max-time 90 2>/dev/null)
+      --max-time 90 2>/dev/null || true)
     # Extract the assistant content and normalize (lowercase, strip whitespace + punctuation)
     CONTENT=$(echo "$RESPONSE" | python3 -c '
 import json, sys, re

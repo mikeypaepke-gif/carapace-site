@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — CARAPACE</title>
+  <meta name="description" content="How CARAPACE handles your data. Short version: it doesn't. Your conversations live on hardware you control.">
+  <meta property="og:title" content="Privacy Policy — CARAPACE">
+  <meta property="og:description" content="How CARAPACE handles your data. Short version: it doesn't.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://carapace.info/privacy/">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="icon" href="/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'] },
+          colors: { teal: { 400: '#00DCC8', 500: '#00C4B4', 600: '#00A89A' } },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { background: #080A12; }
+    .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06); }
+    .gradient-text { background: linear-gradient(135deg, #00DCC8 0%, #00C4B4 50%, #2dd4bf 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+    .legal h2 {
+      font-size: 1.125rem;
+      font-weight: 700;
+      color: rgba(255,255,255,0.9);
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.01em;
+    }
+    .legal p, .legal li {
+      color: rgba(255,255,255,0.55);
+      line-height: 1.7;
+      font-size: 0.9rem;
+    }
+    .legal p { margin-bottom: 0.9rem; }
+    .legal ul { margin: 0.5rem 0 1rem 1.4rem; list-style-type: disc; }
+    .legal li { margin-bottom: 0.35rem; }
+    .legal .callout {
+      display: block;
+      background: rgba(0,220,200,0.04);
+      border-left: 2px solid rgba(0,220,200,0.4);
+      padding: 0.9rem 1.1rem;
+      margin: 0.8rem 0 1.2rem;
+      font-size: 0.88rem;
+      line-height: 1.65;
+      color: rgba(255,255,255,0.7);
+    }
+    .legal a { color: #00DCC8; }
+    .legal a:hover { text-decoration: underline; }
+    .legal strong { color: rgba(255,255,255,0.8); }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #080A12; }
+    ::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
+  </style>
+</head>
+<body class="text-white font-sans antialiased">
+
+  <nav class="fixed top-0 w-full z-50 backdrop-blur-xl bg-[#080A12]/80 border-b border-white/[0.05]">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-8 h-8 rounded-lg">
+        <span class="font-bold tracking-tight">CARAPACE</span>
+      </a>
+      <div class="hidden sm:flex items-center gap-8 text-sm">
+        <a href="/install/mac/" class="text-white/50 hover:text-white transition-colors">Mac</a>
+        <a href="/install/linux/" class="text-white/50 hover:text-white transition-colors">Linux</a>
+        <a href="/install/ios/" class="text-white/50 hover:text-white transition-colors">iOS</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="text-white/50 hover:text-white transition-colors">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <section class="pt-32 pb-8 md:pt-40">
+    <div class="max-w-2xl mx-auto px-6">
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-teal-400 mb-4">Legal</p>
+      <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight mb-3">Privacy Policy</h1>
+      <p class="text-sm text-white/40">Effective Date: April 21, 2026</p>
+    </div>
+  </section>
+
+  <section class="pb-20">
+    <div class="max-w-2xl mx-auto px-6">
+      <div class="glass rounded-2xl p-8 md:p-10 legal">
+
+        <div class="callout">
+          <strong>The short version.</strong> CARAPACE is built so your conversations with AI, your API keys, and the data you process all stay on hardware <em>you</em> control — your Mac, your VPS, or your Raspberry Pi. We (the app authors) don't run a cloud for your conversations. We don't receive them. We can't read them.
+        </div>
+
+        <p>This Privacy Policy explains what the CARAPACE software and website at <a href="https://carapace.info">carapace.info</a> do and do not collect, and what we do with the little information that does reach us. It applies to the Linux installer, the macOS application, the iOS application, and the carapace.info website.</p>
+
+        <h2>1. What we don't collect</h2>
+        <p>CARAPACE is a self-hosted personal AI operating layer. The whole point is <strong>your data doesn't leave your hardware.</strong></p>
+        <ul>
+          <li>We do not run a server that receives your conversations, prompts, transcripts, images, or camera frames. Those go directly between your phone and the gateway you operate (Mac, Linux, or Pi).</li>
+          <li>We do not log your API keys. They live in your phone's Keychain or in configuration files on your own machine.</li>
+          <li>We do not require accounts, sign-in, or email. The iOS app and the macOS app do not have a login screen.</li>
+          <li>We do not run analytics SDKs, advertising SDKs, or tracking pixels. There is no Segment, no Mixpanel, no Google Analytics, no Meta Pixel, no Amplitude — none of it.</li>
+          <li>We do not sell, rent, or share personal data. There is nothing to sell.</li>
+        </ul>
+
+        <h2>2. What does flow over the internet</h2>
+        <p>Running CARAPACE involves some network activity by design. Here's what goes where:</p>
+        <ul>
+          <li><strong>Your phone ↔ your gateway.</strong> Chat, voice, and camera traffic moves directly between your iPhone and the gateway you're paired with, typically over your local network or your Tailnet. We never sit in the middle of this path.</li>
+          <li><strong>Your gateway ↔ AI providers.</strong> When you use Google Gemini, Anthropic Claude, OpenAI, xAI, or other AI providers, your gateway sends your prompts to the provider you configured using the API key <em>you</em> supply. Those providers operate under their own privacy policies. We recommend reviewing them — we don't control what they do with prompts.</li>
+          <li><strong>App updates and installer.</strong> Downloading the macOS DMG or running the Linux installer fetches files from carapace.info (hosted on Cloudflare). Those requests are standard web-server logs (IP address, user agent, timestamp) and are retained briefly by Cloudflare for abuse prevention. We don't correlate them to identities.</li>
+          <li><strong>iOS app downloads and IAP.</strong> Installing the iOS app and any in-app purchase goes through Apple, under Apple's privacy policy — not ours. See section 3.</li>
+        </ul>
+
+        <h2>3. In-app purchases</h2>
+        <p>The iOS app offers one-time, non-subscription in-app purchases that unlock how many gateways a single iPhone can pair with (Household, Power, Corporate). These purchases are processed entirely by Apple using your Apple ID.</p>
+        <ul>
+          <li>We do not receive your name, email, payment method, or billing address from Apple.</li>
+          <li>We do not receive the exact dollar amount you paid — Apple handles pricing, taxes, and refunds.</li>
+          <li>The iOS app asks Apple's StoreKit API which products you currently own on this Apple ID, to unlock the corresponding device cap. That check happens on-device; the answer is cached locally in the iOS <code>Keychain</code> and <code>UserDefaults</code>.</li>
+          <li>Family Sharing propagation (if enabled) and refunds are handled by Apple; we honor whatever StoreKit reports.</li>
+        </ul>
+        <p>If you want a refund, request it through Apple directly (Settings → Apple ID → Subscriptions → Report a Problem, or reportaproblem.apple.com). We don't have access to the transaction and can't issue refunds on Apple's behalf.</p>
+
+        <h2>4. Data stored on your own hardware</h2>
+        <p>The iOS app stores the following locally on your iPhone:</p>
+        <ul>
+          <li>The list of gateways you've paired with (nickname + URL + auth token), in the iOS Keychain and UserDefaults.</li>
+          <li>Your API keys if you've entered any, in the iOS Keychain.</li>
+          <li>Conversation history cache, to avoid re-fetching on every app open. This is local-only.</li>
+          <li>App preferences (camera quality, wake word, voice selection, theme).</li>
+          <li>Optional diagnostic logs if you enable the Debug Console. These are never transmitted unless you explicitly share them.</li>
+        </ul>
+        <p>The macOS app and Linux installer store config, tokens, and cached conversations on the machine where they run. Deleting the app (or the config directory) removes the data.</p>
+
+        <h2>5. Microphone and camera</h2>
+        <p>The iOS app requests microphone access for voice features and camera access for vision features. These only activate when you explicitly start a voice session or open a camera view. Audio and video frames are streamed <em>directly</em> from your phone to your gateway — we don't receive or proxy them.</p>
+        <p>An optional "wake word" setting keeps the microphone armed in low-power passive mode so the app can hear "Hey Claw." Local detection only — no audio is sent anywhere until the wake word fires and you start a session.</p>
+
+        <h2>6. Cookies and local storage</h2>
+        <p>The carapace.info website uses no tracking cookies. The only storage is first-party, same-origin <code>localStorage</code> used to remember UI preferences (e.g. which carousel card you scrolled to). No third-party scripts (other than Tailwind CSS and Google Fonts, both delivered via CDN) run on the site.</p>
+
+        <h2>7. Children</h2>
+        <p>The CARAPACE iOS app is not directed at children under 13. We do not knowingly collect data from anyone, but because the app processes inputs (voice, text, camera) that may be sensitive, younger users should use CARAPACE through a parent's Apple ID under Apple Family Sharing, which applies parental controls and purchase approvals.</p>
+
+        <h2>8. Third-party services we rely on</h2>
+        <p>Running the service requires us to rely on a handful of third parties. None of them receive your prompts or conversations:</p>
+        <ul>
+          <li><strong>Apple</strong> — App Store distribution, StoreKit in-app purchases, iCloud Keychain (for your own device, at your option). Apple's privacy policy governs this layer.</li>
+          <li><strong>Cloudflare</strong> — CDN and static hosting for carapace.info and the installer. Standard edge logging.</li>
+          <li><strong>GitHub</strong> — source code hosting and the issue tracker. If you open an issue, everything you paste becomes public. We don't control GitHub.</li>
+          <li><strong>AI providers you configure</strong> — Google, Anthropic, OpenAI, xAI, or others. Your gateway talks to them directly with API keys you provide. Their policies govern how they handle your prompts.</li>
+        </ul>
+
+        <h2>9. Your rights</h2>
+        <p>Because CARAPACE is self-hosted, most of your data is already in your hands — there's no "data export" request to make of us for your conversations. If you have questions about specific data you believe we hold (for example, installer logs tied to an IP address), contact us at the address below and we'll respond within 30 days.</p>
+        <p>If you're in a jurisdiction that grants rights to access, correct, or delete personal data (GDPR, CCPA, etc.), those rights apply to the limited data we do have. The main practical exercise of those rights is: request deletion, which will be honored to the extent any data exists to delete.</p>
+
+        <h2>10. Security</h2>
+        <p>We take reasonable technical and administrative measures to protect the limited data we do hold. That said, no system is perfectly secure. Because the architecture keeps your conversations off our servers, a breach of our servers would not expose your AI interactions. Breaches of your gateway (your Mac, your VPS, your Pi) are out of our control — securing that hardware is your responsibility.</p>
+        <p>If we become aware of a security incident affecting data we hold that relates to you, we will notify affected users to the extent required by applicable law.</p>
+
+        <h2>11. Changes</h2>
+        <p>If we update this Policy, the new version will always be at <a href="https://carapace.info/privacy/">carapace.info/privacy/</a>, with a fresh Effective Date at the top. Material changes will also be announced in the iOS app's Settings → About section and on the website. Continued use of the Software after an update means you accept the updated Policy.</p>
+
+        <h2>12. Contact</h2>
+        <p>Privacy questions, concerns, or data-deletion requests: open an issue at <a href="https://github.com/mikeypaepke-gif/carapace-site/issues">github.com/mikeypaepke-gif/carapace-site/issues</a> (public) or reach us privately through the contact form at <a href="https://carapace.info/#contact">carapace.info</a>.</p>
+
+      </div>
+
+      <p class="mt-6 text-center text-xs text-white/25">
+        <a href="/" class="hover:text-white/60 transition-colors">← Back to carapace.info</a>
+        <span class="mx-2">·</span>
+        <a href="/terms/" class="hover:text-white/60 transition-colors">Terms of Use</a>
+      </p>
+    </div>
+  </section>
+
+  <footer class="border-t border-white/[0.05] py-10">
+    <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-white/30">
+      <div class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-6 h-6 rounded-md opacity-60">
+        <span>CARAPACE · <a href="/" class="hover:text-white/60 transition-colors">carapace.info</a></span>
+      </div>
+      <div class="flex items-center gap-5">
+        <a href="/install/mac/" class="hover:text-white/60 transition-colors">Mac</a>
+        <a href="/install/linux/" class="hover:text-white/60 transition-colors">Linux</a>
+        <a href="/install/ios/" class="hover:text-white/60 transition-colors">iOS</a>
+        <a href="/terms/" class="hover:text-white/60 transition-colors">Terms</a>
+        <a href="/privacy/" class="hover:text-white/60 transition-colors">Privacy</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="hover:text-white/60 transition-colors">GitHub</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

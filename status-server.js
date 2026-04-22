@@ -328,6 +328,136 @@ http.createServer((req, res) => {
 
     if (p === "/health") { res.end(JSON.stringify({ ok: true })); return; }
 
+    // Auto-pair for tailnet peers owned by the same user. Mirrors
+    // StatusServer.swift's /pair behavior on Mac.
+    //
+    // Data sources are all FILES, not subprocesses — the status-server
+    // runs under systemd with a minimal environment (HOME only, no PATH
+    // beyond /usr/bin:/bin) so any `execSync("openclaw …")` or
+    // `execSync("tailscale …")` silently fails when those binaries live
+    // under $HOME/.npm-global/bin or $HOME/.nvm/…/bin. Instead we read
+    // ~/.openclaw/openclaw.json for the token and ~/.carapace/tailscale-
+    // status.json (written at install time + refreshed by a tailscale
+    // status subprocess with the right PATH) for tailnet identity. If
+    // the cached status is missing we fall back to `tailscale` via an
+    // explicit-path lookup. No subprocess ⇒ no PATH pitfall.
+    if (p === "/pair") {
+      try {
+        const callerLogin = (req.headers["tailscale-user-login"] || "").trim();
+        if (!callerLogin) {
+          res.writeHead(401);
+          res.end(JSON.stringify({ error: "request did not come through Tailscale Serve" }));
+          return;
+        }
+
+        // 1. Read this machine's own tailnet identity.
+        let tsJson = null;
+        const statusCache = path.join(DIR, "tailscale-status.json");
+        if (fs.existsSync(statusCache)) {
+          try {
+            tsJson = JSON.parse(fs.readFileSync(statusCache, "utf8"));
+          } catch (_) { tsJson = null; }
+        }
+        // Fallback: exec `tailscale status --json` with a resolved path.
+        if (!tsJson) {
+          const { execSync } = require("child_process");
+          const tailscaleCandidates = [
+            "/usr/local/bin/tailscale",
+            "/opt/homebrew/bin/tailscale",
+            "/usr/bin/tailscale",
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+          ];
+          const tsBin = tailscaleCandidates.find(p => { try { return fs.existsSync(p); } catch (_) { return false; }});
+          if (tsBin) {
+            try {
+              const raw = execSync(`"${tsBin}" status --json`, {
+                timeout: 3000,
+                stdio: ["ignore", "pipe", "ignore"],
+              }).toString();
+              tsJson = JSON.parse(raw);
+              // Cache for next call.
+              try { fs.writeFileSync(statusCache, raw); } catch (_) {}
+            } catch (_) { tsJson = null; }
+          }
+        }
+        if (!tsJson) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ error: "tailnet identity unavailable on this machine" }));
+          return;
+        }
+        const selfUserId = tsJson.Self && tsJson.Self.UserID;
+        const users = tsJson.User;
+        const ownerLogin = users && users[String(selfUserId)] && users[String(selfUserId)].LoginName;
+        if (!ownerLogin) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ error: "tailnet owner unresolvable" }));
+          return;
+        }
+        if (callerLogin.toLowerCase() !== String(ownerLogin).toLowerCase()) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ error: "different tailnet user — not authorized to auto-pair" }));
+          return;
+        }
+
+        // 2. Read the gateway bearer token directly from the openclaw
+        //    config file. Avoids `openclaw config get …` (which requires
+        //    PATH to include the nvm/npm-global bin dir — systemd's
+        //    minimal env doesn't).
+        let gwToken = "";
+        try {
+          const cfg = JSON.parse(fs.readFileSync(path.join(OC_DIR, "openclaw.json"), "utf8"));
+          gwToken = (cfg && cfg.gateway && cfg.gateway.auth && cfg.gateway.auth.token) || "";
+        } catch (_) { gwToken = ""; }
+        if (!gwToken) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ error: "this machine has no gateway token yet" }));
+          return;
+        }
+
+        // 3. Build the MagicDNS gateway URL.
+        const selfDNSRaw = tsJson.Self && tsJson.Self.DNSName;
+        const selfDNS = selfDNSRaw ? String(selfDNSRaw).replace(/\.$/, "") : null;
+        const gatewayURL = selfDNS ? `https://${selfDNS}` : null;
+        if (!gatewayURL) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ error: "MagicDNS hostname unavailable" }));
+          return;
+        }
+
+        // 4. Also surface the Gemini API key if this machine has one
+        //    configured. Lets the Mac app auto-populate its vision-mode
+        //    key slot on auto-pair — so the QR code it generates for
+        //    iOS pairing already includes the right key for this
+        //    gateway. Pulled from the google:default profile in
+        //    auth-profiles.json (the standard openclaw provider entry
+        //    for Google/Gemini). Best-effort — absent key just means
+        //    the Mac doesn't auto-populate and the user enters their
+        //    own, same as today.
+        let geminiAPIKey = null;
+        try {
+          const authProfilesPath = path.join(OC_DIR, "agents", "main", "agent", "auth-profiles.json");
+          const ap = JSON.parse(fs.readFileSync(authProfilesPath, "utf8"));
+          const g = ap && ap.profiles && ap.profiles["google:default"];
+          if (g && g.type === "api_key" && typeof g.key === "string" && g.key.length > 0) {
+            geminiAPIKey = g.key;
+          }
+        } catch (_) { /* no key — ok */ }
+
+        const payload = {
+          gatewayURL,
+          token: gwToken,
+          hostname: selfDNS,
+        };
+        if (geminiAPIKey) payload.geminiAPIKey = geminiAPIKey;
+        res.end(JSON.stringify(payload));
+        return;
+      } catch (err) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: "pair handler crashed: " + (err && err.message) }));
+        return;
+      }
+    }
+
     if (p === "/history") {
       const agent = qs.get("agent") || "main";
       res.end(JSON.stringify(loadHistory(Math.min(limit, 200), token, agent)));
