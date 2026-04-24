@@ -606,6 +606,112 @@ function buildFallbackStatus(status, detail) {
   };
 }
 
+// ============================================================================
+// SSE — real-time push for iOS dashboard views
+// ============================================================================
+// Replaces per-view polling timers. iOS opens ONE long-lived connection to
+// /events; on every relevant file change the server pushes a tiny signal
+// frame and iOS re-fetches authoritative data from the existing GET
+// endpoints. Failure modes:
+//   • iOS app backgrounds → URLSession kills the stream → SSEClient
+//     reconnects on next foreground (app code's job).
+//   • SSE never establishes → iOS falls back to a 30s polling timer
+//     per view (app code's job).
+//   • Many rapid file writes (e.g. a chat session jsonl getting appended
+//     during a streaming reply) → debounced 200-500ms so we don't drown
+//     iOS in re-fetches.
+// Auth: optional bearer token in Authorization header. Validated against
+// the gateway token in openclaw.json — same model as every other endpoint.
+const SSE_CLIENTS = new Set();
+const SSE_HEARTBEAT_MS = 30000; // every 30s, send a keep-alive comment
+const SSE_MAX_CLIENTS = 50;     // safety cap; one Mac + one iPhone is the norm
+
+function sseValidateToken(req) {
+  // Same logic loadHistory uses — if the gateway has a configured token,
+  // require Bearer match; otherwise any caller is accepted (loopback).
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(OC_DIR, "openclaw.json"), "utf8"));
+    const gwToken = cfg && cfg.gateway && cfg.gateway.auth && cfg.gateway.auth.token;
+    if (!gwToken) return true;
+    const auth = (req.headers["authorization"] || "").trim();
+    const provided = auth.startsWith("Bearer ") ? auth.slice(7).trim() : auth;
+    return provided === gwToken;
+  } catch { return true; } // fail-open if config unreadable (rare)
+}
+
+function sseBroadcast(eventType, payload = {}) {
+  const frame = `event: ${eventType}\ndata: ${JSON.stringify({ ...payload, ts: Date.now() })}\n\n`;
+  for (const client of SSE_CLIENTS) {
+    try { client.write(frame); }
+    catch { SSE_CLIENTS.delete(client); }
+  }
+}
+
+function sseDebounce(fn, ms) {
+  let timer = null;
+  return () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => { timer = null; fn(); }, ms);
+  };
+}
+
+const sseProjectsChanged = sseDebounce(() => sseBroadcast("projects.updated"), 200);
+const sseCronChanged     = sseDebounce(() => sseBroadcast("cron.updated"), 200);
+const sseAgentsChanged   = sseDebounce(() => sseBroadcast("agents.updated"), 500);
+
+// File watchers — wrapped in try/catch because the watched path might not
+// exist yet on a fresh install (will be created later by the agent or by
+// a sync). When that happens we defer + retry on a 5s tick until the file
+// appears, then attach the watcher and stop polling.
+function sseWatchFile(filePath, onChange) {
+  let watcher = null;
+  function attach() {
+    if (watcher) return;
+    try {
+      watcher = fs.watch(filePath, { persistent: true }, onChange);
+      watcher.on("error", () => { try { watcher.close(); } catch {} watcher = null; setTimeout(attach, 5000); });
+    } catch {
+      setTimeout(attach, 5000);
+    }
+  }
+  attach();
+}
+
+function sseWatchDirRecursive(dirPath, onChange) {
+  let watcher = null;
+  function attach() {
+    if (watcher) return;
+    if (!fs.existsSync(dirPath)) { setTimeout(attach, 5000); return; }
+    try {
+      // recursive: true is supported on macOS + Linux (kernel 2.6.13+).
+      // Filter out write events on non-jsonl files to keep noise down.
+      watcher = fs.watch(dirPath, { persistent: true, recursive: true }, (event, filename) => {
+        if (!filename) return;
+        if (!filename.endsWith(".jsonl") && !filename.endsWith("sessions.json")) return;
+        onChange();
+      });
+      watcher.on("error", () => { try { watcher.close(); } catch {} watcher = null; setTimeout(attach, 5000); });
+    } catch {
+      setTimeout(attach, 5000);
+    }
+  }
+  attach();
+}
+
+sseWatchFile(MEMORY_PATH, sseProjectsChanged);
+sseWatchFile(path.join(DIR, "carapace-cron-tracker.json"), sseCronChanged);
+sseWatchDirRecursive(path.join(OC_DIR, "agents"), sseAgentsChanged);
+
+// Heartbeat — keeps NAT/proxy/load-balancer mappings warm and lets iOS
+// detect dead connections via TCP reset rather than waiting for a
+// keepalive timeout.
+setInterval(() => {
+  for (const client of SSE_CLIENTS) {
+    try { client.write(": heartbeat\n\n"); }
+    catch { SSE_CLIENTS.delete(client); }
+  }
+}, SSE_HEARTBEAT_MS).unref(); // .unref so this interval doesn't block process exit
+
 http.createServer((req, res) => {
   let body = "";
   req.on("data", d => { body += d; });
@@ -621,6 +727,39 @@ http.createServer((req, res) => {
     const token = (req.headers["authorization"] || "").replace("Bearer ", "").trim() || null;
 
     if (p === "/health") { res.end(JSON.stringify({ ok: true })); return; }
+
+    // SSE — long-lived event stream. Sends real-time signals when
+    // server-side data changes (projects, cron, agents) so iOS can
+    // re-fetch immediately instead of polling. See SSE comment block
+    // above for full design notes.
+    if (p === "/events") {
+      if (!sseValidateToken(req)) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid token" }));
+        return;
+      }
+      if (SSE_CLIENTS.size >= SSE_MAX_CLIENTS) {
+        res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "30" });
+        res.end(JSON.stringify({ error: "too many SSE clients" }));
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no", // disable any reverse-proxy buffering
+        "Access-Control-Allow-Origin": "*",
+      });
+      // Initial frame so clients know the connection is alive + can render
+      // a "connected" UI state. Includes the server's idea of what events
+      // exist so the client can show a debug list.
+      res.write(`event: ready\ndata: ${JSON.stringify({ ts: Date.now(), eventTypes: ["projects.updated", "cron.updated", "agents.updated"] })}\n\n`);
+      SSE_CLIENTS.add(res);
+      const cleanup = () => { SSE_CLIENTS.delete(res); try { res.end(); } catch {} };
+      req.on("close", cleanup);
+      req.on("error", cleanup);
+      return;
+    }
 
     // Auto-pair for tailnet peers owned by the same user. Mirrors
     // StatusServer.swift's /pair behavior on Mac.
