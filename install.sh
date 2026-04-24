@@ -221,6 +221,91 @@ PY
   ok "CARAPACE vision rules installed into MEMORY.md."
 }
 
+# ── OpenClaw discovery + PATH-persistence helpers ────────
+# Defined at top-level (NOT inside the SKIP_OPENCLAW_SETUP block) so
+# they're callable on every code path: fresh install, upgrade, or
+# "keep my existing OpenClaw" skip path. The persist call has to fire
+# even when we skip steps 1-2, otherwise re-runs on a box that already
+# has openclaw never write /etc/profile.d and `openclaw: command not
+# found` persists in fresh shells.
+find_openclaw() {
+  if have_cmd openclaw; then command -v openclaw; return 0; fi
+  for nvmdir in "$HOME"/.nvm/versions/node/*/bin; do
+    [[ -x "$nvmdir/openclaw" ]] && { echo "$nvmdir/openclaw"; return 0; }
+  done
+  for p in /usr/local/bin/openclaw /usr/bin/openclaw "$HOME/.npm-global/bin/openclaw"; do
+    [[ -x "$p" ]] && { echo "$p"; return 0; }
+  done
+  local npmbin
+  npmbin="$(npm prefix -g 2>/dev/null)/bin/openclaw"
+  [[ -x "$npmbin" ]] && { echo "$npmbin"; return 0; }
+  return 1
+}
+
+# Clean dirty install state (ENOTEMPTY fix)
+clean_dirty_install() {
+  local oc_lib="$HOME/.openclaw/lib/node_modules/openclaw"
+  if [[ -d "$oc_lib" ]]; then
+    if [[ ! -x "$oc_lib/bin/openclaw.js" ]] && [[ ! -x "$oc_lib/dist/cli/index.js" ]]; then
+      warn "Incomplete OpenClaw install — clearing broken package..."
+      rm -rf "$oc_lib"
+      rm -rf "$HOME/.openclaw/lib/node_modules/.openclaw-"* 2>/dev/null || true
+      ok "Cleared broken package (config preserved)"
+    fi
+  fi
+}
+
+# Persist openclaw on PATH for fresh shells, system services, and SSH.
+# MUST run on every install — including upgrades where openclaw was
+# already on PATH. All system-file writes routed through `$SUDO tee` so
+# they work whether $SUDO is empty (root) or "sudo" (non-root user).
+persist_openclaw_path() {
+  local oc_path="$1"
+  [[ -n "$oc_path" ]] || return 0
+  local oc_dir
+  oc_dir="$(dirname "$oc_path")"
+
+  # User-level shell rc
+  local SHELL_RC="$HOME/.bashrc"
+  [[ -f "$HOME/.zshrc" ]] && SHELL_RC="$HOME/.zshrc"
+  grep -qF "$oc_dir" "$SHELL_RC" 2>/dev/null || echo "export PATH=\"$oc_dir:\$PATH\"" >> "$SHELL_RC"
+  if [[ -f "$HOME/.profile" ]]; then
+    grep -qF "$oc_dir" "$HOME/.profile" 2>/dev/null || echo "export PATH=\"$oc_dir:\$PATH\"" >> "$HOME/.profile"
+  fi
+  # Ensure nvm sourced in shell rc
+  if [[ -s "$HOME/.nvm/nvm.sh" ]] && ! grep -q 'NVM_DIR' "$SHELL_RC" 2>/dev/null; then
+    echo 'export NVM_DIR="$HOME/.nvm"' >> "$SHELL_RC"
+    echo '[ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"' >> "$SHELL_RC"
+  fi
+
+  # /etc/profile.d for all shells (system-wide PATH).
+  if [[ -d /etc/profile.d ]]; then
+    local NVM_ACTIVE_BIN
+    NVM_ACTIVE_BIN="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1 || true)"
+    $SUDO tee /etc/profile.d/openclaw.sh > /dev/null << PROFEOF
+export NVM_DIR="$HOME/.nvm"
+[ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
+# Explicit nvm node bin path for non-interactive shells
+export PATH="${NVM_ACTIVE_BIN}:$HOME/.npm-global/bin:\$PATH"
+PROFEOF
+    $SUDO chmod 644 /etc/profile.d/openclaw.sh
+    # Also add to /etc/environment for system services
+    if [[ -n "$NVM_ACTIVE_BIN" ]] && ! grep -qF "$NVM_ACTIVE_BIN" /etc/environment 2>/dev/null; then
+      $SUDO sed -i '/\.nvm\/versions\/node/d' /etc/environment 2>/dev/null || true
+      echo "PATH=\"${NVM_ACTIVE_BIN}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"" | $SUDO tee -a /etc/environment > /dev/null || true
+    fi
+    # Also write to /etc/bash.bashrc for non-interactive SSH sessions
+    if [[ -f /etc/bash.bashrc ]] && ! grep -q 'openclaw nvm' /etc/bash.bashrc 2>/dev/null; then
+      $SUDO tee -a /etc/bash.bashrc > /dev/null << BASHEOF
+# openclaw nvm
+export NVM_DIR="$HOME/.nvm"
+[ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
+export PATH="${NVM_ACTIVE_BIN}:\$PATH"
+BASHEOF
+    fi
+  fi
+}
+
 # ── Privilege check ──────────────────────────────────────
 IS_ROOT=false
 SUDO=""
@@ -652,91 +737,8 @@ fi
 # ══════════════════════════════════════════════════════════
 step "OpenClaw"
 
-find_openclaw() {
-  if have_cmd openclaw; then command -v openclaw; return 0; fi
-  for nvmdir in "$HOME"/.nvm/versions/node/*/bin; do
-    [[ -x "$nvmdir/openclaw" ]] && { echo "$nvmdir/openclaw"; return 0; }
-  done
-  for p in /usr/local/bin/openclaw /usr/bin/openclaw "$HOME/.npm-global/bin/openclaw"; do
-    [[ -x "$p" ]] && { echo "$p"; return 0; }
-  done
-  local npmbin
-  npmbin="$(npm prefix -g 2>/dev/null)/bin/openclaw"
-  [[ -x "$npmbin" ]] && { echo "$npmbin"; return 0; }
-  return 1
-}
-
-# Clean dirty install state (ENOTEMPTY fix)
-clean_dirty_install() {
-  local oc_lib="$HOME/.openclaw/lib/node_modules/openclaw"
-  if [[ -d "$oc_lib" ]]; then
-    if [[ ! -x "$oc_lib/bin/openclaw.js" ]] && [[ ! -x "$oc_lib/dist/cli/index.js" ]]; then
-      warn "Incomplete OpenClaw install — clearing broken package..."
-      rm -rf "$oc_lib"
-      rm -rf "$HOME/.openclaw/lib/node_modules/.openclaw-"* 2>/dev/null || true
-      ok "Cleared broken package (config preserved)"
-    fi
-  fi
-}
-
-# Persist openclaw on PATH for fresh shells, system services, and SSH.
-# MUST run on every install — including upgrades where openclaw was
-# already on PATH. Earlier versions only wrote /etc/profile.d on the
-# fresh-install branch, so re-runs on an existing box left the PATH
-# entry missing and `openclaw: command not found` in new shells.
-persist_openclaw_path() {
-  local oc_path="$1"
-  [[ -n "$oc_path" ]] || return 0
-  local oc_dir
-  oc_dir="$(dirname "$oc_path")"
-
-  # User-level shell rc
-  local SHELL_RC="$HOME/.bashrc"
-  [[ -f "$HOME/.zshrc" ]] && SHELL_RC="$HOME/.zshrc"
-  grep -qF "$oc_dir" "$SHELL_RC" 2>/dev/null || echo "export PATH=\"$oc_dir:\$PATH\"" >> "$SHELL_RC"
-  if [[ -f "$HOME/.profile" ]]; then
-    grep -qF "$oc_dir" "$HOME/.profile" 2>/dev/null || echo "export PATH=\"$oc_dir:\$PATH\"" >> "$HOME/.profile"
-  fi
-  # Ensure nvm sourced in shell rc
-  if [[ -s "$HOME/.nvm/nvm.sh" ]] && ! grep -q 'NVM_DIR' "$SHELL_RC" 2>/dev/null; then
-    echo 'export NVM_DIR="$HOME/.nvm"' >> "$SHELL_RC"
-    echo '[ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"' >> "$SHELL_RC"
-  fi
-
-  # /etc/profile.d for all shells. Writes here ALL require root —
-  # earlier versions did `cat > /etc/profile.d/openclaw.sh` and
-  # `echo >> /etc/environment` directly, which silently failed for
-  # non-root installs (or aborted with `set -e` like the curl-pipe
-  # path on Ubuntu). Routing every system-file write through
-  # `$SUDO tee` is the canonical fix — works whether $SUDO is
-  # empty (already root) or "sudo" (non-root user with sudo).
-  if [[ -d /etc/profile.d ]]; then
-    local NVM_ACTIVE_BIN
-    NVM_ACTIVE_BIN="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1 || true)"
-    $SUDO tee /etc/profile.d/openclaw.sh > /dev/null << PROFEOF
-export NVM_DIR="$HOME/.nvm"
-[ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
-# Explicit nvm node bin path for non-interactive shells
-export PATH="${NVM_ACTIVE_BIN}:$HOME/.npm-global/bin:\$PATH"
-PROFEOF
-    $SUDO chmod 644 /etc/profile.d/openclaw.sh
-    # Also add to /etc/environment for system services
-    if [[ -n "$NVM_ACTIVE_BIN" ]] && ! grep -qF "$NVM_ACTIVE_BIN" /etc/environment 2>/dev/null; then
-      # Remove any prior PATH= line we wrote, then add fresh one
-      $SUDO sed -i '/\.nvm\/versions\/node/d' /etc/environment 2>/dev/null || true
-      echo "PATH=\"${NVM_ACTIVE_BIN}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"" | $SUDO tee -a /etc/environment > /dev/null || true
-    fi
-    # Also write to /etc/bash.bashrc for non-interactive SSH sessions
-    if [[ -f /etc/bash.bashrc ]] && ! grep -q 'openclaw nvm' /etc/bash.bashrc 2>/dev/null; then
-      $SUDO tee -a /etc/bash.bashrc > /dev/null << BASHEOF
-# openclaw nvm
-export NVM_DIR="$HOME/.nvm"
-[ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
-export PATH="${NVM_ACTIVE_BIN}:\$PATH"
-BASHEOF
-    fi
-  fi
-}
+# (find_openclaw, clean_dirty_install, persist_openclaw_path are defined
+# at top-level so they're callable even when SKIP_OPENCLAW_SETUP=true.)
 
 OC_PATH="$(find_openclaw 2>/dev/null || echo "")"
 if [[ -n "$OC_PATH" ]]; then
