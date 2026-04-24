@@ -57,7 +57,12 @@ have_cmd() { command -v "$1" >/dev/null 2>&1; }
 _systemd_warn_shown=0
 sysctl_safe() {
   if have_cmd systemctl; then
-    systemctl "$@" || true
+    # $SUDO is "" when running as root, "sudo" otherwise — works in
+    # both modes. Without this, non-root invocations of
+    # `systemctl daemon-reload` / `enable` / `restart` returned
+    # "Failed to connect to bus" or permission errors and the
+    # service never started.
+    $SUDO systemctl "$@" || true
   else
     if (( _systemd_warn_shown == 0 )); then
       echo -e "  ${DIM}(systemd not available — skipping service-manager ops; services won't auto-start on reboot.)${RESET}"
@@ -1181,7 +1186,7 @@ with open(home + "/.carapace/sync-trackers.sh", "w") as f:
 os.chmod(home + "/.carapace/sync-trackers.sh", 0o755)
 PYEOF
 
-cat > /etc/systemd/system/carapace-status.service << EOF
+$SUDO tee /etc/systemd/system/carapace-status.service > /dev/null << EOF
 [Unit]
 Description=CARAPACE Status Server
 After=network.target
@@ -1348,7 +1353,7 @@ fi
 
 # ── Tailscale serve persistence (survives reboot) ───
 if $SERVE_OK && have_cmd systemctl; then
-  cat > /etc/systemd/system/carapace-tailscale-serve.service << 'TSEOF'
+  $SUDO tee /etc/systemd/system/carapace-tailscale-serve.service > /dev/null << 'TSEOF'
 [Unit]
 Description=CARAPACE Tailscale Serve
 After=network-online.target tailscaled.service
