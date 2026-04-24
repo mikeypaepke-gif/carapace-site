@@ -267,9 +267,17 @@ PY
 inject_carapace_bootstrap() {
   local bootstrap_file="$HOME/.openclaw/workspace/BOOTSTRAP.md"
   if [[ -f "$bootstrap_file" ]]; then
-    # Either openclaw shipped one, or the agent hasn't completed
-    # ours yet from a previous install. Don't touch.
-    return 0
+    # If it's ALREADY ours (has our sentinel), leave alone — agent
+    # may be mid-flight on first hatch and we don't want to clobber
+    # any user-edits or interrupt the run.
+    if grep -q "BEGIN CARAPACE BOOTSTRAP" "$bootstrap_file" 2>/dev/null; then
+      return 0
+    fi
+    # Otherwise it's openclaw's stock bootstrap (or a stale file from
+    # an old install). Back it up and overwrite — our hook in MEMORY.md
+    # is going to send the agent to read this file, so it MUST be ours.
+    local stamp; stamp="$(date +%Y%m%d_%H%M%S)"
+    cp "$bootstrap_file" "${bootstrap_file}.openclaw.bak.${stamp}" 2>/dev/null || true
   fi
   mkdir -p "$(dirname "$bootstrap_file")"
   local tmp_file="${bootstrap_file}.carapace.tmp.$$"
@@ -362,14 +370,16 @@ inject_carapace_bootstrap_hook() {
 
   cat > "$block_file" << 'CARAPACE_BOOTSTRAP_HOOK_EOF'
 <!-- BEGIN CARAPACE BOOTSTRAP HOOK (managed by Carapace installer · do not edit between BEGIN/END) -->
-## First-Launch Hook
+## First-Light Check (do this before every reply)
 
-On your VERY FIRST reply in any session: check whether the file `BOOTSTRAP.md` exists at the workspace root (`~/.openclaw/workspace/BOOTSTRAP.md`).
+Before responding to the user, do this one silent check:
 
-- **If it exists** — that file is your birth certificate. Read it and follow its instructions BEFORE replying normally to whatever the user asked. After completing all of its steps (which include deleting `BOOTSTRAP.md`), continue normally with the user's actual question.
-- **If it does not exist** — bootstrap is already complete. Skip this hook silently and reply normally.
+**Does the file `~/.openclaw/workspace/BOOTSTRAP.md` exist?**
 
-This hook fires on every session start by virtue of being in MEMORY.md, but `BOOTSTRAP.md` is only present until the first hatch completes — so after the user's been bootstrapped this hook becomes a no-op.
+- **YES** → That file is your birth certificate. Read it and execute its instructions BEFORE replying to whatever the user asked. The very last step of those instructions is to **delete `BOOTSTRAP.md`** — once you do that, this check becomes a permanent no-op for every future turn. Don't skip the delete; it's how this hook stops firing.
+- **NO** → Bootstrap is already complete. Skip silently and reply normally to the user.
+
+This is intentionally checked every turn (not just on session start) because session reuse and history replay can mask "first reply" semantics. The check is cheap — a single file existence test — and harmless once `BOOTSTRAP.md` is gone.
 
 <!-- END CARAPACE BOOTSTRAP HOOK -->
 CARAPACE_BOOTSTRAP_HOOK_EOF
