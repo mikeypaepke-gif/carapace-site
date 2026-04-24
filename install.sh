@@ -91,6 +91,129 @@ run() {
   fi
 }
 
+# ── Vision rules block injector ──────────────────────────
+# Safely upserts the CARAPACE VISION RULES block into the user's
+# OpenClaw memory file (~/.openclaw/workspace/memory/MEMORY.md) so
+# the gateway agent knows how to handle the iPhone vision payload
+# (image-attachment ordering, [ctx] line, focus grid, scan contact
+# sheet, brevity / anti-list directives).
+#
+# Safety guarantees:
+#   * Never modifies content outside the BEGIN/END markers
+#   * Atomic write (tmp file + rename) — no partial writes if killed
+#   * Verifies non-managed sections byte-match original before swap
+#   * Backs up original to MEMORY.md.carapace.bak.<timestamp> the
+#     FIRST time we touch the file (when no sentinels yet exist)
+#   * Idempotent — re-running just refreshes the block in place
+#
+# If MEMORY.md doesn't exist yet, creates it with just our block —
+# safe because OpenClaw treats an empty memory file as "no facts."
+inject_carapace_vision_rules() {
+  local memory_file="$HOME/.openclaw/workspace/memory/MEMORY.md"
+  local begin_marker="<!-- BEGIN CARAPACE VISION RULES"
+  local end_marker="<!-- END CARAPACE VISION RULES"
+  local block_file
+  block_file="$(mktemp)"
+  trap "rm -f '$block_file'" EXIT
+
+  cat > "$block_file" << 'CARAPACE_VISION_BLOCK_EOF'
+<!-- BEGIN CARAPACE VISION RULES (managed by Carapace installer — do not edit between BEGIN/END; agent learnings go below the END marker) -->
+## Vision Response Rules (vision turns only)
+
+A "vision turn" is any user message tagged with `👁️ [vision]` AND/OR containing one or more image attachments AND/OR ending with a `[ctx] …` suffix line. If none of those are present, this block does NOT apply — fall back to your normal behavior.
+
+**Reading the payload:**
+- **Image 1** = wide camera frame (what the user is pointing at).
+- **Image 2** (optional) = labeled focus grid of subjects the user explicitly tapped, each cell stamped `[N]` and optionally `· 2.8m`. Only present when the user pinned focus stickers. It is NOT a separate scene — it is a labeled subset of image 1.
+- **Image 3** (optional) = temporal contact-sheet from a SCAN turn — 6–12 cells laid out in a grid, each stamped `T+Ns` (seconds from scan start). Only present when the user ran scan mode. The cells are time-spread snapshots of the SAME sweep, in chronological order — treat them as a panorama-equivalent of the scanned area, not separate scenes. Use them together to understand "what was in the room/fridge/shelf" the user was sweeping.
+- **`[ctx] …` line** = quiet context hint at the end of the user message. May contain `focused (N): label@distance`, barcode, OCR text, and a brevity directive. Treat as advisory; the user's actual question is the text BEFORE the `[ctx]` line.
+
+**Hard rules:**
+- Match the user's tone and length. Casual greeting → casual reply. Specific question → focused answer. Reply in 1–2 short sentences unless the user explicitly asks for detail or a list.
+- Do NOT use lists, bullets, or section headers in chit-chat, casual, or empathetic conversations. Plain prose only. Lists are allowed only when the user explicitly asks for one.
+- The on-device label (e.g., `OUTDOOR`, `SKY`) is a NOISY guess from a small classifier. Trust your own visual perception of the image. Do NOT correct the label out loud unless the user asks; just answer based on what you see.
+- The image is a snapshot from a camera that may have been moving (motion blur), in low light (noise), or only partially focused. These are PHOTO-CAPTURE ARTIFACTS, not attributes of the real-world subject. Do NOT comment on blur, focus, exposure, lighting, framing, or photo quality in your reply unless the user explicitly asks. Describe what you SEE, not how clearly you can see it.
+- When the user has pinned focus subjects, those are what they're asking about. Use image 2 to identify each `[N]` and answer about them — do not pivot to describing the rest of the scene.
+- When NO focus is pinned and the user asks about a specific item, answer from image 1 and you may suggest they double-tap that item to peel a focused sticker for sharper detail. Mention this at most once per turn — never nag.
+
+**Fallbacks:**
+- If image attachments are absent but the message is clearly about something visible, answer from text + memory; don't hallucinate visual details.
+- If the user's question is ambiguous about WHICH subject in image 1, ask one short clarifying question instead of guessing.
+
+<!-- END CARAPACE VISION RULES -->
+CARAPACE_VISION_BLOCK_EOF
+
+  mkdir -p "$(dirname "$memory_file")"
+  local tmp_file="${memory_file}.carapace.tmp.$$"
+
+  if [[ ! -f "$memory_file" ]]; then
+    cat "$block_file" > "$tmp_file"
+    mv "$tmp_file" "$memory_file"
+    ok "Created MEMORY.md with CARAPACE vision rules (was absent)."
+    return 0
+  fi
+
+  local has_block
+  has_block="$(python3 - "$memory_file" "$begin_marker" "$end_marker" <<'PY'
+import sys
+path, begin, end = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, "r", encoding="utf-8") as f:
+    content = f.read()
+print("yes" if begin in content and end in content else "no")
+PY
+)"
+
+  if [[ "$has_block" == "no" ]]; then
+    local stamp; stamp="$(date +%Y%m%d-%H%M%S)"
+    cp "$memory_file" "${memory_file}.carapace.bak.${stamp}"
+    ok "Backed up MEMORY.md → ${memory_file}.carapace.bak.${stamp} (first install)"
+  fi
+
+  python3 - "$memory_file" "$tmp_file" "$begin_marker" "$end_marker" "$block_file" <<'PY'
+import sys, re
+src_path, dst_path, begin_marker, end_marker, block_path = sys.argv[1:6]
+with open(src_path, "r", encoding="utf-8") as f:
+    original = f.read()
+with open(block_path, "r", encoding="utf-8") as f:
+    new_block = f.read().rstrip("\n") + "\n"
+begin_re = re.compile(r"^" + re.escape(begin_marker) + r".*$", re.MULTILINE)
+end_re   = re.compile(r"^" + re.escape(end_marker)   + r".*$", re.MULTILINE)
+b = begin_re.search(original); e = end_re.search(original)
+if b and e and b.start() < e.start():
+    before = original[:b.start()].rstrip("\n")
+    after  = original[e.end():].lstrip("\n")
+    rebuilt = (before + "\n\n" + new_block + ("\n" + after if after else "")) if before else (new_block + ("\n" + after if after else ""))
+    non_managed_original = (before + "\n" + after).strip()
+elif b or e:
+    print("Partial sentinel block in MEMORY.md — aborting.", file=sys.stderr); sys.exit(2)
+else:
+    base = original.rstrip("\n")
+    rebuilt = base + "\n\n" + new_block
+    non_managed_original = base.strip()
+with open(dst_path, "w", encoding="utf-8") as f:
+    f.write(rebuilt)
+with open(dst_path, "r", encoding="utf-8") as f:
+    written = f.read()
+b2 = begin_re.search(written); e2 = end_re.search(written)
+if not b2 or not e2:
+    print("Sentinels missing in rebuilt file — aborting.", file=sys.stderr); sys.exit(3)
+non_managed_written = (written[:b2.start()].rstrip("\n") + "\n" + written[e2.end():].lstrip("\n").rstrip("\n")).strip()
+if non_managed_original != non_managed_written:
+    print("Verification failed — non-managed content drift. Aborting.", file=sys.stderr); sys.exit(4)
+PY
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
+    rm -f "$tmp_file" "$block_file"
+    warn "MEMORY.md upsert aborted (exit $rc) — file untouched."
+    return 1
+  fi
+
+  mv "$tmp_file" "$memory_file"
+  rm -f "$block_file"
+  trap - EXIT
+  ok "CARAPACE vision rules installed into MEMORY.md."
+}
+
 # ── Privilege check ──────────────────────────────────────
 IS_ROOT=false
 SUDO=""
@@ -1286,14 +1409,12 @@ TS=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(js
 [[ -n "$TS" ]] && GW="https://$TS" || GW="http://$(hostname -I 2>/dev/null | awk '{print $1}' || ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v 127.0.0.1 | head -1 || echo '127.0.0.1'):18789"
 ENC_GW=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$GW")
 ENC_TOKEN=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$TOKEN")
-# Optional Gemini key — fold into pair URL so Vision mode is ready immediately
-# post-pair. iOS SettingsManager picks it up and writes to Keychain on import.
-GEMINI_PARAM=""
-if [[ -n "${GEMINI_API_KEY:-}" ]]; then
-  ENC_GEMINI=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$GEMINI_API_KEY")
-  GEMINI_PARAM="&geminiAPIKey=${ENC_GEMINI}"
-fi
-LINK="carapace://config?gatewayBaseURL=${ENC_GW}&token=${ENC_TOKEN}${GEMINI_PARAM}"
+# Vision mode no longer needs a Gemini key — the iPhone runs Apple's
+# on-device perception layer (camera + LiDAR + Vision framework) and
+# routes turns through OpenClaw to whatever chat provider the user
+# picked during setup. The pair URL only carries the gateway address
+# and token now.
+LINK="carapace://config?gatewayBaseURL=${ENC_GW}&token=${ENC_TOKEN}"
 echo ""
 echo "  Gateway: $GW"
 echo "  Token:   ${TOKEN:0:16}..."
@@ -1466,13 +1587,14 @@ except: sys.exit(1)
 " "$AUTH_FILE" 2>/dev/null; then
   ok "AI already configured — skipping"
 elif [[ -n "${GEMINI_API_KEY:-}" ]]; then
-  # ── One-shot install path: env-var Gemini key configures BOTH sides ──
+  # ── Gemini Quickstart: env-var auto-config of the chat provider ──
   # `GEMINI_API_KEY=AIzaSy... curl | bash` should zero-interaction
-  # provision OpenClaw with Gemini as the chat provider AND bake the
-  # same key into the iOS pair URL as the Vision key. Skip the
+  # provision OpenClaw with Gemini as the chat provider — skip the
   # interactive provider picker entirely; user already made their
-  # choice by setting the env var.
-  echo -e "  ${DIM}GEMINI_API_KEY detected — auto-configuring OpenClaw with Gemini...${RESET}"
+  # choice by setting the env var. Vision mode does NOT consume this
+  # key (vision now runs on-device + routes through whatever chat
+  # provider the gateway has configured).
+  echo -e "  ${DIM}GEMINI_API_KEY detected — Gemini Quickstart, configuring OpenClaw chat...${RESET}"
   PROVIDER="google"
   MODEL="google/gemini-2.5-flash"
   API_KEY="$GEMINI_API_KEY"
@@ -1513,7 +1635,7 @@ PYEOF
       curl -sf --max-time 1 http://127.0.0.1:18789/health >/dev/null 2>&1 && break
       sleep 1
     done
-    ok "OpenClaw auto-configured with Gemini — chat + Vision share one key"
+    ok "OpenClaw chat provider set to Gemini (Quickstart)"
   fi
 fi
 
@@ -1877,88 +1999,18 @@ PYEOF
   rm -f "$PROBE_SNAPSHOT_KEYS"
 fi
 
-# ── Gemini Vision key resolution ────────────────────────
-# Rules (in priority order):
-#   1. If the user passed GEMINI_API_KEY as env var, use it (highest priority —
-#      explicit user intent).
-#   2. If OpenClaw's chat provider is already Gemini, REUSE that key for
-#      Vision automatically. No need to ask twice.
-#   3. Otherwise, if stdin is a terminal, prompt: "Want to add a free Gemini
-#      key for Vision mode? (y/n)". If yes, collect + validate against
-#      Google AI Studio's models endpoint.
-#   4. Unset → print a hint and leave Vision unconfigured. User can paste
-#      it in iOS Settings later.
-AUTH_FILE="$HOME/.openclaw/agents/main/agent/auth-profiles.json"
-if [[ -z "${GEMINI_API_KEY:-}" ]] && [[ -f "$AUTH_FILE" ]]; then
-  # Scan the configured provider list for a Gemini key. Keys shape:
-  #   profiles: { "google:<something>": { "key": "AIza...", "provider": "google", "type": "api_key" } }
-  AUTO_GEMINI_KEY=$(python3 -c "
-import json, sys
-try:
-  d = json.load(open('$AUTH_FILE'))
-  for k, v in (d.get('profiles') or {}).items():
-    prov = (v.get('provider') or k.split(':')[0]).lower()
-    if prov in ('google', 'gemini', 'google-ai', 'aistudio'):
-      key = v.get('key') or v.get('apiKey')
-      if key and key.startswith('AIzaSy'):
-        print(key); break
-except Exception:
-  pass
-" 2>/dev/null)
-  if [[ -n "$AUTO_GEMINI_KEY" ]]; then
-    export GEMINI_API_KEY="$AUTO_GEMINI_KEY"
-    ok "Gemini key from OpenClaw provider config — reusing for Vision mode"
-  fi
-fi
+# ── Vision mode configuration ───────────────────────────
+# Vision mode used to need a separate Gemini API key for Gemini Live
+# (real-time camera streaming). It doesn't anymore — the iPhone now
+# runs Apple's on-device perception layer (Vision framework + LiDAR
+# + ScenePerception) and routes every vision turn through OpenClaw to
+# whatever chat provider the user picked. Zero extra config required;
+# whatever model the gateway is wired to will see the camera frames
+# + the iOS-side context hint and respond. The "CARAPACE VISION RULES"
+# block we install into MEMORY.md below tells the gateway agent how
+# to interpret the payload.
 
-# Validate any Gemini key we have (env var OR auto-detected) by hitting
-# Google's models endpoint. If the call fails, null out the key so we
-# don't bake a broken one into the pair URL.
-validate_gemini_key() {
-  local key="$1"
-  [[ -z "$key" ]] && return 1
-  local code
-  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 \
-    "https://generativelanguage.googleapis.com/v1beta/models?key=$key" 2>/dev/null)
-  [[ "$code" = "200" ]]
-}
-
-if [[ -n "${GEMINI_API_KEY:-}" ]]; then
-  echo -e "  ${DIM}Validating Gemini API key...${RESET}"
-  if validate_gemini_key "$GEMINI_API_KEY"; then
-    ok "Gemini key validated — Vision mode ready"
-  else
-    warn "Gemini key rejected by Google AI Studio. Unsetting — Vision will be unconfigured."
-    echo -e "  ${DIM}  Get a free valid key at: https://aistudio.google.com/apikey${RESET}"
-    unset GEMINI_API_KEY
-  fi
-fi
-
-# Interactive prompt ONLY when stdin is a TTY AND we still don't have a
-# key. curl-piped installs (no terminal) skip this branch cleanly.
-if [[ -z "${GEMINI_API_KEY:-}" ]] && { [ -t 0 ] || [ -e /dev/tty ]; }; then
-  echo ""
-  echo -e "  ${TEAL}Add a free Gemini API key for Vision mode (camera + live visual AI)?${RESET}"
-  echo -e "  ${DIM}Free at: https://aistudio.google.com/apikey — or skip and add later in iOS Settings${RESET}"
-  if [ -t 0 ]; then
-    read -rp "  Paste key (blank to skip): " _gemini_in
-  else
-    read -rp "  Paste key (blank to skip): " _gemini_in < /dev/tty || _gemini_in=""
-  fi
-  if [[ -n "$_gemini_in" ]]; then
-    # Trim whitespace + validate
-    _gemini_in="$(echo "$_gemini_in" | tr -d '[:space:]')"
-    if validate_gemini_key "$_gemini_in"; then
-      export GEMINI_API_KEY="$_gemini_in"
-      ok "Gemini key validated — Vision mode ready"
-    else
-      warn "That key was rejected by Google. Skipping Vision setup."
-      echo -e "  ${DIM}  Double-check at: https://aistudio.google.com/apikey${RESET}"
-    fi
-  fi
-fi
-
-echo ""
+inject_carapace_vision_rules
 echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
 echo -e "  ${GREEN}${BOLD}  ✓ CARAPACE is ready!${RESET}"
 echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
@@ -1973,12 +2025,9 @@ carapace-qr 2>/dev/null || {
   [[ -n "$TS" ]] && GW="https://$TS" || GW="http://127.0.0.1:18789"
   ENC_GW=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$GW")
   ENC_TOKEN=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$TOKEN")
-  GEMINI_PARAM=""
-  if [[ -n "${GEMINI_API_KEY:-}" ]]; then
-    ENC_GEMINI=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$GEMINI_API_KEY")
-    GEMINI_PARAM="&geminiAPIKey=${ENC_GEMINI}"
-  fi
-  LINK="carapace://config?gatewayBaseURL=${ENC_GW}&token=${ENC_TOKEN}${GEMINI_PARAM}"
+  # Pair URL is gateway + token only — Vision mode runs entirely on
+  # the iPhone using Apple's on-device perception layer.
+  LINK="carapace://config?gatewayBaseURL=${ENC_GW}&token=${ENC_TOKEN}"
   echo "  Gateway: $GW"
   echo "  Token:   ${TOKEN:0:16}..."
   echo ""
@@ -1992,19 +2041,6 @@ carapace-qr 2>/dev/null || {
 echo ""
 echo -e "  ${DIM}Download CARAPACE for iPhone: https://apps.apple.com/us/app/carapace/id6760282881${RESET}"
 echo ""
-
-# Vision mode requires a separate Gemini key. If the user didn't pass one
-# via env var, point them to where to get one so Vision isn't a dead tile.
-if [[ -z "${GEMINI_API_KEY:-}" ]]; then
-  echo -e "  ${DIM}💡 Vision mode (camera + Gemini Live) needs a free Gemini API key.${RESET}"
-  echo -e "  ${DIM}   Get one at: https://aistudio.google.com/apikey${RESET}"
-  echo -e "  ${DIM}   Re-run with: GEMINI_API_KEY=<key> curl -fsSL https://carapace.info/install.sh | bash${RESET}"
-  echo -e "  ${DIM}   Or paste it in Carapace iOS → Settings → Gemini API Key.${RESET}"
-  echo ""
-else
-  echo -e "  ${GREEN}✓ Gemini API key baked into the pair URL — Vision mode ready.${RESET}"
-  echo ""
-fi
 
 echo -e "  ${BOLD}Other options:${RESET}"
 echo -e "    ${BOLD}openclaw tui${RESET}    — Terminal chat interface"
