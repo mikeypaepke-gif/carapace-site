@@ -1323,11 +1323,16 @@ EOF
 fi
 
 # ── Tailscale Serve ─────────────────────────────────────
+# `tailscale serve` writes to /var/lib/tailscale/serve.json which is
+# root-owned; non-root users get "Access denied: serve config denied"
+# unless `tailscale set --operator=$USER` was previously run. Always
+# go through $SUDO so sudoer installs work on a fresh box without
+# pre-configuring tailscale operator privileges.
 SERVE_OK=false
 if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   echo -e "  ${DIM}Connecting Tailscale Serve...${RESET}"
   # Always run tailscale serve for gateway
-  tailscale serve --bg http://127.0.0.1:18789 >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg http://127.0.0.1:18789 >/dev/null 2>&1 || true
   ok "Tailscale serve → gateway connected"
   SERVE_OK=true
 
@@ -1341,29 +1346,48 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   # at /carapace/pair on the backend (404). Point all /carapace/*
   # catch-all mappings at the bare http://127.0.0.1:18794 root so the
   # forwarded remainder lines up with the real routes.
-  tailscale serve --bg --set-path /health http://127.0.0.1:18794/health >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /history http://127.0.0.1:18794/history >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /health http://127.0.0.1:18794/health >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /history http://127.0.0.1:18794/history >/dev/null 2>&1 || true
   # Catch-all for /carapace/* — forwards everything under the prefix
   # (including /carapace/pair needed for tailnet auto-pair) to the
   # status server's matching root route.
-  tailscale serve --bg --set-path /carapace http://127.0.0.1:18794 >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /carapace/projects http://127.0.0.1:18794/projects >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /carapace/cron http://127.0.0.1:18794/cron >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /carapace/agents http://127.0.0.1:18794/agents >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /carapace/status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /carapace/history http://127.0.0.1:18794/history >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /carapace http://127.0.0.1:18794 >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /carapace/projects http://127.0.0.1:18794/projects >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /carapace/cron http://127.0.0.1:18794/cron >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /carapace/agents http://127.0.0.1:18794/agents >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /carapace/status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /carapace/history http://127.0.0.1:18794/history >/dev/null 2>&1 || true
   # Explicit /carapace/pair — belt-and-suspenders so auto-pair works
   # even if the /carapace catch-all above ever gets reverted.
-  tailscale serve --bg --set-path /carapace/pair http://127.0.0.1:18794/pair >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /sessions http://127.0.0.1:18794/sessions >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /carapace/sessions http://127.0.0.1:18794/sessions >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /projects http://127.0.0.1:18794/projects >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /cron http://127.0.0.1:18794/cron >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /agents http://127.0.0.1:18794/agents >/dev/null 2>&1 || true
-  tailscale serve --bg --set-path /status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /carapace/pair http://127.0.0.1:18794/pair >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /sessions http://127.0.0.1:18794/sessions >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /carapace/sessions http://127.0.0.1:18794/sessions >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /projects http://127.0.0.1:18794/projects >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /cron http://127.0.0.1:18794/cron >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /agents http://127.0.0.1:18794/agents >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
   # Pair at root too, in case the peer is hitting https://host/pair (no prefix).
-  tailscale serve --bg --set-path /pair http://127.0.0.1:18794/pair >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /pair http://127.0.0.1:18794/pair >/dev/null 2>&1 || true
   ok "Tailscale serve → status server paths"
+
+  # ── Tailscale Funnel (public access for phones not on the tailnet) ───
+  # Without funnel, the .ts.net URL is tailnet-only — phones without
+  # Tailscale installed/logged-in CANNOT reach the gateway, and pairing
+  # silently fails with "could not connect" in the iOS app. Funnel makes
+  # the same .ts.net hostname publicly resolvable + reachable while still
+  # requiring the gateway bearer token for actual API access. If the
+  # tailnet ACL doesn't grant funnel for this node, this fails non-fatally
+  # — the user can still pair from a tailnet-attached phone, or enable
+  # funnel manually after tweaking ACLs in the admin console.
+  if $SUDO tailscale funnel --bg http://127.0.0.1:18789 >/dev/null 2>&1; then
+    ok "Tailscale Funnel → gateway publicly reachable (auth still required)"
+    FUNNEL_OK=true
+  else
+    warn "Tailscale Funnel not enabled — phones must be on your tailnet to pair"
+    echo -e "  ${DIM}  Enable funnel for this node at: https://login.tailscale.com/admin/acls${RESET}"
+    echo -e "  ${DIM}  Then re-run: sudo tailscale funnel --bg http://127.0.0.1:18789${RESET}"
+    FUNNEL_OK=false
+  fi
 
   # Verify HTTPS endpoint
   if [[ -n "$TS_HOSTNAME" ]]; then
@@ -1376,11 +1400,18 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   fi
 fi
 
-# ── Tailscale serve persistence (survives reboot) ───
+# ── Tailscale serve+funnel persistence (survives reboot) ───
+# IMPORTANT: tailscale serve and tailscale funnel both write to the
+# same serveConfig in /var/lib/tailscale/. The funnel ExecStartPost
+# MUST run AFTER all serve calls — funnel "promotes" the existing
+# serve config to public, but a subsequent serve call would demote it
+# back to tailnet-only. The "|| true" on the funnel line is for
+# tailnets that don't grant funnel ACLs to this node — install
+# continues, just without public access.
 if $SERVE_OK && have_cmd systemctl; then
   $SUDO tee /etc/systemd/system/carapace-tailscale-serve.service > /dev/null << 'TSEOF'
 [Unit]
-Description=CARAPACE Tailscale Serve
+Description=CARAPACE Tailscale Serve + Funnel
 After=network-online.target tailscaled.service
 Wants=network-online.target tailscaled.service
 
@@ -1403,13 +1434,23 @@ ExecStartPost=/usr/bin/tailscale serve --bg --set-path /projects http://127.0.0.
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /cron http://127.0.0.1:18794/cron
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /agents http://127.0.0.1:18794/agents
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /status http://127.0.0.1:18794/status
+# Promote to public via Funnel — must come AFTER all serve calls.
+# Non-fatal "-" prefix lets the unit succeed even if the tailnet ACL
+# blocks funnel for this node.
+ExecStartPost=-/usr/bin/tailscale funnel --bg http://127.0.0.1:18789
 
 [Install]
 WantedBy=multi-user.target
 TSEOF
   sysctl_safe daemon-reload
   sysctl_safe enable carapace-tailscale-serve >/dev/null 2>&1
-  ok "Tailscale serve persistence enabled"
+  # Start it once now too — until this commit the unit was only enabled,
+  # never started, so a fresh install relied on the imperative serve calls
+  # above (which silently failed for sudoers due to missing $SUDO before
+  # this commit). Starting the unit reconciles the running serve config
+  # with the unit definition.
+  sysctl_safe start carapace-tailscale-serve >/dev/null 2>&1
+  ok "Tailscale serve + funnel persistence enabled"
 fi
 
 # ── Tracker sync cron ───────────────────────────────────
