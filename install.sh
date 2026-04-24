@@ -1175,32 +1175,12 @@ sync_script = textwrap.dedent("""
     json.dump({'version':1,'updated':datetime.now(timezone.utc).isoformat(),'jobs':jobs},
         open(os.path.expanduser('~/.carapace/carapace-cron-tracker.json'),'w'),indent=2)
     "
-    # Sync projects from workspace or seed default
-    python3 - << 'PYEOF2'
-    import json, os, socket
-    from datetime import datetime, timezone
-    proj_file = os.path.expanduser('~/.carapace/carapace-project-tracker.json')
-    ws_tracker = os.path.expanduser('~/.openclaw/workspace/projects/tracker.json')
-    try:
-        data = json.load(open(proj_file))
-    except:
-        data = {'version': 1, 'updated': '', 'projects': []}
-    if os.path.exists(ws_tracker):
-        try:
-            ws = json.load(open(ws_tracker))
-            if ws.get('projects'):
-                data['projects'] = ws['projects']
-                data['updated'] = datetime.now(timezone.utc).isoformat()
-                json.dump(data, open(proj_file, 'w'), indent=2)
-        except:
-            pass
-    elif not data.get('projects'):
-        data['projects'] = [{'id': 'my-server', 'name': 'My Server',
-            'description': 'CARAPACE running on ' + socket.gethostname(),
-            'status': 'green', 'progress': 100, 'workstreams': []}]
-        data['updated'] = datetime.now(timezone.utc).isoformat()
-        json.dump(data, open(proj_file, 'w'), indent=2)
-    PYEOF2
+    # Projects are no longer sync'd here — they live directly in
+    # ~/.openclaw/workspace/memory/MEMORY.md (managed CARAPACE PROJECTS
+    # block, agent-maintained, real-time iOS reflection). status-server.js
+    # reads from MEMORY.md on every /projects request and migrates from
+    # tracker.json on its first boot if the block is absent. Cron only
+    # syncs cron jobs now.
 """).lstrip()
 
 home = os.path.expanduser("~")
@@ -1472,11 +1452,15 @@ TSEOF
   ok "Tailscale serve persistence enabled (tailnet-only)"
 fi
 
-# ── Tracker sync cron ───────────────────────────────────
+# ── Cron-jobs sync cron ─────────────────────────────────
+# Mirrors `openclaw cron list` into ~/.carapace/carapace-cron-tracker.json
+# every 2 minutes so the iOS Cron tab has data to render. Projects are
+# NO LONGER synced here — they live in MEMORY.md and status-server.js
+# reads them in real-time.
 bash ~/.carapace/sync-trackers.sh 2>/dev/null || true
 SYNC_CRON="*/2 * * * * bash $HOME/.carapace/sync-trackers.sh >/dev/null 2>&1"
 ( crontab -l 2>/dev/null | grep -v "sync-trackers" || true; echo "$SYNC_CRON" ) | sort -u | crontab -
-ok "Tracker sync running every 2 minutes"
+ok "Cron jobs sync running every 2 minutes (projects now real-time via MEMORY.md)"
 
 # ══════════════════════════════════════════════════════════
 # Step 7: Helper Commands
