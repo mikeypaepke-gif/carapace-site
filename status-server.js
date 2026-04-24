@@ -26,6 +26,7 @@ const TRACKER_PORT = 18795; // python project-tracker-server (legacy fallback)
 // Status emojis: 🟢 green · 🟡 yellow · 🔴 red · ⚪ idle
 // Owner defaults to `main` when omitted (forward-compat for multi-agent).
 const MEMORY_PATH = path.join(OC_DIR, "workspace", "memory", "MEMORY.md");
+const IDENTITY_PATH = path.join(OC_DIR, "workspace", "IDENTITY.md");
 const PROMPT_META_PATH = path.join(DIR, "project-prompt-meta.json");
 const PROJECTS_BEGIN = "<!-- BEGIN CARAPACE PROJECTS";
 const PROJECTS_END = "<!-- END CARAPACE PROJECTS";
@@ -622,6 +623,48 @@ function buildFallbackStatus(status, detail) {
 //     iOS in re-fetches.
 // Auth: optional bearer token in Authorization header. Validated against
 // the gateway token in openclaw.json — same model as every other endpoint.
+
+// ── IDENTITY parsing ─────────────────────────────────────────────
+// IDENTITY.md is a freeform markdown file the agent fills in during
+// the first-light bootstrap (Name, Creature, Vibe, Emoji). Format
+// isn't strictly defined — model writes whatever feels natural — so
+// the parser is intentionally liberal:
+//   * matches `Name: …`, `**Name:** …`, `- Name: …`, `# Name`, etc.
+//   * case-insensitive field names
+//   * trims whitespace, strips surrounding markdown like *italics*
+//   * empty / unfilled fields → null (template state vs filled state)
+function parseIdentityMd(text) {
+  const fields = ["name", "creature", "vibe", "emoji"];
+  const out = { name: null, creature: null, vibe: null, emoji: null, raw: text };
+  for (const field of fields) {
+    // Match "Name: value" with optional bold/italic/list markers.
+    const re = new RegExp(
+      `^\\s*(?:[-*]\\s+)?(?:\\*\\*)?(?:_)?${field}(?:_)?(?:\\*\\*)?\\s*:\\s*(.+?)\\s*$`,
+      "im"
+    );
+    const m = text.match(re);
+    if (m && m[1]) {
+      let v = m[1].trim();
+      // Strip surrounding markdown emphasis (*foo*, **foo**, _foo_)
+      v = v.replace(/^[*_]+|[*_]+$/g, "").trim();
+      // Skip placeholders/template values
+      if (v && !/^(_+|\.\.\.|todo|tbd|\[.*\])$/i.test(v)) {
+        out[field] = v;
+      }
+    }
+  }
+  return out;
+}
+
+function readIdentity() {
+  try {
+    const text = fs.readFileSync(IDENTITY_PATH, "utf8");
+    return parseIdentityMd(text);
+  } catch {
+    return { name: null, creature: null, vibe: null, emoji: null, raw: "" };
+  }
+}
+
 const SSE_CLIENTS = new Set();
 const SSE_HEARTBEAT_MS = 30000; // every 30s, send a keep-alive comment
 const SSE_MAX_CLIENTS = 50;     // safety cap; one Mac + one iPhone is the norm
@@ -664,6 +707,10 @@ const sseAgentsChanged   = sseDebounce(() => sseBroadcast("agents.updated"), 500
 // historyUpdated, AgentsView observes agentsUpdated, both update
 // in real time without one stomping on the other.
 const sseHistoryChanged  = sseDebounce(() => sseBroadcast("history.updated"), 300);
+// Identity changes are RARE (typically once per install during the
+// first-light bootstrap). Short debounce because the agent writes
+// IDENTITY.md as a single edit, not a streaming append.
+const sseIdentityChanged = sseDebounce(() => sseBroadcast("identity.updated"), 200);
 
 // File watchers — wrapped in try/catch because the watched path might not
 // exist yet on a fresh install (will be created later by the agent or by
@@ -712,6 +759,7 @@ function sseWatchDirRecursive(dirPath, onJsonl, onSessionsJson) {
 
 sseWatchFile(MEMORY_PATH, sseProjectsChanged);
 sseWatchFile(path.join(DIR, "carapace-cron-tracker.json"), sseCronChanged);
+sseWatchFile(IDENTITY_PATH, sseIdentityChanged);
 sseWatchDirRecursive(path.join(OC_DIR, "agents"), sseHistoryChanged, sseAgentsChanged);
 
 // Heartbeat — keeps NAT/proxy/load-balancer mappings warm and lets iOS
@@ -765,7 +813,7 @@ http.createServer((req, res) => {
       // Initial frame so clients know the connection is alive + can render
       // a "connected" UI state. Includes the server's idea of what events
       // exist so the client can show a debug list.
-      res.write(`event: ready\ndata: ${JSON.stringify({ ts: Date.now(), eventTypes: ["projects.updated", "cron.updated", "agents.updated", "history.updated"] })}\n\n`);
+      res.write(`event: ready\ndata: ${JSON.stringify({ ts: Date.now(), eventTypes: ["projects.updated", "cron.updated", "agents.updated", "history.updated", "identity.updated"] })}\n\n`);
       SSE_CLIENTS.add(res);
       // CRITICAL: listen on RES, not REQ. For GET requests the request
       // "close" event fires as soon as the body is consumed (immediate
@@ -775,6 +823,26 @@ http.createServer((req, res) => {
       const cleanup = () => { SSE_CLIENTS.delete(res); try { res.end(); } catch {} };
       res.on("close", cleanup);
       res.on("error", cleanup);
+      return;
+    }
+
+    // Identity — name + emoji + creature + vibe parsed from the
+    // workspace IDENTITY.md the agent fills in during the first-light
+    // bootstrap. iOS uses this to render the agent's chosen identity
+    // in the Agents tab instead of the raw "main" name. Fields are
+    // null until the agent fills them — clients should fall back
+    // gracefully to default labels in that case.
+    if (p === "/identity") {
+      const id = readIdentity();
+      // Strip the raw markdown payload from the response — clients
+      // only need the parsed fields, and shipping the full file is
+      // wasteful + leaks any free-form notes the agent jotted in.
+      const { name, creature, vibe, emoji } = id;
+      res.end(JSON.stringify({
+        name, creature, vibe, emoji,
+        configured: !!(name || emoji),
+        updated: new Date().toLocaleTimeString(),
+      }));
       return;
     }
 
