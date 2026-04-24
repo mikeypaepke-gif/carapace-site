@@ -1603,9 +1603,16 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════
-# Step 9: Configure Your AI (auto-onboard) — skip if user chose to skip OpenClaw setup
+# Step 9: Configure Your AI (auto-onboard)
+#
+# Runs whenever an auth profile is MISSING — even when the user chose
+# to keep their existing OpenClaw setup. The "skip OpenClaw setup"
+# branch is meant to preserve gateway/agent config, not to leave the
+# install half-done with no provider keys. Step 9 itself short-circuits
+# at line ~1620 if the auth profile is already present, so this is
+# safe to run on a fully-configured box too.
 # ══════════════════════════════════════════════════════════
-if ! $SKIP_OPENCLAW_SETUP; then
+if ! $SKIP_OPENCLAW_SETUP || [[ ! -s "$HOME/.openclaw/agents/main/agent/auth-profiles.json" ]]; then
 step "Configure Your AI"
 
 export PATH="$HOME/.npm-global/bin:$PATH"
