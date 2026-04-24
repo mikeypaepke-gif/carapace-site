@@ -658,6 +658,12 @@ function sseDebounce(fn, ms) {
 const sseProjectsChanged = sseDebounce(() => sseBroadcast("projects.updated"), 200);
 const sseCronChanged     = sseDebounce(() => sseBroadcast("cron.updated"), 200);
 const sseAgentsChanged   = sseDebounce(() => sseBroadcast("agents.updated"), 500);
+// history.updated fires only when a session jsonl is appended (a new
+// chat message landed). agents.updated also fires for that case AND
+// for sessions.json metadata changes — iOS ChatView observes
+// historyUpdated, AgentsView observes agentsUpdated, both update
+// in real time without one stomping on the other.
+const sseHistoryChanged  = sseDebounce(() => sseBroadcast("history.updated"), 300);
 
 // File watchers — wrapped in try/catch because the watched path might not
 // exist yet on a fresh install (will be created later by the agent or by
@@ -677,18 +683,24 @@ function sseWatchFile(filePath, onChange) {
   attach();
 }
 
-function sseWatchDirRecursive(dirPath, onChange) {
+function sseWatchDirRecursive(dirPath, onJsonl, onSessionsJson) {
   let watcher = null;
   function attach() {
     if (watcher) return;
     if (!fs.existsSync(dirPath)) { setTimeout(attach, 5000); return; }
     try {
       // recursive: true is supported on macOS + Linux (kernel 2.6.13+).
-      // Filter out write events on non-jsonl files to keep noise down.
+      // Subdivide events by filename so jsonl appends → history.updated
+      // (iOS ChatView re-fetches /history) and sessions.json changes →
+      // agents.updated only (iOS AgentsView re-fetches /status).
       watcher = fs.watch(dirPath, { persistent: true, recursive: true }, (event, filename) => {
         if (!filename) return;
-        if (!filename.endsWith(".jsonl") && !filename.endsWith("sessions.json")) return;
-        onChange();
+        if (filename.endsWith(".jsonl")) {
+          onJsonl();        // history.updated (and agents.updated as a side effect)
+          onSessionsJson(); // because session activity also moved
+        } else if (filename.endsWith("sessions.json")) {
+          onSessionsJson(); // agents.updated only
+        }
       });
       watcher.on("error", () => { try { watcher.close(); } catch {} watcher = null; setTimeout(attach, 5000); });
     } catch {
@@ -700,7 +712,7 @@ function sseWatchDirRecursive(dirPath, onChange) {
 
 sseWatchFile(MEMORY_PATH, sseProjectsChanged);
 sseWatchFile(path.join(DIR, "carapace-cron-tracker.json"), sseCronChanged);
-sseWatchDirRecursive(path.join(OC_DIR, "agents"), sseAgentsChanged);
+sseWatchDirRecursive(path.join(OC_DIR, "agents"), sseHistoryChanged, sseAgentsChanged);
 
 // Heartbeat — keeps NAT/proxy/load-balancer mappings warm and lets iOS
 // detect dead connections via TCP reset rather than waiting for a
@@ -753,7 +765,7 @@ http.createServer((req, res) => {
       // Initial frame so clients know the connection is alive + can render
       // a "connected" UI state. Includes the server's idea of what events
       // exist so the client can show a debug list.
-      res.write(`event: ready\ndata: ${JSON.stringify({ ts: Date.now(), eventTypes: ["projects.updated", "cron.updated", "agents.updated"] })}\n\n`);
+      res.write(`event: ready\ndata: ${JSON.stringify({ ts: Date.now(), eventTypes: ["projects.updated", "cron.updated", "agents.updated", "history.updated"] })}\n\n`);
       SSE_CLIENTS.add(res);
       // CRITICAL: listen on RES, not REQ. For GET requests the request
       // "close" event fires as soon as the body is consumed (immediate
