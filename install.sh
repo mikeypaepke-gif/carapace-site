@@ -714,25 +714,31 @@ else
       echo 'export NVM_DIR="$HOME/.nvm"' >> "$SHELL_RC"
       echo '[ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"' >> "$SHELL_RC"
     fi
-    # /etc/profile.d for all shells
+    # /etc/profile.d for all shells. Writes here ALL require root —
+    # earlier versions did `cat > /etc/profile.d/openclaw.sh` and
+    # `echo >> /etc/environment` directly, which silently failed for
+    # non-root installs (or aborted with `set -e` like the curl-pipe
+    # path on Ubuntu). Routing every system-file write through
+    # `$SUDO tee` is the canonical fix — works whether $SUDO is
+    # empty (already root) or "sudo" (non-root user with sudo).
     if [[ -d /etc/profile.d ]]; then
       NVM_ACTIVE_BIN="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1 || true)"
-      cat > /etc/profile.d/openclaw.sh << PROFEOF
+      $SUDO tee /etc/profile.d/openclaw.sh > /dev/null << PROFEOF
 export NVM_DIR="$HOME/.nvm"
 [ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
 # Explicit nvm node bin path for non-interactive shells
 export PATH="${NVM_ACTIVE_BIN}:$HOME/.npm-global/bin:\$PATH"
 PROFEOF
-      chmod 644 /etc/profile.d/openclaw.sh
+      $SUDO chmod 644 /etc/profile.d/openclaw.sh
       # Also add to /etc/environment for system services
       if [[ -n "$NVM_ACTIVE_BIN" ]] && ! grep -qF "$NVM_ACTIVE_BIN" /etc/environment 2>/dev/null; then
         # Remove any prior PATH= line we wrote, then add fresh one
         $SUDO sed -i '/\.nvm\/versions\/node/d' /etc/environment 2>/dev/null || true
-        echo "PATH=\"${NVM_ACTIVE_BIN}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"" >> /etc/environment || true
+        echo "PATH=\"${NVM_ACTIVE_BIN}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"" | $SUDO tee -a /etc/environment > /dev/null || true
       fi
       # Also write to /etc/bash.bashrc for non-interactive SSH sessions
       if [[ -f /etc/bash.bashrc ]] && ! grep -q 'openclaw nvm' /etc/bash.bashrc 2>/dev/null; then
-        cat >> /etc/bash.bashrc << BASHEOF
+        $SUDO tee -a /etc/bash.bashrc > /dev/null << BASHEOF
 # openclaw nvm
 export NVM_DIR="$HOME/.nvm"
 [ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
