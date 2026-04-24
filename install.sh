@@ -1255,13 +1255,31 @@ if [[ -f "$HOME/.carapace/status-server.js" ]]; then
   cp "$HOME/.carapace/status-server.js" "$BACKUP"
 fi
 # Download the canonical status-server.js from the site. Ships alongside
-# install.sh so it's always in sync with the installer.
+# install.sh so it's always in sync with the installer. The earlier
+# block (1130+) wrote an embedded heredoc copy that goes stale every
+# time the canonical file gains a route (most recently /pair, added in
+# commit ab38b5d). Always overwrite + restart the service so the running
+# process picks up new routes — without the restart, the service stays
+# on whatever version was loaded into memory at last boot, and the iOS
+# / Mac apps hit 404 on routes that exist on disk but not in memory.
 if curl -fsSL --max-time 20 -o "$HOME/.carapace/status-server.js.new" \
       "https://carapace.info/status-server.js" 2>/dev/null; then
   mv "$HOME/.carapace/status-server.js.new" "$HOME/.carapace/status-server.js"
   # Status server binds 127.0.0.1 by default; Tailscale Serve proxies to
   # it from the public HTTPS interface so that's the right default.
   ok "status-server.js installed"
+  # Restart the service NOW so it loads the freshly-downloaded file. The
+  # earlier block already started it with the (stale) embedded heredoc
+  # version; without this restart the running PID keeps the old code in
+  # memory even though the file on disk is current.
+  if have_cmd systemctl && systemctl list-unit-files carapace-status.service >/dev/null 2>&1; then
+    sysctl_safe restart carapace-status >/dev/null 2>&1
+    # Give it a moment to rebind 18794
+    for _r in $(seq 1 5); do
+      curl -sf --max-time 1 http://127.0.0.1:18794/health >/dev/null 2>&1 && break
+      sleep 1
+    done
+  fi
 else
   echo -e "  ${YELLOW}⚠ Could not download status-server.js — iOS dashboard will be empty${RESET}"
 fi
@@ -1417,12 +1435,22 @@ ExecStartPre=/bin/sleep 5
 ExecStart=/usr/bin/tailscale serve --bg http://127.0.0.1:18789
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /health http://127.0.0.1:18794/health
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /history http://127.0.0.1:18794/history
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace http://127.0.0.1:18794/carapace
+# /carapace catch-all — destination is bare (no /carapace suffix) so
+# /carapace/pair → strip → /pair → upstream /pair (200, returns
+# pair JSON the Mac/iOS app expects). The earlier persistence unit
+# shipped /carapace/carapace as the destination, which made the catch-all
+# 404 every sub-path that didn't have an explicit override below, and
+# the Mac app reported "incompatible host" trying to fetch /carapace/pair.
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace http://127.0.0.1:18794
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/projects http://127.0.0.1:18794/projects
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/cron http://127.0.0.1:18794/cron
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/agents http://127.0.0.1:18794/agents
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/status http://127.0.0.1:18794/status
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/history http://127.0.0.1:18794/history
+# /carapace/pair + /pair — explicit so auto-pair survives even if the
+# /carapace catch-all ever drifts back to the broken /carapace destination.
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/pair http://127.0.0.1:18794/pair
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /pair http://127.0.0.1:18794/pair
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /sessions http://127.0.0.1:18794/sessions
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/sessions http://127.0.0.1:18794/sessions
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /projects http://127.0.0.1:18794/projects
