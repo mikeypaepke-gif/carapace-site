@@ -1370,24 +1370,15 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   $SUDO tailscale serve --bg --set-path /pair http://127.0.0.1:18794/pair >/dev/null 2>&1 || true
   ok "Tailscale serve → status server paths"
 
-  # ── Tailscale Funnel (public access for phones not on the tailnet) ───
-  # Without funnel, the .ts.net URL is tailnet-only — phones without
-  # Tailscale installed/logged-in CANNOT reach the gateway, and pairing
-  # silently fails with "could not connect" in the iOS app. Funnel makes
-  # the same .ts.net hostname publicly resolvable + reachable while still
-  # requiring the gateway bearer token for actual API access. If the
-  # tailnet ACL doesn't grant funnel for this node, this fails non-fatally
-  # — the user can still pair from a tailnet-attached phone, or enable
-  # funnel manually after tweaking ACLs in the admin console.
-  if $SUDO tailscale funnel --bg http://127.0.0.1:18789 >/dev/null 2>&1; then
-    ok "Tailscale Funnel → gateway publicly reachable (auth still required)"
-    FUNNEL_OK=true
-  else
-    warn "Tailscale Funnel not enabled — phones must be on your tailnet to pair"
-    echo -e "  ${DIM}  Enable funnel for this node at: https://login.tailscale.com/admin/acls${RESET}"
-    echo -e "  ${DIM}  Then re-run: sudo tailscale funnel --bg http://127.0.0.1:18789${RESET}"
-    FUNNEL_OK=false
-  fi
+  # CARAPACE intentionally stays TAILNET-ONLY (no Funnel). Funnel would
+  # expose the gateway to the public internet via Tailscale's edge nodes,
+  # which means Tailscale terminates TLS and could see traffic in
+  # plaintext, and any leak of the bearer token (browser history, logs,
+  # screenshots of the QR) is exploitable from anywhere on the internet.
+  # The right model for a personal AI is: phone runs Tailscale, joins
+  # your tailnet, hits the .ts.net hostname directly with end-to-end
+  # tunnel encryption. The pair-instructions banner at the end of the
+  # install reminds the user to install Tailscale on their phone.
 
   # Verify HTTPS endpoint
   if [[ -n "$TS_HOSTNAME" ]]; then
@@ -1400,18 +1391,22 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   fi
 fi
 
-# ── Tailscale serve+funnel persistence (survives reboot) ───
-# IMPORTANT: tailscale serve and tailscale funnel both write to the
-# same serveConfig in /var/lib/tailscale/. The funnel ExecStartPost
-# MUST run AFTER all serve calls — funnel "promotes" the existing
-# serve config to public, but a subsequent serve call would demote it
-# back to tailnet-only. The "|| true" on the funnel line is for
-# tailnets that don't grant funnel ACLs to this node — install
-# continues, just without public access.
+# ── Tailscale serve persistence (survives reboot) ───
+# Tailnet-only by design — see the comment in the imperative serve
+# block above for why we don't use Funnel. If you WANT public access
+# (eg. you can't put Tailscale on your phone), add this line to the
+# unit AFTER all serve ExecStartPost lines:
+#   ExecStartPost=-/usr/bin/tailscale funnel --bg http://127.0.0.1:18789
+# The "-" prefix makes it non-fatal if your tailnet ACL blocks funnel.
 if $SERVE_OK && have_cmd systemctl; then
+  # Defensively turn funnel OFF on every install — older versions of
+  # this script (commits 35bf3ea..04feb0a8) shipped a unit that enabled
+  # funnel by default, so an upgrade-in-place could leave a public
+  # config behind. Idempotent: no-op if funnel was never on.
+  $SUDO tailscale funnel --https=443 off >/dev/null 2>&1 || true
   $SUDO tee /etc/systemd/system/carapace-tailscale-serve.service > /dev/null << 'TSEOF'
 [Unit]
-Description=CARAPACE Tailscale Serve + Funnel
+Description=CARAPACE Tailscale Serve (tailnet-only)
 After=network-online.target tailscaled.service
 Wants=network-online.target tailscaled.service
 
@@ -1434,23 +1429,19 @@ ExecStartPost=/usr/bin/tailscale serve --bg --set-path /projects http://127.0.0.
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /cron http://127.0.0.1:18794/cron
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /agents http://127.0.0.1:18794/agents
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /status http://127.0.0.1:18794/status
-# Promote to public via Funnel — must come AFTER all serve calls.
-# Non-fatal "-" prefix lets the unit succeed even if the tailnet ACL
-# blocks funnel for this node.
-ExecStartPost=-/usr/bin/tailscale funnel --bg http://127.0.0.1:18789
 
 [Install]
 WantedBy=multi-user.target
 TSEOF
   sysctl_safe daemon-reload
   sysctl_safe enable carapace-tailscale-serve >/dev/null 2>&1
-  # Start it once now too — until this commit the unit was only enabled,
+  # Start it once now too — until commit 35bf3ea the unit was only enabled,
   # never started, so a fresh install relied on the imperative serve calls
   # above (which silently failed for sudoers due to missing $SUDO before
-  # this commit). Starting the unit reconciles the running serve config
-  # with the unit definition.
-  sysctl_safe start carapace-tailscale-serve >/dev/null 2>&1
-  ok "Tailscale serve + funnel persistence enabled"
+  # that commit). Starting the unit reconciles the running serve config
+  # with the unit definition and overwrites any leftover funnel state.
+  sysctl_safe restart carapace-tailscale-serve >/dev/null 2>&1
+  ok "Tailscale serve persistence enabled (tailnet-only)"
 fi
 
 # ── Tracker sync cron ───────────────────────────────────
@@ -2124,6 +2115,12 @@ carapace-qr 2>/dev/null || {
 
 echo ""
 echo -e "  ${DIM}Download CARAPACE for iPhone: https://apps.apple.com/us/app/carapace/id6760282881${RESET}"
+echo ""
+echo -e "  ${TEAL}${BOLD}One-time phone setup:${RESET}"
+echo -e "  ${DIM}  1. Install Tailscale on your iPhone (App Store) and sign in with the${RESET}"
+echo -e "  ${DIM}     same account you used here. Carapace is tailnet-only by design —${RESET}"
+echo -e "  ${DIM}     your phone needs to be on the tailnet to reach the gateway.${RESET}"
+echo -e "  ${DIM}  2. Open Carapace on iPhone → scan the QR above to pair.${RESET}"
 echo ""
 
 echo -e "  ${BOLD}Other options:${RESET}"
