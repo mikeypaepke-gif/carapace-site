@@ -1,7 +1,301 @@
 const http = require("http"), fs = require("fs"), path = require("path"), os = require("os");
 const DIR = path.join(os.homedir(), ".carapace");
 const OC_DIR = path.join(os.homedir(), ".openclaw");
-const TRACKER_PORT = 18795; // python project-tracker-server
+const TRACKER_PORT = 18795; // python project-tracker-server (legacy fallback)
+
+// ============================================================================
+// CARAPACE PROJECTS — MEMORY.md-backed project tracker
+// ============================================================================
+// Projects + workstreams live in a managed sentinel-marked block in
+// ~/.openclaw/workspace/memory/MEMORY.md so the agent can naturally read
+// + update them in conversation (BM25-indexed by openclaw, no cron lag,
+// real-time iOS reflection). Replaces the old setup where a */2 cron
+// synced ~/.openclaw/workspace/projects/tracker.json into
+// ~/.carapace/carapace-project-tracker.json — that path stays as a
+// no-op fallback for users still mid-migration but is no longer
+// authoritative.
+//
+// Block format (between BEGIN/END markers):
+//   ## Projects
+//   ### <id> · <Name> · <emoji> <progress>%
+//   <description paragraph>
+//   **Focus:** <project focus prompt>
+//   **Workstreams:**
+//   - `<id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus>
+//
+// Status emojis: 🟢 green · 🟡 yellow · 🔴 red · ⚪ idle
+// Owner defaults to `main` when omitted (forward-compat for multi-agent).
+const MEMORY_PATH = path.join(OC_DIR, "workspace", "memory", "MEMORY.md");
+const PROMPT_META_PATH = path.join(DIR, "project-prompt-meta.json");
+const PROJECTS_BEGIN = "<!-- BEGIN CARAPACE PROJECTS";
+const PROJECTS_END = "<!-- END CARAPACE PROJECTS";
+const EMOJI_TO_STATUS = { "🟢": "green", "🟡": "yellow", "🔴": "red", "⚪": "idle" };
+const STATUS_TO_EMOJI = { green: "🟢", yellow: "🟡", red: "🔴", idle: "⚪" };
+
+function projectsExtractBlock(memoryText) {
+  const begin = memoryText.indexOf(PROJECTS_BEGIN);
+  if (begin === -1) return null;
+  const beginEol = memoryText.indexOf("\n", begin);
+  if (beginEol === -1) return null;
+  const end = memoryText.indexOf(PROJECTS_END, beginEol);
+  if (end === -1) return null;
+  return memoryText.slice(beginEol + 1, end).replace(/\s+$/, "");
+}
+
+function projectsParseSection(text) {
+  const lines = text.split("\n");
+  if (!lines.length) return null;
+  const headerMatch = lines[0].match(/^([^\s·]+)\s*·\s*(.+?)\s*·\s*(🟢|🟡|🔴|⚪)\s*(\d+)%\s*$/);
+  if (!headerMatch) return null;
+  const [, id, name, emoji, progressStr] = headerMatch;
+  const project = {
+    id: id.trim(),
+    name: name.trim(),
+    status: EMOJI_TO_STATUS[emoji] || "idle",
+    progress: parseInt(progressStr, 10),
+    description: "",
+    divePrompt: "",
+    workstreams: [],
+  };
+  let i = 1;
+  const descLines = [];
+  while (i < lines.length) {
+    const ln = lines[i];
+    if (ln.match(/^\*\*(Focus|Workstreams):\*\*/)) break;
+    descLines.push(ln);
+    i++;
+  }
+  project.description = descLines.join("\n").trim();
+  while (i < lines.length) {
+    const ln = lines[i];
+    const focusMatch = ln.match(/^\*\*Focus:\*\*\s*(.*)$/);
+    if (focusMatch) { project.divePrompt = focusMatch[1].trim(); i++; break; }
+    if (ln.match(/^\*\*Workstreams:\*\*/)) break;
+    i++;
+  }
+  while (i < lines.length) {
+    const ln = lines[i];
+    if (ln.match(/^\*\*Workstreams:\*\*/)) { i++; continue; }
+    const bm = ln.match(/^- `([^`]+)`\s*·\s*(.+?)\s*·\s*(🟢|🟡|🔴|⚪)\s*(\d+)%\s*(?:·\s*@([\w-]+)\s*)?(?:—\s*(.*))?$/);
+    if (bm) {
+      const [, wid, wname, wemoji, wprogress, wowner, wfocus] = bm;
+      project.workstreams.push({
+        id: wid.trim(),
+        name: wname.trim(),
+        status: EMOJI_TO_STATUS[wemoji] || "idle",
+        progress: parseInt(wprogress, 10),
+        owner: wowner ? wowner.trim() : "main",
+        focusPrompt: (wfocus || "").trim(),
+      });
+    }
+    i++;
+  }
+  return project;
+}
+
+function projectsParseBlock(blockText) {
+  if (!blockText) return [];
+  const clean = blockText.replace(/<!--[\s\S]*?-->/g, "").trim();
+  const sections = clean.split(/^### /m);
+  const projects = [];
+  for (let i = 1; i < sections.length; i++) {
+    const proj = projectsParseSection(sections[i]);
+    if (proj) projects.push(proj);
+  }
+  return projects;
+}
+
+function projectsFormatBlock(projects) {
+  const lines = [
+    "<!-- Format:",
+    "### <id> · <Name> · <emoji> <progress>%",
+    "<description paragraph>",
+    "",
+    "**Focus:** <project focus prompt>",
+    "",
+    "**Workstreams:**",
+    "- `<id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus>",
+    "",
+    "Emojis: 🟢 green · 🟡 yellow · 🔴 red · ⚪ idle",
+    "-->",
+    "## Projects",
+    "",
+  ];
+  for (const p of projects) {
+    const emoji = STATUS_TO_EMOJI[p.status] || "⚪";
+    const progress = Number.isFinite(p.progress) ? p.progress : 0;
+    lines.push(`### ${p.id} · ${p.name} · ${emoji} ${progress}%`);
+    if (p.description) lines.push(p.description);
+    lines.push("");
+    lines.push(`**Focus:** ${p.divePrompt || ""}`);
+    lines.push("");
+    lines.push("**Workstreams:**");
+    if (!p.workstreams || !p.workstreams.length) {
+      lines.push("- _none yet_");
+    } else {
+      for (const w of p.workstreams) {
+        const we = STATUS_TO_EMOJI[w.status] || "⚪";
+        const wp = Number.isFinite(w.progress) ? w.progress : 0;
+        const owner = w.owner && w.owner !== "main" ? ` · @${w.owner}` : "";
+        const focus = w.focusPrompt ? ` — ${w.focusPrompt}` : "";
+        lines.push(`- \`${w.id}\` · ${w.name} · ${we} ${wp}%${owner}${focus}`);
+      }
+    }
+    lines.push("");
+  }
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+function projectsRead() {
+  let memory;
+  try { memory = fs.readFileSync(MEMORY_PATH, "utf8"); }
+  catch { return []; }
+  const block = projectsExtractBlock(memory);
+  if (!block) return [];
+  return projectsParseBlock(block);
+}
+
+function projectsWrite(projects) {
+  const begin = `${PROJECTS_BEGIN} (agent-maintained · iOS Projects view reads + writes here · do not edit between markers from outside) -->`;
+  const end = `${PROJECTS_END} -->`;
+  const newBlock = `${begin}\n${projectsFormatBlock(projects)}\n${end}\n`;
+  fs.mkdirSync(path.dirname(MEMORY_PATH), { recursive: true });
+  let memory;
+  try { memory = fs.readFileSync(MEMORY_PATH, "utf8"); }
+  catch { memory = ""; }
+  let rebuilt;
+  if (!memory) {
+    rebuilt = newBlock;
+  } else {
+    const beginIdx = memory.indexOf(PROJECTS_BEGIN);
+    const endIdx = memory.indexOf(PROJECTS_END);
+    if (beginIdx !== -1 && endIdx !== -1 && beginIdx < endIdx) {
+      const endLineEnd = memory.indexOf("\n", endIdx);
+      const afterEnd = endLineEnd === -1 ? "" : memory.slice(endLineEnd + 1);
+      const before = memory.slice(0, beginIdx).replace(/\n+$/, "");
+      const after = afterEnd.replace(/^\n+/, "");
+      rebuilt = (before ? before + "\n\n" : "") + newBlock + (after ? "\n" + after : "");
+    } else {
+      rebuilt = memory.replace(/\n+$/, "") + "\n\n" + newBlock;
+    }
+  }
+  const tmp = `${MEMORY_PATH}.carapace-projects.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, rebuilt);
+  fs.renameSync(tmp, MEMORY_PATH);
+}
+
+function projectsReadMeta() {
+  try { return JSON.parse(fs.readFileSync(PROMPT_META_PATH, "utf8")); }
+  catch { return {}; }
+}
+function projectsWriteMeta(meta) {
+  fs.mkdirSync(path.dirname(PROMPT_META_PATH), { recursive: true });
+  fs.writeFileSync(PROMPT_META_PATH, JSON.stringify(meta, null, 2));
+}
+function projectsBumpMeta(key) {
+  const meta = projectsReadMeta();
+  const cur = meta[key] || { version: 0, updatedAt: null };
+  meta[key] = { version: cur.version + 1, updatedAt: new Date().toISOString() };
+  projectsWriteMeta(meta);
+  return meta[key];
+}
+
+function projectsBuildResponse() {
+  const projects = projectsRead();
+  const meta = projectsReadMeta();
+  for (const p of projects) {
+    const pm = meta[p.id];
+    if (pm) { p.promptVersion = pm.version; p.promptUpdatedAt = pm.updatedAt; }
+    for (const w of (p.workstreams || [])) {
+      const wm = meta[`${p.id}:${w.id}`];
+      if (wm) { w.promptVersion = wm.version; w.promptUpdatedAt = wm.updatedAt; }
+    }
+  }
+  return { version: 1, updated: new Date().toISOString(), projects };
+}
+
+function projectsUpdateProjectPrompt(projectId, newPrompt) {
+  const projects = projectsRead();
+  const proj = projects.find(p => p.id === projectId);
+  if (!proj) return { error: "project not found", status: 404 };
+  proj.divePrompt = newPrompt || "";
+  projectsWrite(projects);
+  const m = projectsBumpMeta(projectId);
+  return { ok: true, id: projectId, promptVersion: m.version, promptUpdatedAt: m.updatedAt };
+}
+
+function projectsUpdateWorkstreamPrompt(projectId, workstreamId, newPrompt) {
+  const projects = projectsRead();
+  const proj = projects.find(p => p.id === projectId);
+  if (!proj) return { error: "project not found", status: 404 };
+  const ws = (proj.workstreams || []).find(w => w.id === workstreamId);
+  if (!ws) return { error: "workstream not found", status: 404 };
+  ws.focusPrompt = newPrompt || "";
+  projectsWrite(projects);
+  const m = projectsBumpMeta(`${projectId}:${workstreamId}`);
+  return { ok: true, id: projectId, wid: workstreamId, promptVersion: m.version, promptUpdatedAt: m.updatedAt };
+}
+
+function projectsDelete(projectId) {
+  const projects = projectsRead();
+  const idx = projects.findIndex(p => p.id === projectId);
+  if (idx === -1) return { error: "project not found", status: 404 };
+  projects.splice(idx, 1);
+  projectsWrite(projects);
+  const meta = projectsReadMeta();
+  for (const k of Object.keys(meta)) {
+    if (k === projectId || k.startsWith(`${projectId}:`)) delete meta[k];
+  }
+  projectsWriteMeta(meta);
+  return { ok: true, deleted: projectId };
+}
+
+// One-shot migration. Runs on status-server startup. Idempotent — no-op
+// when the PROJECTS block is already present in MEMORY.md.
+function projectsMigrateOnStartup() {
+  let memory;
+  try { memory = fs.readFileSync(MEMORY_PATH, "utf8"); }
+  catch { memory = ""; }
+  if (memory.indexOf(PROJECTS_BEGIN) !== -1) return; // already migrated
+  // Try the cron-synced copy first, fall back to openclaw's own tracker.
+  const candidates = [
+    path.join(DIR, "carapace-project-tracker.json"),
+    path.join(OC_DIR, "workspace", "projects", "tracker.json"),
+  ];
+  let tracker = null;
+  for (const c of candidates) {
+    try {
+      const data = JSON.parse(fs.readFileSync(c, "utf8"));
+      if (data && Array.isArray(data.projects) && data.projects.length) {
+        tracker = data; break;
+      }
+    } catch {}
+  }
+  if (!tracker) return; // nothing to migrate
+  const legacyProjects = tracker.projects.map(p => ({
+    id: p.id,
+    name: p.name || p.id,
+    status: p.status || "idle",
+    progress: Number.isFinite(p.progress) ? p.progress : 0,
+    description: p.description || "",
+    divePrompt: p.divePrompt || "",
+    workstreams: (p.workstreams || []).map(w => ({
+      id: w.id,
+      name: w.name || w.id,
+      status: w.status || "idle",
+      progress: Number.isFinite(w.progress) ? w.progress : 0,
+      owner: w.owner || "main",
+      focusPrompt: w.focusPrompt || "",
+    })),
+  }));
+  try {
+    projectsWrite(legacyProjects);
+    console.log(`[projects] migrated ${legacyProjects.length} project(s) from tracker.json → MEMORY.md`);
+  } catch (e) {
+    console.error(`[projects] migration failed: ${e.message}`);
+  }
+}
+projectsMigrateOnStartup();
 
 // Fallback: write prompt directly to the status-server's tracker file when the
 // Python tracker server isn't running (e.g. Linux headless installs).
@@ -550,27 +844,42 @@ http.createServer((req, res) => {
       return;
     }
 
-    // PUT /projects/:id/prompt and PUT /projects/:id/workstreams/:wid/prompt
-    // — proxy to python tracker at :18795 which owns the canonical tracker.json
-    if (req.method === "PUT" && /^\/projects\/[^/]+\/(prompt|workstreams\/[^/]+\/prompt)\/?$/.test(p)) {
-      proxyToTracker("PUT", p, body, res);
-      return;
+    // PUT /projects/:id/prompt — update project-level focus prompt
+    // PUT /projects/:id/workstreams/:wid/prompt — update workstream focus
+    // Both write to the CARAPACE PROJECTS block in MEMORY.md (atomic,
+    // sentinel-safe). Sidecar ~/.carapace/project-prompt-meta.json
+    // tracks promptVersion + promptUpdatedAt counters that iOS uses
+    // for cache invalidation.
+    if (req.method === "PUT") {
+      const projMatch = p.match(/^\/projects\/([^/]+)\/prompt\/?$/);
+      const wsMatch = p.match(/^\/projects\/([^/]+)\/workstreams\/([^/]+)\/prompt\/?$/);
+      if (projMatch || wsMatch) {
+        try {
+          const payload = JSON.parse(body || "{}");
+          let result;
+          if (wsMatch) {
+            const [, pid, wid] = wsMatch;
+            result = projectsUpdateWorkstreamPrompt(decodeURIComponent(pid), decodeURIComponent(wid), payload.focusPrompt);
+          } else {
+            const [, pid] = projMatch;
+            result = projectsUpdateProjectPrompt(decodeURIComponent(pid), payload.divePrompt || payload.focusPrompt);
+          }
+          if (result.error) { res.writeHead(result.status || 500); res.end(JSON.stringify(result)); return; }
+          res.end(JSON.stringify(result));
+        } catch (e) {
+          res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+        }
+        return;
+      }
     }
 
-    // DELETE /projects/:id — delete a project
-    if (req.method === "DELETE" && p.startsWith("/projects/")) {
+    // DELETE /projects/:id — remove project from MEMORY.md
+    if (req.method === "DELETE" && p.startsWith("/projects/") && !p.includes("/cron/")) {
       const id = decodeURIComponent(p.slice("/projects/".length));
       if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "missing id" })); return; }
-      const fp = path.join(DIR, "carapace-project-tracker.json");
-      try {
-        const data = JSON.parse(fs.readFileSync(fp, "utf8"));
-        const before = data.projects.length;
-        data.projects = data.projects.filter(proj => proj.id !== id);
-        if (data.projects.length === before) { res.writeHead(404); res.end(JSON.stringify({ error: "project not found" })); return; }
-        data.updated = new Date().toISOString();
-        fs.writeFileSync(fp, JSON.stringify(data));
-        res.end(JSON.stringify({ ok: true, deleted: id }));
-      } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
+      const result = projectsDelete(id);
+      if (result.error) { res.writeHead(result.status || 500); res.end(JSON.stringify(result)); return; }
+      res.end(JSON.stringify(result));
       return;
     }
 
@@ -580,11 +889,21 @@ http.createServer((req, res) => {
       return;
     }
 
+    // GET /projects + /tracker — now sourced from MEMORY.md instead of
+    // the cron-synced carapace-project-tracker.json. Real-time: edits
+    // the agent makes in-conversation appear immediately on iOS without
+    // waiting for a 2-min cron tick.
+    if (p === "/projects" || p === "/tracker") {
+      if (!isTierPaid()) { res.end(EMPTY_PROJECTS); return; }
+      try { res.end(JSON.stringify(projectsBuildResponse())); }
+      catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
+    // Other file-backed endpoints (cron) still read from disk
     const filePath = fileMap[p] ? path.join(DIR, fileMap[p]) : null;
     if (filePath) {
-      // Gate tracking endpoints behind paid tier
       if (!isTierPaid()) {
-        if (p === "/projects" || p === "/tracker") { res.end(EMPTY_PROJECTS); return; }
         if (p === "/cron") { res.end(EMPTY_CRON); return; }
       }
       try { res.end(fs.readFileSync(filePath, "utf8")); }
