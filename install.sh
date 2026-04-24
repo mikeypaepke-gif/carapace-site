@@ -1409,7 +1409,7 @@ fi
 have_cmd qrencode && ok "qrencode ready" || true
 
 # carapace-qr command
-cat > /usr/local/bin/carapace-qr << 'QRCMD'
+$SUDO tee /usr/local/bin/carapace-qr > /dev/null << 'QRCMD'
 #!/usr/bin/env bash
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
@@ -1442,11 +1442,11 @@ else
 fi
 echo ""
 QRCMD
-chmod +x /usr/local/bin/carapace-qr
+$SUDO chmod +x /usr/local/bin/carapace-qr
 ok "carapace-qr command installed"
 
 # carapace-onboard wrapper (runs openclaw onboard, then restarts system service)
-cat > /usr/local/bin/carapace-onboard << 'ONBOARDCMD'
+$SUDO tee /usr/local/bin/carapace-onboard > /dev/null << 'ONBOARDCMD'
 #!/usr/bin/env bash
 # Silence nvm/npmrc conflict warning
 sed -i '/^prefix=/d' "$HOME/.npmrc" 2>/dev/null || true
@@ -1529,7 +1529,7 @@ for _gw_wait2 in $(seq 1 10); do
   sleep 1
 done
 ONBOARDCMD
-chmod +x /usr/local/bin/carapace-onboard
+$SUDO chmod +x /usr/local/bin/carapace-onboard
 ok "carapace-onboard command installed"
 
 # ── Nightly maintenance cron ────────────────────────────
