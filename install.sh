@@ -235,20 +235,35 @@ PY
 # ── BOOTSTRAP.md injector ────────────────────────────────
 # OpenClaw 2026.4.22 shipped a default workspace BOOTSTRAP.md that
 # triggered a "first light" hatch greeting on the agent's first
-# turn. 2026.4.23 dropped that default — agents now ship with
-# pre-templated IDENTITY.md / USER.md and skip the hatch entirely,
-# losing the delightful "Hey, I just came online — who am I?
-# who are you?" first conversation.
+# turn — the runtime auto-injected a "[Bootstrap pending] Please
+# read BOOTSTRAP.md from the workspace and follow it" system
+# prompt on every reply until the file was deleted.
 #
-# Carapace puts it back, tailored for our app. The agent reads
-# BOOTSTRAP.md on first turn, runs the hatch flow (with a SKIP
-# affordance), updates IDENTITY.md + USER.md from the answers,
-# then deletes BOOTSTRAP.md per AGENTS.md convention so it never
-# fires again.
+# 2026.4.23 silently dropped that runtime injection — agents now
+# ship with pre-templated IDENTITY.md / USER.md and reply normally
+# even when BOOTSTRAP.md exists in the workspace, losing the
+# delightful "Hey, I just came online — who am I? who are you?"
+# first conversation entirely.
 #
-# Idempotent: only writes when ~/.openclaw/workspace/BOOTSTRAP.md
-# is absent. If openclaw upstream brings their own back, or the
-# agent has already completed + deleted ours, we don't clobber.
+# Carapace puts the hatch back, tailored for our app, in TWO
+# pieces because just dropping the file alone no longer triggers
+# anything in 2026.4.23+:
+#
+#   1. inject_carapace_bootstrap (this function): writes
+#      ~/.openclaw/workspace/BOOTSTRAP.md with the Carapace-flavored
+#      birth-certificate content (see below). Idempotent — skip if
+#      file already exists.
+#
+#   2. inject_carapace_bootstrap_hook (separate function below):
+#      writes a sentinel-marked block into MEMORY.md telling the
+#      agent "On your first reply in any session, check the
+#      workspace for BOOTSTRAP.md and follow it if present, then
+#      delete it." MEMORY.md IS always loaded into the agent's
+#      startup context so the hook gets picked up reliably even
+#      without the runtime auto-injection.
+#
+# The two pieces work together: hook is the trigger, BOOTSTRAP.md
+# is the script.
 inject_carapace_bootstrap() {
   local bootstrap_file="$HOME/.openclaw/workspace/BOOTSTRAP.md"
   if [[ -f "$bootstrap_file" ]]; then
@@ -319,6 +334,96 @@ Be the kind of mind a person would actually want to live with.
 CARAPACE_BOOTSTRAP_EOF
   mv "$tmp_file" "$bootstrap_file"
   ok "CARAPACE bootstrap installed (agent will run first-light hatch on first turn)."
+}
+
+# ── BOOTSTRAP HOOK injector (into MEMORY.md) ─────────────
+# Companion to inject_carapace_bootstrap. The runtime in OpenClaw
+# 2026.4.23+ no longer auto-prefixes "Bootstrap pending" on agent
+# replies, so the workspace BOOTSTRAP.md alone never gets read.
+# This injects a tiny sentinel-marked block into MEMORY.md that
+# tells the agent: "On first reply, check workspace for
+# BOOTSTRAP.md and follow it if present, then delete it."
+#
+# MEMORY.md IS reliably loaded into agent context at session
+# start (we already use it for vision rules + projects), so the
+# hook fires every session until BOOTSTRAP.md is deleted (which
+# happens after the agent completes the hatch — Step 4).
+#
+# Same safety chain as inject_carapace_vision_rules: sentinel
+# markers, atomic tmp+rename, python-verified non-managed bytes
+# preserved, idempotent re-run.
+inject_carapace_bootstrap_hook() {
+  local memory_file="$HOME/.openclaw/workspace/memory/MEMORY.md"
+  local begin_marker="<!-- BEGIN CARAPACE BOOTSTRAP HOOK"
+  local end_marker="<!-- END CARAPACE BOOTSTRAP HOOK"
+  local block_file
+  block_file="$(mktemp)"
+  trap "rm -f '$block_file'" EXIT
+
+  cat > "$block_file" << 'CARAPACE_BOOTSTRAP_HOOK_EOF'
+<!-- BEGIN CARAPACE BOOTSTRAP HOOK (managed by Carapace installer · do not edit between BEGIN/END) -->
+## First-Launch Hook
+
+On your VERY FIRST reply in any session: check whether the file `BOOTSTRAP.md` exists at the workspace root (`~/.openclaw/workspace/BOOTSTRAP.md`).
+
+- **If it exists** — that file is your birth certificate. Read it and follow its instructions BEFORE replying normally to whatever the user asked. After completing all of its steps (which include deleting `BOOTSTRAP.md`), continue normally with the user's actual question.
+- **If it does not exist** — bootstrap is already complete. Skip this hook silently and reply normally.
+
+This hook fires on every session start by virtue of being in MEMORY.md, but `BOOTSTRAP.md` is only present until the first hatch completes — so after the user's been bootstrapped this hook becomes a no-op.
+
+<!-- END CARAPACE BOOTSTRAP HOOK -->
+CARAPACE_BOOTSTRAP_HOOK_EOF
+
+  mkdir -p "$(dirname "$memory_file")"
+  local tmp_file="${memory_file}.carapace.bshook.tmp.$$"
+
+  if [[ ! -f "$memory_file" ]]; then
+    cat "$block_file" > "$tmp_file"
+    mv "$tmp_file" "$memory_file"
+    rm -f "$block_file"
+    trap - EXIT
+    ok "CARAPACE bootstrap hook installed in MEMORY.md (was absent)."
+    return 0
+  fi
+
+  python3 - "$memory_file" "$tmp_file" "$begin_marker" "$end_marker" "$block_file" <<'PY'
+import sys, re
+src_path, dst_path, begin_marker, end_marker, block_path = sys.argv[1:6]
+with open(src_path, "r", encoding="utf-8") as f: original = f.read()
+with open(block_path, "r", encoding="utf-8") as f: new_block = f.read().rstrip("\n") + "\n"
+begin_re = re.compile(r"^" + re.escape(begin_marker) + r".*$", re.MULTILINE)
+end_re   = re.compile(r"^" + re.escape(end_marker)   + r".*$", re.MULTILINE)
+b = begin_re.search(original); e = end_re.search(original)
+if b and e and b.start() < e.start():
+    before = original[:b.start()].rstrip("\n")
+    after  = original[e.end():].lstrip("\n")
+    rebuilt = (before + "\n\n" + new_block + ("\n" + after if after else "")) if before else (new_block + ("\n" + after if after else ""))
+    non_managed_original = (before + "\n" + after).strip()
+elif b or e:
+    print("Partial sentinel block in MEMORY.md — aborting.", file=sys.stderr); sys.exit(2)
+else:
+    base = original.rstrip("\n")
+    rebuilt = base + "\n\n" + new_block
+    non_managed_original = base.strip()
+with open(dst_path, "w", encoding="utf-8") as f: f.write(rebuilt)
+with open(dst_path, "r", encoding="utf-8") as f: written = f.read()
+b2 = begin_re.search(written); e2 = end_re.search(written)
+if not b2 or not e2:
+    print("Sentinels missing in rebuilt file — aborting.", file=sys.stderr); sys.exit(3)
+non_managed_written = (written[:b2.start()].rstrip("\n") + "\n" + written[e2.end():].lstrip("\n").rstrip("\n")).strip()
+if non_managed_original != non_managed_written:
+    print("Verification failed — non-managed content drift. Aborting.", file=sys.stderr); sys.exit(4)
+PY
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
+    rm -f "$tmp_file" "$block_file"
+    warn "MEMORY.md bootstrap-hook upsert aborted (exit $rc) — file untouched."
+    return 1
+  fi
+  mv "$tmp_file" "$memory_file"
+  rm -f "$block_file"
+  trap - EXIT
+  ok "CARAPACE bootstrap hook installed in MEMORY.md."
 }
 
 # ── OpenClaw discovery + PATH-persistence helpers ────────
@@ -2220,6 +2325,7 @@ fi
 
 inject_carapace_vision_rules
 inject_carapace_bootstrap
+inject_carapace_bootstrap_hook
 echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
 echo -e "  ${GREEN}${BOLD}  ✓ CARAPACE is ready!${RESET}"
 echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
