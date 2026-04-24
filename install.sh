@@ -773,12 +773,18 @@ else
   fi
 fi
 
-# ALWAYS persist PATH — runs on both fresh install AND upgrade-on-existing.
-persist_openclaw_path "$OC_PATH"
-
 fi  # end SKIP_OPENCLAW_SETUP block (Steps 1-2)
 
 # ── Steps 3+ always run (support tools) ──
+
+# ALWAYS persist openclaw on PATH — runs whether we just installed,
+# upgraded, or kept the user's existing setup (SKIP_OPENCLAW_SETUP=true).
+# Earlier the persist call was nested inside the install branch, so
+# users who said "keep my existing OpenClaw" never got /etc/profile.d
+# written and got `openclaw: command not found` in fresh shells.
+OC_PATH_FINAL="${OC_PATH:-${OC_EXISTING:-}}"
+[[ -z "$OC_PATH_FINAL" ]] && OC_PATH_FINAL="$(find_openclaw 2>/dev/null || echo "")"
+persist_openclaw_path "$OC_PATH_FINAL"
 
 # ══════════════════════════════════════════════════════════
 # Step 3: Tailscale
