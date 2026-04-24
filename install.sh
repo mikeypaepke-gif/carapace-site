@@ -1096,6 +1096,27 @@ else
   fi
 fi
 
+# ── User-systemd linger (CRITICAL for non-root sudoer installs) ──
+# The gateway service typically lives under user-systemd (see Mike's
+# install where openclaw onboard creates ~/.config/systemd/user/
+# openclaw-gateway.service). Without `loginctl enable-linger <user>`,
+# user-systemd dies the moment the last SSH/login session closes —
+# taking the gateway with it. The systemd service auto-restarts when
+# the user logs in again, but in the gap (and forever if no one logs
+# in) the gateway is gone and iOS chat/voice 502s with "bad gateway."
+# Enable linger so the user's systemd survives logout, exactly like
+# a system-level service would.
+if ! $IS_ROOT && have_cmd loginctl; then
+  CURRENT_LINGER="$(loginctl show-user "$(whoami)" --property=Linger --value 2>/dev/null || echo no)"
+  if [[ "$CURRENT_LINGER" != "yes" ]]; then
+    if $SUDO loginctl enable-linger "$(whoami)" 2>/dev/null; then
+      ok "Linger enabled — gateway survives SSH logout"
+    else
+      warn "Could not enable linger — gateway may stop when you log out (run: sudo loginctl enable-linger $(whoami))"
+    fi
+  fi
+fi
+
 # Don't clear model/provider if already configured (idempotency)
 EXISTING_MODEL=$(timeout 10 openclaw config get agents.defaults.model 2>/dev/null | head -1 | tr -d '"{ ' || echo "")
 if [[ -z "$EXISTING_MODEL" || "$EXISTING_MODEL" == "null" ]]; then
