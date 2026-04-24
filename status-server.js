@@ -755,9 +755,14 @@ http.createServer((req, res) => {
       // exist so the client can show a debug list.
       res.write(`event: ready\ndata: ${JSON.stringify({ ts: Date.now(), eventTypes: ["projects.updated", "cron.updated", "agents.updated"] })}\n\n`);
       SSE_CLIENTS.add(res);
+      // CRITICAL: listen on RES, not REQ. For GET requests the request
+      // "close" event fires as soon as the body is consumed (immediate
+      // for body-less GETs), which would tear down the SSE subscription
+      // before the first watcher event ever fires. The response "close"
+      // event correctly tracks when the underlying TCP connection ends.
       const cleanup = () => { SSE_CLIENTS.delete(res); try { res.end(); } catch {} };
-      req.on("close", cleanup);
-      req.on("error", cleanup);
+      res.on("close", cleanup);
+      res.on("error", cleanup);
       return;
     }
 
