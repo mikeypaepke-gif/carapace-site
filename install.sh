@@ -793,6 +793,52 @@ ok "cron available"
 # Low-RAM boxes need swap in place before dnf/apt runs, or dep resolution
 # can SIGSEGV mid-install.
 
+# ══════════════════════════════════════════════════════════
+# Transparency notice — what this installer injects into your agent
+# ══════════════════════════════════════════════════════════
+#
+# Carapace modifies your OpenClaw agent's behavior by injecting
+# three sentinel-marked blocks. Users have a right to know exactly
+# what the installer changes BEFORE it runs. The same text shipped
+# in all three install paths (Mac DMG, Linux DMG helper, this
+# curl-bash script) is also published verbatim on GitHub for review.
+echo ""
+echo -e "${YELLOW}${BOLD}━━━ SECURITY NOTICE — agent prompt injections ━━━━━━━━━━━━${RESET}"
+echo ""
+echo -e "  This installer will write three managed blocks into your"
+echo -e "  OpenClaw workspace, which steer how your AI behaves:"
+echo ""
+echo -e "    ${BOLD}1.${RESET} ${TEAL}CARAPACE VISION RULES${RESET}  → ~/.openclaw/workspace/memory/MEMORY.md"
+echo -e "       Tone + framing rules for camera turns (image grid"
+echo -e "       structure, [ctx] line, anti-narration rule, etc.)"
+echo ""
+echo -e "    ${BOLD}2.${RESET} ${TEAL}CARAPACE BOOTSTRAP${RESET}     → ~/.openclaw/workspace/BOOTSTRAP.md"
+echo -e "       One-shot first-conversation hatch sequence (deletes"
+echo -e "       itself after the agent's first turn)"
+echo ""
+echo -e "    ${BOLD}3.${RESET} ${TEAL}CARAPACE FIRST-LIGHT${RESET}   → ~/.openclaw/workspace/AGENTS.md"
+echo -e "       Agent identity + persona seed (name, emoji, voice)"
+echo ""
+echo -e "  ${BOLD}All three blocks are wrapped in BEGIN/END sentinels${RESET} so you"
+echo -e "  can audit them, hand-edit them, or remove them later."
+echo ""
+echo -e "  ${BOLD}Only install Carapace from carapace.info or the official${RESET}"
+echo -e "  ${BOLD}GitHub source.${RESET} Installing from any other host could inject"
+echo -e "  arbitrary instructions into your agent — a real security risk"
+echo -e "  given how much control the agent has over your machine."
+echo ""
+echo -e "  Source of every prompt block (commit-pinned, line-numbered):"
+echo -e "    ${TEAL}https://github.com/mikeypaepke-gif/carapace-site/blob/main/install.sh${RESET}"
+echo ""
+echo -e "  ${YELLOW}For your security, prompt-block updates are NEVER auto-applied.${RESET}"
+echo -e "  ${YELLOW}A new Carapace release does NOT silently rewrite the blocks.${RESET}"
+echo -e "  Run this installer again any time you want to pull the latest"
+echo -e "  reviewed prompt set. That way every change to your agent's"
+echo -e "  behavior happens under your hand, never behind your back."
+echo ""
+echo -e "${YELLOW}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""
+
 # Disable needrestart config
 if [[ -f /etc/needrestart/needrestart.conf ]]; then
   $SUDO sed -i "s/^#\?\s*\$nrconf{restart}.*/\$nrconf{restart} = 'a';/" /etc/needrestart/needrestart.conf 2>/dev/null || true
