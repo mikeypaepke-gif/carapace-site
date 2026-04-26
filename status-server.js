@@ -585,6 +585,59 @@ function deriveSubagentEmoji(label) {
   return "🌱";
 }
 
+/// Resolve an agent's workspace directory. OpenClaw uses one of:
+///   1. Explicit `workspace` field in agents.list[]
+///   2. Default `~/.openclaw/workspace-<id>` for non-main
+///   3. `~/.openclaw/workspace` for main
+function resolveAgentWorkspace(agentId, regEntry) {
+  if (regEntry && typeof regEntry.workspace === "string" && regEntry.workspace.length > 0) {
+    return regEntry.workspace;
+  }
+  if (agentId === "main") {
+    return path.join(OC_DIR, "workspace");
+  }
+  return path.join(OC_DIR, `workspace-${agentId}`);
+}
+
+/// Parse an agent's IDENTITY.md (the file the agent itself fills in
+/// during bootstrap) for { name, emoji, creature }. Returns nil
+/// values when missing or still in template state.
+function parseAgentIdentityMd(workspaceDir) {
+  try {
+    const file = path.join(workspaceDir, "IDENTITY.md");
+    if (!fs.existsSync(file)) return null;
+    const text = fs.readFileSync(file, "utf8");
+    const grab = (label) => {
+      const re = new RegExp("^[\\-\\*]\\s*\\*\\*" + label + ":\\*\\*\\s*(.*?)\\s*$", "im");
+      const m = text.match(re);
+      if (!m) return null;
+      const v = m[1].trim();
+      if (!v || /^_.*_$/.test(v) || v.startsWith("_(")) return null;
+      return v;
+    };
+    const name = grab("Name");
+    const emoji = grab("Emoji");
+    const creature = grab("Creature");
+    if (!name && !emoji) return null;
+    return { name, emoji, creature };
+  } catch { return null; }
+}
+
+/// Resolve effective identity:
+///   1. Per-agent IDENTITY.md (agent's own bootstrap)
+///   2. agents.list[].identity in openclaw.json
+///   3. null
+function resolveAgentIdentity(agentId, registeredAgents) {
+  const reg = (registeredAgents || []).find(a => a && a.id === agentId);
+  const workspace = resolveAgentWorkspace(agentId, reg);
+  const fromMd = parseAgentIdentityMd(workspace);
+  if (fromMd) return fromMd;
+  if (reg && reg.identity && (reg.identity.name || reg.identity.emoji)) {
+    return reg.identity;
+  }
+  return null;
+}
+
 /// Read every agent registered in ~/.openclaw/openclaw.json. This is
 /// the canonical list — agents listed here exist whether or not
 /// they've ever started a session. Used by getLiveAgentStatus and
@@ -607,6 +660,7 @@ function getLiveAgentStatus() {
     if (!fs.existsSync(agentsRoot)) return buildFallbackStatus("idle", "No agents directory");
 
     const agents = {};
+    const registered = getRegisteredAgents();
     const agentDirs = fs.readdirSync(agentsRoot).filter(a => {
       try { return fs.statSync(path.join(agentsRoot, a)).isDirectory(); } catch { return false; }
     });
@@ -637,15 +691,21 @@ function getLiveAgentStatus() {
           if (sessionKey !== canonicalKey) continue;
           // Top-level agent session: show if active in last 30 min
           if (ageMs > 30 * 60 * 1000) continue;
-          const agentLabel = agent === "main" ? "Main" :
+          // Effective identity comes from per-agent IDENTITY.md first,
+          // then openclaw.json identity, then a title-cased fallback.
+          const ident = resolveAgentIdentity(agent, registered);
+          const fallbackLabel = agent === "main" ? "Main" :
             agent.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+          const agentLabel = (ident && ident.name) || fallbackLabel;
           const agentKey = agent === "main" ? "main" : agent;
-          agents[agentKey] = {
+          const node = {
             name: agentLabel,
             status: isRunning ? "active" : "idle",
             detail: isRunning ? "Processing" : "Ready",
             updated: new Date(updatedAt).toLocaleTimeString()
           };
+          if (ident && ident.emoji) node.emoji = ident.emoji;
+          agents[agentKey] = node;
         } else if (isSubagent) {
           // 5-min visibility window: keep the subagent on the spinal
           // map for 5 min after its last activity (idle = greyed by
@@ -689,16 +749,17 @@ function getLiveAgentStatus() {
     // Surface every registered-but-idle agent from openclaw.json so
     // the iOS spinal map shows ALL agents (per Mike's spec: "All true
     // agents must show in the spinal map even when idle"). Live
-    // session data above takes precedence — we only fill in agents
-    // that didn't get populated from sessions/sessions.json.
-    const registered = getRegisteredAgents();
+    // session data above takes precedence.
+    //
+    // Identity flows through resolveAgentIdentity which prefers the
+    // agent's own IDENTITY.md over openclaw.json config.
     const nowStr = new Date().toLocaleTimeString();
     for (const reg of registered) {
       const id = reg && reg.id;
       if (!id) continue;
       if (agents[id]) continue;  // live data wins
-      const ident = reg.identity || {};
-      const rawName = ident.name || reg.name || (id === "main" ? "Main" : id);
+      const ident = resolveAgentIdentity(id, registered);
+      const rawName = (ident && ident.name) || reg.name || (id === "main" ? "Main" : id);
       const niceName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
       const node = {
         name: niceName,
@@ -706,7 +767,7 @@ function getLiveAgentStatus() {
         detail: "Ready",
         updated: nowStr
       };
-      if (ident.emoji) node.emoji = ident.emoji;
+      if (ident && ident.emoji) node.emoji = ident.emoji;
       agents[id] = node;
     }
 
