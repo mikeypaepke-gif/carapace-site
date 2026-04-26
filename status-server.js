@@ -4,19 +4,29 @@ const OC_DIR = path.join(os.homedir(), ".openclaw");
 const TRACKER_PORT = 18795; // python project-tracker-server (legacy fallback)
 
 // ============================================================================
-// CARAPACE PROJECTS — MEMORY.md-backed project tracker
+// CARAPACE PROJECTS — per-agent PROJECTS.md tracker
 // ============================================================================
-// Projects + workstreams live in a managed sentinel-marked block in
-// ~/.openclaw/workspace/memory/MEMORY.md so the agent can naturally read
-// + update them in conversation (BM25-indexed by openclaw, no cron lag,
-// real-time iOS reflection). Replaces the old setup where a */2 cron
-// synced ~/.openclaw/workspace/projects/tracker.json into
-// ~/.carapace/carapace-project-tracker.json — that path stays as a
-// no-op fallback for users still mid-migration but is no longer
-// authoritative.
+// Projects + workstreams live in a dedicated `PROJECTS.md` file in
+// EACH agent's workspace (so different agents track their own boards).
+// Layout:
+//   ~/.openclaw/workspace/PROJECTS.md                     ← main's projects
+//   ~/.openclaw/workspace/agents/<id>/PROJECTS.md         ← per-agent
+//   ~/.openclaw/workspace-<id>/PROJECTS.md                ← VPS-style alt
 //
-// Block format (between BEGIN/END markers):
-//   ## Projects
+// The whole FILE is the projects list — no sentinel markers, just an
+// optional <!-- format reference --> comment at the top followed by
+// `### slug · Name · emoji progress%` sections. The agent reads +
+// writes this file directly using its file tools (instructions live
+// in AGENTS.md per-agent via the install-script injection).
+//
+// History: this used to be a sentinel block inside MEMORY.md, which
+// per OpenClaw's docs is "ONLY load in main session, contains
+// personal context that shouldn't leak to strangers." Squatting in
+// MEMORY.md made per-agent projects impossible AND polluted the
+// agent's curated long-term memory with structured data. Splitting
+// to PROJECTS.md keeps both stores clean.
+//
+// Format inside PROJECTS.md (one section per project):
 //   ### <id> · <Name> · <emoji> <progress>%
 //   <description paragraph>
 //   **Focus:** <project focus prompt>
@@ -24,23 +34,22 @@ const TRACKER_PORT = 18795; // python project-tracker-server (legacy fallback)
 //   - `<id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus>
 //
 // Status emojis: 🟢 green · 🟡 yellow · 🔴 red · ⚪ idle
-// Owner defaults to `main` when omitted (forward-compat for multi-agent).
-const MEMORY_PATH = path.join(OC_DIR, "workspace", "memory", "MEMORY.md");
+// Owner defaults to `main` when omitted.
 const IDENTITY_PATH = path.join(OC_DIR, "workspace", "IDENTITY.md");
 const PROMPT_META_PATH = path.join(DIR, "project-prompt-meta.json");
-const PROJECTS_BEGIN = "<!-- BEGIN CARAPACE PROJECTS";
-const PROJECTS_END = "<!-- END CARAPACE PROJECTS";
 const EMOJI_TO_STATUS = { "🟢": "green", "🟡": "yellow", "🔴": "red", "⚪": "idle" };
 const STATUS_TO_EMOJI = { green: "🟢", yellow: "🟡", red: "🔴", idle: "⚪" };
 
-function projectsExtractBlock(memoryText) {
-  const begin = memoryText.indexOf(PROJECTS_BEGIN);
-  if (begin === -1) return null;
-  const beginEol = memoryText.indexOf("\n", begin);
-  if (beginEol === -1) return null;
-  const end = memoryText.indexOf(PROJECTS_END, beginEol);
-  if (end === -1) return null;
-  return memoryText.slice(beginEol + 1, end).replace(/\s+$/, "");
+/// Resolve the PROJECTS.md path for a given agent id. Reuses the
+/// same workspace-resolution logic that powers per-agent identity.
+/// Defaults to main when agentId is missing/empty.
+function projectsFilePath(agentId) {
+  const id = (agentId && String(agentId).trim()) || "main";
+  const registered = (typeof getRegisteredAgents === "function") ? getRegisteredAgents() : [];
+  const ws = (typeof resolveAgentWorkspace === "function")
+    ? resolveAgentWorkspace(id, (registered.find(a => a && a.id === id)) || null)
+    : (id === "main" ? path.join(OC_DIR, "workspace") : path.join(OC_DIR, `workspace-${id}`));
+  return path.join(ws, "PROJECTS.md");
 }
 
 function projectsParseSection(text) {
@@ -96,6 +105,8 @@ function projectsParseSection(text) {
 
 function projectsParseBlock(blockText) {
   if (!blockText) return [];
+  // Strip ALL HTML comments (the file-header reference comment + any
+  // ad-hoc agent comments) before parsing sections.
   const clean = blockText.replace(/<!--[\s\S]*?-->/g, "").trim();
   const sections = clean.split(/^### /m);
   const projects = [];
@@ -147,42 +158,38 @@ function projectsFormatBlock(projects) {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
-function projectsRead() {
-  let memory;
-  try { memory = fs.readFileSync(MEMORY_PATH, "utf8"); }
+function projectsRead(agentId) {
+  const file = projectsFilePath(agentId);
+  let body;
+  try { body = fs.readFileSync(file, "utf8"); }
   catch { return []; }
-  const block = projectsExtractBlock(memory);
-  if (!block) return [];
-  return projectsParseBlock(block);
+  return projectsParseBlock(body);
 }
 
-function projectsWrite(projects) {
-  const begin = `${PROJECTS_BEGIN} (agent-maintained · iOS Projects view reads + writes here · do not edit between markers from outside) -->`;
-  const end = `${PROJECTS_END} -->`;
-  const newBlock = `${begin}\n${projectsFormatBlock(projects)}\n${end}\n`;
-  fs.mkdirSync(path.dirname(MEMORY_PATH), { recursive: true });
-  let memory;
-  try { memory = fs.readFileSync(MEMORY_PATH, "utf8"); }
-  catch { memory = ""; }
-  let rebuilt;
-  if (!memory) {
-    rebuilt = newBlock;
-  } else {
-    const beginIdx = memory.indexOf(PROJECTS_BEGIN);
-    const endIdx = memory.indexOf(PROJECTS_END);
-    if (beginIdx !== -1 && endIdx !== -1 && beginIdx < endIdx) {
-      const endLineEnd = memory.indexOf("\n", endIdx);
-      const afterEnd = endLineEnd === -1 ? "" : memory.slice(endLineEnd + 1);
-      const before = memory.slice(0, beginIdx).replace(/\n+$/, "");
-      const after = afterEnd.replace(/^\n+/, "");
-      rebuilt = (before ? before + "\n\n" : "") + newBlock + (after ? "\n" + after : "");
-    } else {
-      rebuilt = memory.replace(/\n+$/, "") + "\n\n" + newBlock;
-    }
-  }
-  const tmp = `${MEMORY_PATH}.carapace-projects.tmp.${process.pid}`;
-  fs.writeFileSync(tmp, rebuilt);
-  fs.renameSync(tmp, MEMORY_PATH);
+function projectsWrite(projects, agentId) {
+  const file = projectsFilePath(agentId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  // The whole file is the projects list — wrap with a leading
+  // <!-- format reference --> comment for self-documentation when
+  // a human (or the agent) opens the file directly.
+  const header = [
+    "<!-- CARAPACE PROJECTS — agent-maintained · iOS Projects view reads + writes here. Format:",
+    "### <id> · <Name> · <emoji> <progress>%",
+    "<description paragraph>",
+    "",
+    "**Focus:** <project focus prompt>",
+    "",
+    "**Workstreams:**",
+    "- `<id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus>",
+    "",
+    "Emojis: 🟢 green · 🟡 yellow · 🔴 red · ⚪ idle",
+    "-->",
+    "",
+  ].join("\n");
+  const body = header + projectsFormatBlock(projects);
+  const tmp = `${file}.carapace-projects.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, body);
+  fs.renameSync(tmp, file);
 }
 
 function projectsReadMeta() {
@@ -201,97 +208,202 @@ function projectsBumpMeta(key) {
   return meta[key];
 }
 
-function projectsBuildResponse() {
-  const projects = projectsRead();
+function projectsBuildResponse(agentId) {
+  const projects = projectsRead(agentId);
+  // Meta keys are namespaced by agent so the prompt-version cursor
+  // for main:install-carapace doesn't collide with orthobro:install-carapace.
   const meta = projectsReadMeta();
+  const ns = (agentId && String(agentId).trim()) || "main";
   for (const p of projects) {
-    const pm = meta[p.id];
+    const pm = meta[`${ns}:${p.id}`];
     if (pm) { p.promptVersion = pm.version; p.promptUpdatedAt = pm.updatedAt; }
     for (const w of (p.workstreams || [])) {
-      const wm = meta[`${p.id}:${w.id}`];
+      const wm = meta[`${ns}:${p.id}:${w.id}`];
       if (wm) { w.promptVersion = wm.version; w.promptUpdatedAt = wm.updatedAt; }
     }
   }
-  return { version: 1, updated: new Date().toISOString(), projects };
+  return { version: 1, agent: ns, updated: new Date().toISOString(), projects };
 }
 
-function projectsUpdateProjectPrompt(projectId, newPrompt) {
-  const projects = projectsRead();
+function projectsUpdateProjectPrompt(agentId, projectId, newPrompt) {
+  const projects = projectsRead(agentId);
   const proj = projects.find(p => p.id === projectId);
   if (!proj) return { error: "project not found", status: 404 };
   proj.divePrompt = newPrompt || "";
-  projectsWrite(projects);
-  const m = projectsBumpMeta(projectId);
-  return { ok: true, id: projectId, promptVersion: m.version, promptUpdatedAt: m.updatedAt };
+  projectsWrite(projects, agentId);
+  const ns = (agentId && String(agentId).trim()) || "main";
+  const m = projectsBumpMeta(`${ns}:${projectId}`);
+  return { ok: true, id: projectId, agent: ns, promptVersion: m.version, promptUpdatedAt: m.updatedAt };
 }
 
-function projectsUpdateWorkstreamPrompt(projectId, workstreamId, newPrompt) {
-  const projects = projectsRead();
+function projectsUpdateWorkstreamPrompt(agentId, projectId, workstreamId, newPrompt) {
+  const projects = projectsRead(agentId);
   const proj = projects.find(p => p.id === projectId);
   if (!proj) return { error: "project not found", status: 404 };
   const ws = (proj.workstreams || []).find(w => w.id === workstreamId);
   if (!ws) return { error: "workstream not found", status: 404 };
   ws.focusPrompt = newPrompt || "";
-  projectsWrite(projects);
-  const m = projectsBumpMeta(`${projectId}:${workstreamId}`);
-  return { ok: true, id: projectId, wid: workstreamId, promptVersion: m.version, promptUpdatedAt: m.updatedAt };
+  projectsWrite(projects, agentId);
+  const ns = (agentId && String(agentId).trim()) || "main";
+  const m = projectsBumpMeta(`${ns}:${projectId}:${workstreamId}`);
+  return { ok: true, id: projectId, wid: workstreamId, agent: ns, promptVersion: m.version, promptUpdatedAt: m.updatedAt };
 }
 
-function projectsDelete(projectId) {
-  const projects = projectsRead();
+function projectsDelete(agentId, projectId) {
+  const projects = projectsRead(agentId);
   const idx = projects.findIndex(p => p.id === projectId);
   if (idx === -1) return { error: "project not found", status: 404 };
   projects.splice(idx, 1);
-  projectsWrite(projects);
+  projectsWrite(projects, agentId);
+  const ns = (agentId && String(agentId).trim()) || "main";
   const meta = projectsReadMeta();
+  // Only purge meta keys for THIS agent's namespace.
+  const projKey = `${ns}:${projectId}`;
   for (const k of Object.keys(meta)) {
-    if (k === projectId || k.startsWith(`${projectId}:`)) delete meta[k];
+    if (k === projKey || k.startsWith(`${projKey}:`)) delete meta[k];
   }
   projectsWriteMeta(meta);
-  return { ok: true, deleted: projectId };
+  return { ok: true, deleted: projectId, agent: ns };
 }
 
-// One-shot migration. Runs on status-server startup. Idempotent — no-op
-// when the PROJECTS block is already present in MEMORY.md.
-function projectsMigrateOnStartup() {
-  let memory;
-  try { memory = fs.readFileSync(MEMORY_PATH, "utf8"); }
-  catch { memory = ""; }
-  if (memory.indexOf(PROJECTS_BEGIN) !== -1) return; // already migrated
-  // Try the cron-synced copy first, fall back to openclaw's own tracker.
-  const candidates = [
-    path.join(DIR, "carapace-project-tracker.json"),
-    path.join(OC_DIR, "workspace", "projects", "tracker.json"),
-  ];
-  let tracker = null;
-  for (const c of candidates) {
-    try {
-      const data = JSON.parse(fs.readFileSync(c, "utf8"));
-      if (data && Array.isArray(data.projects) && data.projects.length) {
-        tracker = data; break;
-      }
-    } catch {}
-  }
-  if (!tracker) return; // nothing to migrate
-  const legacyProjects = tracker.projects.map(p => ({
-    id: p.id,
-    name: p.name || p.id,
-    status: p.status || "idle",
-    progress: Number.isFinite(p.progress) ? p.progress : 0,
-    description: p.description || "",
-    divePrompt: p.divePrompt || "",
-    workstreams: (p.workstreams || []).map(w => ({
-      id: w.id,
-      name: w.name || w.id,
-      status: w.status || "idle",
-      progress: Number.isFinite(w.progress) ? w.progress : 0,
-      owner: w.owner || "main",
-      focusPrompt: w.focusPrompt || "",
-    })),
-  }));
+// ============================================================================
+// CRON — live-query OpenClaw, no tracker.json dependency
+// ============================================================================
+// Was a file-backed endpoint sourced from the periodic sync-trackers.sh
+// cron job. That sync was tied to the project-tracker cron, which we
+// removed when projects moved into per-agent PROJECTS.md. Now we
+// query openclaw directly each request — it's fast (<100ms locally)
+// and the result is always live.
+function buildCronPayload() {
+  const { execSync } = require("child_process");
+  let raw;
   try {
-    projectsWrite(legacyProjects);
-    console.log(`[projects] migrated ${legacyProjects.length} project(s) from tracker.json → MEMORY.md`);
+    // `--all` includes disabled jobs (per Mike: disabled should still
+    // show on iOS, just visually subordinated).
+    raw = execSync("openclaw cron list --json --all 2>/dev/null", {
+      encoding: "utf8",
+      timeout: 5000,
+      env: { ...process.env, PATH: `${process.env.HOME}/.npm-global/bin:${process.env.PATH || "/usr/bin:/bin"}` },
+    });
+  } catch {
+    return { version: 1, updated: new Date().toISOString(), jobs: [] };
+  }
+
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch { return { version: 1, updated: new Date().toISOString(), jobs: [] }; }
+
+  const fmtMs = (ms) => {
+    if (!ms) return "";
+    try {
+      const d = new Date(ms);
+      return d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+    } catch { return ""; }
+  };
+
+  const jobs = (parsed.jobs || []).map(j => {
+    const sched = j.schedule || {};
+    let scheduleStr = "";
+    if (sched.kind === "every" && sched.everyMs) {
+      const mins = Math.round(sched.everyMs / 60000);
+      scheduleStr = `every ${mins}m`;
+    } else if (sched.kind === "cron") {
+      scheduleStr = sched.expr || "";
+    } else {
+      scheduleStr = sched.kind || "";
+    }
+    const state = j.state || {};
+    const enabled = j.enabled !== false;
+    return {
+      id: j.id || "",
+      name: j.name || j.id || "",
+      schedule: scheduleStr,
+      enabled: enabled,
+      // Status: "idle" when enabled (not currently running — we don't
+      // track running state from `cron list`), "disabled" otherwise.
+      status: enabled ? "idle" : "disabled",
+      lastRun: fmtMs(state.lastRunAtMs),
+      // Sortable raw timestamp for iOS / clients that want it.
+      lastRunAtMs: state.lastRunAtMs || 0,
+      nextRun: fmtMs(state.nextRunAtMs),
+      payload: ((j.payload || {}).message || "").slice(0, 240),
+    };
+  });
+
+  // Sort: most-recently-run at the TOP. Jobs that have never run
+  // sort to the bottom (lastRunAtMs = 0). Per Mike's spec.
+  jobs.sort((a, b) => (b.lastRunAtMs || 0) - (a.lastRunAtMs || 0));
+
+  return {
+    version: 1,
+    updated: new Date().toISOString(),
+    jobs: jobs,
+  };
+}
+
+// One-shot migration. Runs on status-server startup. Pulls the
+// legacy MEMORY.md sentinel block (or the older
+// carapace-project-tracker.json) into the new per-agent
+// PROJECTS.md format for `main`. Idempotent — no-op when main's
+// PROJECTS.md already exists.
+function projectsMigrateOnStartup() {
+  const mainPath = projectsFilePath("main");
+  if (fs.existsSync(mainPath)) return; // already migrated
+
+  // 1) Try lifting from the legacy sentinel block in main's MEMORY.md.
+  const memoryPath = path.join(OC_DIR, "workspace", "memory", "MEMORY.md");
+  let migrated = null;
+  try {
+    const memory = fs.readFileSync(memoryPath, "utf8");
+    const beginRe = /^<!-- BEGIN CARAPACE PROJECTS/m;
+    const endRe = /^<!-- END CARAPACE PROJECTS/m;
+    const b = memory.match(beginRe);
+    if (b) {
+      const beginEol = memory.indexOf("\n", b.index);
+      const tail = memory.slice(beginEol + 1);
+      const e = tail.match(endRe);
+      if (e) {
+        const blockText = tail.slice(0, e.index).replace(/\s+$/, "");
+        migrated = projectsParseBlock(blockText);
+      }
+    }
+  } catch {}
+
+  // 2) Fallback: legacy tracker JSON copies.
+  if (!migrated || !migrated.length) {
+    const candidates = [
+      path.join(DIR, "carapace-project-tracker.json"),
+      path.join(OC_DIR, "workspace", "projects", "tracker.json"),
+    ];
+    for (const c of candidates) {
+      try {
+        const data = JSON.parse(fs.readFileSync(c, "utf8"));
+        if (data && Array.isArray(data.projects) && data.projects.length) {
+          migrated = data.projects.map(p => ({
+            id: p.id,
+            name: p.name || p.id,
+            status: p.status || "idle",
+            progress: Number.isFinite(p.progress) ? p.progress : 0,
+            description: p.description || "",
+            divePrompt: p.divePrompt || "",
+            workstreams: (p.workstreams || []).map(w => ({
+              id: w.id, name: w.name || w.id,
+              status: w.status || "idle",
+              progress: Number.isFinite(w.progress) ? w.progress : 0,
+              owner: w.owner || "main",
+              focusPrompt: w.focusPrompt || "",
+            })),
+          }));
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  if (!migrated || !migrated.length) return; // nothing to migrate
+  try {
+    projectsWrite(migrated, "main");
+    console.log(`[projects] migrated ${migrated.length} project(s) → ${mainPath}`);
   } catch (e) {
     console.error(`[projects] migration failed: ${e.message}`);
   }
@@ -935,7 +1047,18 @@ function sseWatchDirRecursive(dirPath, onJsonl, onSessionsJson) {
   attach();
 }
 
-sseWatchFile(MEMORY_PATH, sseProjectsChanged);
+// Watch each known agent's PROJECTS.md so SSE projects.updated
+// fires whenever any agent's board changes. Main + every per-agent
+// workspace. New agents added later won't get a watcher until next
+// status-server restart — acceptable; iOS polls /projects on session
+// switch anyway and will pick up new agents that way.
+sseWatchFile(projectsFilePath("main"), sseProjectsChanged);
+try {
+  for (const reg of getRegisteredAgents()) {
+    if (!reg || !reg.id || reg.id === "main") continue;
+    sseWatchFile(projectsFilePath(reg.id), sseProjectsChanged);
+  }
+} catch {}
 sseWatchFile(path.join(DIR, "carapace-cron-tracker.json"), sseCronChanged);
 sseWatchFile(IDENTITY_PATH, sseIdentityChanged);
 sseWatchDirRecursive(path.join(OC_DIR, "agents"), sseHistoryChanged, sseAgentsChanged);
@@ -1272,6 +1395,10 @@ http.createServer((req, res) => {
     // sentinel-safe). Sidecar ~/.carapace/project-prompt-meta.json
     // tracks promptVersion + promptUpdatedAt counters that iOS uses
     // for cache invalidation.
+    // `?agent=<id>` selects which agent's PROJECTS.md to read/write.
+    // Defaults to "main" when omitted (backward compat).
+    const agentParam = qs.get("agent") || "main";
+
     if (req.method === "PUT") {
       const projMatch = p.match(/^\/projects\/([^/]+)\/prompt\/?$/);
       const wsMatch = p.match(/^\/projects\/([^/]+)\/workstreams\/([^/]+)\/prompt\/?$/);
@@ -1281,10 +1408,10 @@ http.createServer((req, res) => {
           let result;
           if (wsMatch) {
             const [, pid, wid] = wsMatch;
-            result = projectsUpdateWorkstreamPrompt(decodeURIComponent(pid), decodeURIComponent(wid), payload.focusPrompt);
+            result = projectsUpdateWorkstreamPrompt(agentParam, decodeURIComponent(pid), decodeURIComponent(wid), payload.focusPrompt);
           } else {
             const [, pid] = projMatch;
-            result = projectsUpdateProjectPrompt(decodeURIComponent(pid), payload.divePrompt || payload.focusPrompt);
+            result = projectsUpdateProjectPrompt(agentParam, decodeURIComponent(pid), payload.divePrompt || payload.focusPrompt);
           }
           if (result.error) { res.writeHead(result.status || 500); res.end(JSON.stringify(result)); return; }
           res.end(JSON.stringify(result));
@@ -1295,11 +1422,12 @@ http.createServer((req, res) => {
       }
     }
 
-    // DELETE /projects/:id — remove project from MEMORY.md
+    // DELETE /projects/:id?agent=<id> — remove project from this
+    // agent's PROJECTS.md.
     if (req.method === "DELETE" && p.startsWith("/projects/") && !p.includes("/cron/")) {
       const id = decodeURIComponent(p.slice("/projects/".length));
       if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "missing id" })); return; }
-      const result = projectsDelete(id);
+      const result = projectsDelete(agentParam, id);
       if (result.error) { res.writeHead(result.status || 500); res.end(JSON.stringify(result)); return; }
       res.end(JSON.stringify(result));
       return;
@@ -1311,23 +1439,30 @@ http.createServer((req, res) => {
       return;
     }
 
-    // GET /projects + /tracker — now sourced from MEMORY.md instead of
-    // the cron-synced carapace-project-tracker.json. Real-time: edits
-    // the agent makes in-conversation appear immediately on iOS without
-    // waiting for a 2-min cron tick.
+    // GET /projects?agent=<id> + /tracker?agent=<id> — sourced from
+    // <agent-workspace>/PROJECTS.md. Per-agent: each agent has its
+    // own board. Default agent=main when omitted.
     if (p === "/projects" || p === "/tracker") {
       if (!isTierPaid()) { res.end(EMPTY_PROJECTS); return; }
-      try { res.end(JSON.stringify(projectsBuildResponse())); }
+      try { res.end(JSON.stringify(projectsBuildResponse(agentParam))); }
       catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
       return;
     }
 
-    // Other file-backed endpoints (cron) still read from disk
+    // /cron — live query against openclaw's cron list. Replaces the
+    // old tracker.json fallback (which depended on a periodic sync
+    // script that we've since dismantled). Always includes disabled
+    // jobs and sorts by most-recently-ran first per Mike's spec.
+    if (p === "/cron") {
+      if (!isTierPaid()) { res.end(EMPTY_CRON); return; }
+      try { res.end(JSON.stringify(buildCronPayload())); }
+      catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
+    // Other file-backed endpoints still read from disk.
     const filePath = fileMap[p] ? path.join(DIR, fileMap[p]) : null;
     if (filePath) {
-      if (!isTierPaid()) {
-        if (p === "/cron") { res.end(EMPTY_CRON); return; }
-      }
       try { res.end(fs.readFileSync(filePath, "utf8")); }
       catch { res.writeHead(404); res.end(JSON.stringify({ error: "not found" })); }
       return;

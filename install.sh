@@ -113,7 +113,153 @@ run() {
 #
 # If MEMORY.md doesn't exist yet, creates it with just our block —
 # safe because OpenClaw treats an empty memory file as "no facts."
-inject_carapace_vision_rules() {
+#
+# REFACTORED: writes now target per-agent AGENTS.md, not MEMORY.md.
+# Shim delegates to the new sweep that hits main + each agent.
+inject_carapace_vision_rules() { sweep_carapace_for_all_agents; }
+
+# ── Generic block-upsert helper ──────────────────────────
+_carapace_upsert_block() {
+  local target_file="$1"; local begin_marker="$2"; local end_marker="$3"; local block_file="$4"
+  mkdir -p "$(dirname "$target_file")"
+  local tmp_file="${target_file}.carapace.tmp.$$"
+  if [[ ! -f "$target_file" ]]; then
+    cat "$block_file" > "$tmp_file"; mv "$tmp_file" "$target_file"; return 0
+  fi
+  /usr/bin/env python3 - "$target_file" "$tmp_file" "$begin_marker" "$end_marker" "$block_file" <<'PY'
+import sys, re
+src_path, dst_path, begin_marker, end_marker, block_path = sys.argv[1:6]
+with open(src_path, "r", encoding="utf-8") as f: original = f.read()
+with open(block_path, "r", encoding="utf-8") as f: new_block = f.read().rstrip("\n") + "\n"
+begin_re = re.compile(r"^" + re.escape(begin_marker) + r".*$", re.MULTILINE)
+end_re   = re.compile(r"^" + re.escape(end_marker)   + r".*$", re.MULTILINE)
+b = begin_re.search(original); e = end_re.search(original)
+if b and e and b.start() < e.start():
+    before = original[:b.start()].rstrip("\n"); after = original[e.end():].lstrip("\n")
+    rebuilt = (before + "\n\n" + new_block + ("\n" + after if after else "")) if before else (new_block + ("\n" + after if after else ""))
+elif b or e:
+    print("Partial sentinel block — aborting.", file=sys.stderr); sys.exit(2)
+else:
+    rebuilt = original.rstrip("\n") + "\n\n" + new_block
+with open(dst_path, "w", encoding="utf-8") as f: f.write(rebuilt)
+PY
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then rm -f "$tmp_file"; return 1; fi
+  mv "$tmp_file" "$target_file"
+}
+
+_carapace_list_agent_workspaces() {
+  echo "$HOME/.openclaw/workspace"
+  if [[ -d "$HOME/.openclaw/workspace/agents" ]]; then
+    for d in "$HOME/.openclaw/workspace/agents/"*/; do
+      [[ -d "$d" ]] || continue
+      [[ "$(basename "$d")" == "memory" ]] && continue
+      echo "${d%/}"
+    done
+  fi
+  for d in "$HOME/.openclaw/"workspace-*/; do
+    [[ -d "$d" ]] || continue; echo "${d%/}"
+  done
+}
+
+inject_carapace_rules_into_workspace() {
+  local workspace="$1"; local agents_md="${workspace}/AGENTS.md"
+  local block_file
+  block_file="$(mktemp)"; trap "rm -f '$block_file'" EXIT
+  cat > "$block_file" << 'CARAPACE_VISION_BLOCK_EOF'
+<!-- BEGIN CARAPACE VISION RULES (managed by Carapace installer — do not edit between BEGIN/END; agent learnings go below the END marker) -->
+## Vision Response Rules (vision turns only)
+
+A "vision turn" is any user message tagged with `👁️ [vision]` AND/OR containing one or more image attachments AND/OR ending with a `[ctx] …` suffix line. If none of those are present, this block does NOT apply.
+
+**Reading the payload:**
+- **Image 1** = wide camera frame.
+- **Image 2** (optional) = labeled focus grid; cells stamped `[N]`.
+- **Image 3** (optional) = SCAN contact-sheet, cells stamped `T+Ns`.
+- **`[ctx] …` line** = context hint (focused, barcode, OCR, hearing, location, brevity directive).
+- **`read on-device[, partial|, low-confidence] [<lang>]: "<text>"`** = on-device Apple Vision OCR. **GROUND TRUTH** — quote verbatim, do NOT re-OCR.
+- **`hearing: <label> (<conf>), …`** = on-device sound classifications. You can hear; weave naturally without narrating.
+
+**Hard rules:**
+- Match user tone. Reply in 1-2 short sentences unless asked for detail.
+- No bulleted lists in casual conversations. Inline `**bold**` welcome on key noun/number/verb (renders teal on iOS).
+- Don't narrate viewing. Just answer about the subject.
+- Focus stickers ARE the subject — don't mention crops/fragments.
+- Don't comment on photo quality / blur unless asked.
+
+<!-- END CARAPACE VISION RULES -->
+CARAPACE_VISION_BLOCK_EOF
+  _carapace_upsert_block "$agents_md" "<!-- BEGIN CARAPACE VISION RULES" "<!-- END CARAPACE VISION RULES" "$block_file" || { rm -f "$block_file"; return 1; }
+  rm -f "$block_file"
+
+  block_file="$(mktemp)"
+  cat > "$block_file" << 'CARAPACE_PROJECT_RULES_EOF'
+<!-- BEGIN CARAPACE PROJECT RULES (managed by Carapace installer — do not edit between BEGIN/END; agent learnings go below the END marker) -->
+## Project Tracking Rules
+
+The user's iOS app surfaces a **Projects** tab — one board PER AGENT. You maintain YOUR OWN board.
+
+**File:** `PROJECTS.md` in this workspace. Read + edit with file tools. Other agents have their own PROJECTS.md — you don't see theirs.
+
+**Format (strict — iOS parses):**
+```
+### <slug-id> · <Name> · <emoji> <progress>%
+<one-paragraph description>
+
+**Focus:** <prompt the user can launch a chat with>
+
+**Workstreams:**
+- `<slug-id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus>
+```
+
+**Status emojis:** 🟢 green · 🟡 yellow · 🔴 red · ⚪ idle
+**Slugs:** lowercase-hyphens, stable, never rename.
+**Add a project** when the user names a multi-step initiative.
+**Update progress** only when concrete work lands.
+**Focus prompts** = launch templates the user taps in iOS — write as the OPENING line you want the chat to have.
+
+<!-- END CARAPACE PROJECT RULES -->
+CARAPACE_PROJECT_RULES_EOF
+  _carapace_upsert_block "$agents_md" "<!-- BEGIN CARAPACE PROJECT RULES" "<!-- END CARAPACE PROJECT RULES" "$block_file" || { rm -f "$block_file"; return 1; }
+  rm -f "$block_file"; trap - EXIT
+  ok "CARAPACE rules → $agents_md"
+}
+
+seed_carapace_projects_for_workspace() {
+  local workspace="$1"; local projects_file="${workspace}/PROJECTS.md"
+  [[ -f "$projects_file" ]] && return 0
+  mkdir -p "$workspace"
+  cat > "$projects_file" << 'CARAPACE_PROJECTS_SEED_EOF'
+<!-- CARAPACE PROJECTS — agent-maintained · iOS Projects view reads + writes here.
+Format: ### <id> · <Name> · <emoji> <progress>%
+        <description paragraph>
+        **Focus:** <project focus prompt>
+        **Workstreams:**
+        - `<id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus>
+Emojis: 🟢 green · 🟡 yellow · 🔴 red · ⚪ idle
+-->
+
+### install-carapace · Install CARAPACE on your device · 🟢 100%
+You set up CARAPACE on your phone, paired it with this gateway, and ran your first conversation. ✅ Done.
+
+**Focus:** What's next now that CARAPACE is set up? Three concrete things I should try first.
+
+**Workstreams:**
+- _none yet_
+CARAPACE_PROJECTS_SEED_EOF
+  ok "Seeded → $projects_file"
+}
+
+sweep_carapace_for_all_agents() {
+  while IFS= read -r ws; do
+    [[ -d "$ws" ]] || continue
+    inject_carapace_rules_into_workspace "$ws" || true
+    seed_carapace_projects_for_workspace "$ws" || true
+  done < <(_carapace_list_agent_workspaces)
+}
+
+# Legacy MEMORY.md-targeted version below — UNREACHABLE.
+_carapace_legacy_unused_inject_vision_rules() {
   local memory_file="$HOME/.openclaw/workspace/memory/MEMORY.md"
   local begin_marker="<!-- BEGIN CARAPACE VISION RULES"
   local end_marker="<!-- END CARAPACE VISION RULES"
@@ -237,6 +383,161 @@ PY
   rm -f "$block_file"
   trap - EXIT
   ok "CARAPACE vision rules installed into MEMORY.md."
+}
+
+# ── Project tracking rules block injector ──────────────────────────
+# Mirror of the carapace-mac patch — teaches the agent how to
+# maintain the sentinel-bounded projects block that the iOS Projects
+# view reads + writes.
+inject_carapace_project_rules() {
+  local memory_file="$HOME/.openclaw/workspace/memory/MEMORY.md"
+  local begin_marker="<!-- BEGIN CARAPACE PROJECT RULES"
+  local end_marker="<!-- END CARAPACE PROJECT RULES"
+  local block_file
+  block_file="$(mktemp)"
+  trap "rm -f '$block_file'" EXIT
+
+  cat > "$block_file" << 'CARAPACE_PROJECT_RULES_EOF'
+<!-- BEGIN CARAPACE PROJECT RULES (managed by Carapace installer — do not edit between BEGIN/END; agent learnings go below the END marker) -->
+## Project Tracking Rules
+
+The user's iOS app surfaces a **Projects** tab that reads + writes a sentinel-bounded block in this same MEMORY.md file. You are the agent responsible for keeping that block accurate. Treat it as your shared todo board with the user — they SEE what you write there.
+
+**Where projects live:** A managed block between `<!-- BEGIN CARAPACE PROJECTS -->` and `<!-- END CARAPACE PROJECTS -->` somewhere in this MEMORY.md. The block exists already (or gets created on first use). DO NOT recreate the markers; just read + edit between them.
+
+**Format (strict — iOS parses this):**
+```
+### <slug-id> · <Name> · <emoji> <progress>%
+<one-paragraph description>
+
+**Focus:** <prompt the user can launch a chat with>
+
+**Workstreams:**
+- `<slug-id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus prompt>
+```
+
+**Status emojis:** 🟢 green (going well) · 🟡 yellow (some friction) · 🔴 red (blocked / failing) · ⚪ idle (not actively working)
+
+**Slug rules:** lowercase-with-hyphens, no spaces, no punctuation. Like `mobile-app-launch` or `wedding-rsvps`. Stable across sessions — never rename a slug once set; the iOS app keys local state on it.
+
+**When to ADD a project:** The user names a multi-step initiative ("I'm working on X", "we need to ship Y", "project: Z") OR you start orchestrating something that spans multiple sessions. Don't create projects for one-off questions or single-step tasks.
+
+**When to ADD a workstream:** A meaningful sub-effort within an existing project that the user can think about independently. Keep it under ~5 workstreams per project — if you're hitting that, the would-be workstream is probably its own project.
+
+**When to UPDATE progress / status:**
+- Bump progress only when concrete work lands (not when "we just talked about it")
+- 0% = fresh, no real work yet · 25% = early progress · 50% = halfway, plan is solid · 75% = late stages, finishing up · 100% = shipped / done (keep at 🟢 100% for completed)
+- Flip 🟡 yellow when something is friction-y but moving · 🔴 red only when actually blocked
+
+**Focus prompts:** The `**Focus:**` line is a prompt TEMPLATE the user taps in the iOS app to start a chat about that project / workstream. Write it as the OPENING you want the chat to have, NOT as a description. Example: `**Focus:** Walk me through the next 3 things to ship for the mobile launch` — not `**Focus:** Mobile launch project`.
+
+**Workstream owner:** Default `main`. Only set `@<other-agent>` when a different registered agent owns that workstream day-to-day.
+
+**Don't:**
+- Don't add fake/placeholder projects to fill the board
+- Don't delete the block or its markers
+- Don't add projects for things outside the user's actual life — only what they're actively working on with you
+- Don't rewrite descriptions every turn — keep them stable; bump only when meaningful new context lands
+
+<!-- END CARAPACE PROJECT RULES -->
+CARAPACE_PROJECT_RULES_EOF
+
+  mkdir -p "$(dirname "$memory_file")"
+  local tmp_file="${memory_file}.carapace.tmp.$$"
+
+  if [[ ! -f "$memory_file" ]]; then
+    cat "$block_file" > "$tmp_file"
+    mv "$tmp_file" "$memory_file"
+    ok "Created MEMORY.md with CARAPACE project rules (was absent)."
+    return 0
+  fi
+
+  /usr/bin/env python3 - "$memory_file" "$tmp_file" "$begin_marker" "$end_marker" "$block_file" <<'PY'
+import sys, re
+src_path, dst_path, begin_marker, end_marker, block_path = sys.argv[1:6]
+with open(src_path, "r", encoding="utf-8") as f:
+    original = f.read()
+with open(block_path, "r", encoding="utf-8") as f:
+    new_block = f.read().rstrip("\n") + "\n"
+begin_re = re.compile(r"^" + re.escape(begin_marker) + r".*$", re.MULTILINE)
+end_re   = re.compile(r"^" + re.escape(end_marker)   + r".*$", re.MULTILINE)
+b = begin_re.search(original); e = end_re.search(original)
+if b and e and b.start() < e.start():
+    before = original[:b.start()].rstrip("\n")
+    after  = original[e.end():].lstrip("\n")
+    rebuilt = (before + "\n\n" + new_block + ("\n" + after if after else "")) if before else (new_block + ("\n" + after if after else ""))
+elif b or e:
+    print("Partial sentinel block in MEMORY.md — aborting.", file=sys.stderr); sys.exit(2)
+else:
+    base = original.rstrip("\n")
+    rebuilt = base + "\n\n" + new_block
+with open(dst_path, "w", encoding="utf-8") as f:
+    f.write(rebuilt)
+PY
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
+    rm -f "$tmp_file" "$block_file"
+    warn "MEMORY.md project-rules upsert aborted (exit $rc) — file untouched."
+    return 1
+  fi
+  mv "$tmp_file" "$memory_file"
+  rm -f "$block_file"
+  trap - EXIT
+  ok "CARAPACE project rules installed into MEMORY.md."
+}
+
+# ── Initial Projects block seed ────────────────────────────────────
+# Drop the FIRST project — "Install CARAPACE on your device" — into
+# the sentinel-bounded PROJECTS block so users see something on
+# first launch instead of a blank Projects tab. Idempotent: if the
+# block already exists, this is a no-op so we never clobber real data.
+seed_carapace_projects_block() {
+  local memory_file="$HOME/.openclaw/workspace/memory/MEMORY.md"
+  local begin_marker="<!-- BEGIN CARAPACE PROJECTS"
+
+  if [[ ! -f "$memory_file" ]]; then
+    return 0
+  fi
+  # Anchor at line-start so the rules-block's documentation mention
+  # of the marker text doesn't false-positive.
+  if grep -q "^$begin_marker" "$memory_file" 2>/dev/null; then
+    return 0
+  fi
+
+  local seed_file
+  seed_file="$(mktemp)"
+  trap "rm -f '$seed_file'" EXIT
+  cat > "$seed_file" << 'CARAPACE_PROJECTS_SEED_EOF'
+<!-- BEGIN CARAPACE PROJECTS (agent-maintained · iOS Projects view reads + writes here · do not edit between markers from outside) -->
+<!-- Format:
+### <id> · <Name> · <emoji> <progress>%
+<description paragraph>
+
+**Focus:** <project focus prompt>
+
+**Workstreams:**
+- `<id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus>
+
+Emojis: 🟢 green · 🟡 yellow · 🔴 red · ⚪ idle
+-->
+## Projects
+
+### install-carapace · Install CARAPACE on your device · 🟢 100%
+You set up CARAPACE on your phone, paired it with this gateway, and ran your first conversation. ✅ Done.
+
+**Focus:** What's next now that CARAPACE is set up? Three concrete things I should try first.
+
+**Workstreams:**
+- _none yet_
+
+<!-- END CARAPACE PROJECTS -->
+CARAPACE_PROJECTS_SEED_EOF
+
+  printf "\n" >> "$memory_file"
+  cat "$seed_file" >> "$memory_file"
+  rm -f "$seed_file"
+  trap - EXIT
+  ok "Seeded CARAPACE projects block (Install CARAPACE 🟢 100%)."
 }
 
 # ── BOOTSTRAP.md injector ────────────────────────────────
@@ -2087,16 +2388,14 @@ except: sys.exit(1)
   # Default models: picked for safe / cheap / stable.
   # - Haiku over Sonnet/Opus (cheapest Claude tier, dated stable rev)
   # - gpt-5-mini over gpt-5 (much cheaper, same family)
-  # - openai-codex/gpt-5.4 (the model OpenClaw itself recommends for
-  #   ChatGPT OAuth — capability-list publishes more variants like
-  #   gpt-5.2-codex but OpenAI's server-side gate rejects them for
-  #   ChatGPT accounts with "model not supported when using Codex
-  #   with a ChatGPT account".)
+  # - openai-codex/gpt-5.5 (current default for ChatGPT OAuth — bumped
+  #   from 5.4 since OpenAI rolled out 5.5 to all ChatGPT plans and
+  #   it's a meaningful capability jump for free.)
   # - grok-4-fast (fast/cheap tier of flagship family, big context)
   # Users can always switch later via `openclaw onboard` or the dashboard.
   SKIP_AI=false
   case "$PROV_CHOICE" in
-    2) PROVIDER="openai-codex"; MODEL="openai-codex/gpt-5.4";         KEY_HINT="(OAuth — no key needed)" ;;
+    2) PROVIDER="openai-codex"; MODEL="openai-codex/gpt-5.5";         KEY_HINT="(OAuth — no key needed)" ;;
     3) PROVIDER="anthropic";    MODEL="anthropic/claude-haiku-4-5";   KEY_HINT="sk-ant-..." ;;
     4) PROVIDER="openai";       MODEL="openai/gpt-5-mini";            KEY_HINT="sk-..." ;;
     5) PROVIDER="xai";          MODEL="xai/grok-4-fast";              KEY_HINT="xai-..." ;;
@@ -2428,7 +2727,7 @@ fi
 # block we install into MEMORY.md below tells the gateway agent how
 # to interpret the payload.
 
-inject_carapace_vision_rules
+sweep_carapace_for_all_agents
 inject_carapace_bootstrap
 inject_carapace_first_light
 echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
