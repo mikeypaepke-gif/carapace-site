@@ -293,12 +293,39 @@ CARAPACE_PROJECTS_SEED_EOF
   ok "Seeded → $projects_file"
 }
 
+# ── Force every session to re-load its system prompt ──────
+# OpenClaw caches systemSent: true after first message. Without
+# flipping back, AGENTS.md updates never reach existing chats.
+flip_all_sessions_system_sent() {
+  local agents_root="$HOME/.openclaw/agents"
+  [[ -d "$agents_root" ]] || return 0
+  for sessions_json in "$agents_root"/*/sessions/sessions.json; do
+    [[ -f "$sessions_json" ]] || continue
+    /usr/bin/env python3 - "$sessions_json" <<'PY'
+import json, sys
+p = sys.argv[1]
+try:
+    with open(p, "r") as f: d = json.load(f)
+except Exception: sys.exit(0)
+changed = 0
+for k, v in d.items():
+    if isinstance(v, dict) and v.get("systemSent") is True:
+        v["systemSent"] = False
+        changed += 1
+if changed:
+    with open(p, "w") as f: json.dump(d, f, indent=2)
+PY
+  done
+  ok "Forced AGENTS.md reload across all sessions"
+}
+
 sweep_carapace_for_all_agents() {
   while IFS= read -r ws; do
     [[ -d "$ws" ]] || continue
     inject_carapace_rules_into_workspace "$ws" || true
     seed_carapace_projects_for_workspace "$ws" || true
   done < <(_carapace_list_agent_workspaces)
+  flip_all_sessions_system_sent || true
 }
 
 # Legacy MEMORY.md-targeted version below — UNREACHABLE.
