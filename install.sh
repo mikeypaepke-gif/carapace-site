@@ -541,6 +541,7 @@ install_self_to_carapace_dir() {
 sweep_carapace_for_all_agents() {
   ensure_carapace_bootstrap_caps || true
   install_self_to_carapace_dir || true
+  seed_main_identity_default || true
   while IFS= read -r ws; do
     [[ -d "$ws" ]] || continue
     inject_carapace_rules_into_workspace "$ws" || true
@@ -549,6 +550,37 @@ sweep_carapace_for_all_agents() {
   retire_legacy_per_agent_projects_files || true
   retire_stale_subagent_bootstrap_files || true
   flip_all_sessions_system_sent || true
+}
+
+# Seed clean Main IDENTITY.md so iOS doesn't render the OpenClaw
+# default template's raw markdown ("- **CREATURE:**" etc) as the
+# spinal-map node label. Idempotent — only writes when missing or
+# still the unfilled OpenClaw template.
+seed_main_identity_default() {
+  local identity_file="$HOME/.openclaw/workspace/IDENTITY.md"
+  local should_overwrite=0
+  if [[ ! -f "$identity_file" ]]; then
+    should_overwrite=1
+  elif grep -q "_(pick something you like)_" "$identity_file" 2>/dev/null; then
+    should_overwrite=1
+  elif grep -q "_(workspace-relative path" "$identity_file" 2>/dev/null; then
+    should_overwrite=1
+  elif ! grep -qE "^\s*[-*]?\s*\*?\*?Name\*?\*?\s*:\s*\S" "$identity_file" 2>/dev/null; then
+    should_overwrite=1
+  fi
+  if [[ $should_overwrite -eq 1 ]]; then
+    mkdir -p "$(dirname "$identity_file")"
+    cat > "$identity_file" << 'CARAPACE_MAIN_IDENTITY_EOF'
+# IDENTITY.md
+
+- **Name:** Main
+- **Emoji:** 🧠
+- **Creature:** Your primary AI operating layer — the always-on coordinator. Routes context, escalates work, and keeps the rest of your agents in sync.
+- **Vibe:** Direct, helpful, calm. Opinionated when it matters. Brief by default; verbose only when you ask.
+- **Purpose:** Be the brain of the operation. Think before acting, surface what matters, never punt back to the user when you can just handle it.
+CARAPACE_MAIN_IDENTITY_EOF
+    ok "Seeded clean Main IDENTITY.md (Name: Main, Emoji: 🧠)"
+  fi
 }
 
 # add-agent <slug> "<Display Name>" "<emoji>" "<role>"
