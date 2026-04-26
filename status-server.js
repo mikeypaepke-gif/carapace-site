@@ -543,7 +543,7 @@ function deriveSubagentNickname(label, fallbackId) {
 
 /// Pick an emoji for a subagent by keyword-matching its spawn label.
 function deriveSubagentEmoji(label) {
-  if (!label) return "🌱";
+  if (!label) return "👤";
   const lower = label.toLowerCase();
   const map = [
     ["research", "🔍"], ["analy", "📊"], ["audit", "🔎"],
@@ -582,7 +582,7 @@ function deriveSubagentEmoji(label) {
   for (const [kw, emoji] of map) {
     if (lower.includes(kw)) return emoji;
   }
-  return "🌱";
+  return "👤";
 }
 
 /// Resolve an agent's workspace directory. OpenClaw uses one of:
