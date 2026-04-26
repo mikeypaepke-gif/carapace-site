@@ -594,11 +594,21 @@ function getLiveAgentStatus() {
           // Show subagents while running OR within 20 seconds of completion
           if (ageMs > twoHours) continue;
           if (!isRunning && ageMs > 20000) continue;
+          // Parent = the agent that actually spawned this subagent.
+          // Session keys are `agent:<spawner>:subagent:<uuid>`, so
+          // splitting yields ["agent", "<spawner>", ...]. Falls back
+          // to the directory we're iterating (which is the spawner
+          // anyway — subagent sessions live under the spawner's
+          // sessions.json) and ultimately to "main" if neither is
+          // discoverable.
+          const keyParts = sessionKey.split(":");
+          const spawnerFromKey = keyParts[1];
+          const parent = spawnerFromKey || agent || "main";
           agents[agentId] = {
             name: `Subagent ${agentId}`,
             status: "active",
             detail: entry.lastChannel || "isolated task",
-            parent: "main",
+            parent: parent,
             updated: new Date(updatedAt).toLocaleTimeString()
           };
         }
