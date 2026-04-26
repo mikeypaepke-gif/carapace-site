@@ -1435,6 +1435,22 @@ PROJECTJSON
 NODE_BIN="$(command -v node)"
 
 # Write status server and sync script via python3 (avoids heredoc quote-stripping)
+# Pull status-server.js from carapace.info — single source of truth.
+# We previously inlined a minified copy of the JS here, which silently
+# drifted from the canonical version every time someone updated the
+# server (e.g. the agents-list-from-openclaw.json fix that broke new
+# agents from showing in the iOS spinal map). Same domain as this
+# install.sh, same trust model — if you trust the install script,
+# you trust this fetch.
+mkdir -p "$HOME/.carapace"
+SS_URL="${SS_URL:-https://carapace.info/status-server.js}"
+if curl -fsSL "$SS_URL" -o "$HOME/.carapace/status-server.js"; then
+  echo "✓ Installed status-server.js from $SS_URL"
+else
+  echo "✗ Failed to download status-server.js from $SS_URL — iOS dashboard will not work"
+  exit 1
+fi
+
 python3 - << 'PYEOF'
 import os, textwrap
 
@@ -1496,8 +1512,11 @@ sync_script = textwrap.dedent("""
 """).lstrip()
 
 home = os.path.expanduser("~")
-with open(home + "/.carapace/status-server.js", "w") as f:
-    f.write(status_server)
+# status-server.js is downloaded from carapace.info before this Python
+# block runs (single source of truth); only sync-trackers.sh is
+# generated from inline content. The status_server variable above is
+# kept around as a dead-code fallback in case the curl fetch ever
+# regresses — the bash check exits before reaching here on failure.
 with open(home + "/.carapace/sync-trackers.sh", "w") as f:
     f.write(sync_script)
 os.chmod(home + "/.carapace/sync-trackers.sh", 0o755)

@@ -528,6 +528,21 @@ const EMPTY_PROJECTS = JSON.stringify({version:1,updated:"",projects:[]});
 const EMPTY_CRON = JSON.stringify({version:1,updated:"",jobs:[]});
 const EMPTY_AGENTS = JSON.stringify({agents:{},updated:""});
 
+/// Read every agent registered in ~/.openclaw/openclaw.json. This is
+/// the canonical list — agents listed here exist whether or not
+/// they've ever started a session. Used by getLiveAgentStatus and
+/// the /sessions endpoint to surface registered-but-idle agents so
+/// the iOS spinal map shows the full topology, not just agents that
+/// happened to run recently.
+function getRegisteredAgents() {
+  try {
+    const cfgPath = path.join(OC_DIR, "openclaw.json");
+    if (!fs.existsSync(cfgPath)) return [];
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    return Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+  } catch { return []; }
+}
+
 /// Build live agent status from OpenClaw session files
 function getLiveAgentStatus() {
   try {
@@ -592,6 +607,30 @@ function getLiveAgentStatus() {
 
     if (!agents["main"]) {
       agents["main"] = { name: "Main", status: "idle", detail: "Ready", updated: new Date().toLocaleTimeString() };
+    }
+
+    // Surface every registered-but-idle agent from openclaw.json so
+    // the iOS spinal map shows ALL agents (per Mike's spec: "All true
+    // agents must show in the spinal map even when idle"). Live
+    // session data above takes precedence — we only fill in agents
+    // that didn't get populated from sessions/sessions.json.
+    const registered = getRegisteredAgents();
+    const nowStr = new Date().toLocaleTimeString();
+    for (const reg of registered) {
+      const id = reg && reg.id;
+      if (!id) continue;
+      if (agents[id]) continue;  // live data wins
+      const ident = reg.identity || {};
+      const rawName = ident.name || reg.name || (id === "main" ? "Main" : id);
+      const niceName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+      const node = {
+        name: niceName,
+        status: "idle",
+        detail: "Ready",
+        updated: nowStr
+      };
+      if (ident.emoji) node.emoji = ident.emoji;
+      agents[id] = node;
     }
 
     return { agents, updated: new Date().toLocaleTimeString() };
@@ -984,6 +1023,12 @@ http.createServer((req, res) => {
 
     if (p === "/sessions") {
       const agentsRoot = path.join(OC_DIR, "agents");
+      // Union of (a) on-disk agent directories (agents that have run)
+      // and (b) registered agents from openclaw.json (agents created
+      // but never started). Either source alone misses cases — disk
+      // misses brand-new agents, config misses ad-hoc agents that
+      // appeared via subagent spawn. Union covers both.
+      const known = new Set();
       let sessions = [];
       try {
         const agentDirs = fs.readdirSync(agentsRoot).filter(a => {
@@ -1006,6 +1051,20 @@ http.createServer((req, res) => {
             agent.replace(/-/g, " ").replace(/_/g, " ")
               .replace(/\b\w/g, c => c.toUpperCase());
           sessions.push({ key: `agent:${agent}:main`, agent, label, lastActive });
+          known.add(agent);
+        }
+        // Surface registered-but-never-run agents from openclaw.json
+        // so the iOS dropdown can switch INTO them on first use. The
+        // gateway will lazy-create the agent dir on first message.
+        const registered = getRegisteredAgents();
+        for (const reg of registered) {
+          const id = reg && reg.id;
+          if (!id || known.has(id)) continue;
+          const ident = reg.identity || {};
+          const rawName = ident.name || reg.name || (id === "main" ? "Main" : id);
+          const label = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+          sessions.push({ key: `agent:${id}:main`, agent: id, label, lastActive: 0 });
+          known.add(id);
         }
         // main first, then by lastActive desc
         sessions.sort((a, b) => {
