@@ -45,15 +45,14 @@ const EMOJI_TO_STATUS = { "🟢": "green", "🟡": "yellow", "🔴": "red", "⚪
 const STATUS_TO_EMOJI = { green: "🟢", yellow: "🟡", red: "🔴", idle: "⚪", suggested: "❓" };
 
 /// Resolve the PROJECTS.md path for a given agent id. Reuses the
-/// same workspace-resolution logic that powers per-agent identity.
-/// Defaults to main when agentId is missing/empty.
-function projectsFilePath(agentId) {
-  const id = (agentId && String(agentId).trim()) || "main";
-  const registered = (typeof getRegisteredAgents === "function") ? getRegisteredAgents() : [];
-  const ws = (typeof resolveAgentWorkspace === "function")
-    ? resolveAgentWorkspace(id, (registered.find(a => a && a.id === id)) || null)
-    : (id === "main" ? path.join(OC_DIR, "workspace") : path.join(OC_DIR, `workspace-${id}`));
-  return path.join(ws, "PROJECTS.md");
+/// Project tracking is MACHINE-WIDE owned by `main` — every agent's
+/// Projects tab reads/writes the same file at ~/.openclaw/workspace/
+/// PROJECTS.md. The agentId param is accepted for API compatibility
+/// but is intentionally ignored: it stays in routes for client-side
+/// context (which agent the user is currently chatting with), but the
+/// resolved file is always main's.
+function projectsFilePath(_agentId) {
+  return path.join(OC_DIR, "workspace", "PROJECTS.md");
 }
 
 function projectsParseSection(text) {
@@ -306,10 +305,31 @@ function buildCronPayload() {
   try {
     // `--all` includes disabled jobs (per Mike: disabled should still
     // show on iOS, just visually subordinated).
+    //
+    // PATH extension: the openclaw bin is a shebang `#!/usr/bin/env node`
+    // script. When LaunchAgent boots us with the restricted system PATH
+    // (`/usr/bin:/bin:/usr/sbin:/sbin`), `env` can't find `node` and the
+    // execSync fails with status 127. Three things must be reachable in
+    // PATH for the shebang to resolve:
+    //   1. `~/.npm-global/bin` — where `openclaw` itself lives
+    //   2. The dir containing OUR running node (process.execPath) so the
+    //      shebang's `env node` resolves to a working interpreter
+    //   3. `/opt/homebrew/bin` + `/usr/local/bin` — common node install
+    //      paths (homebrew on Mac arm64 + intel/Linux manual)
+    // Without (2), execSync silently dies with 127 and the iOS app sees
+    // an empty cron list even though `openclaw cron list` works fine
+    // from the user's shell.
+    const nodeDir = require("path").dirname(process.execPath);
+    const extraPaths = [
+      `${process.env.HOME}/.npm-global/bin`,
+      nodeDir,
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+    ].join(":");
     raw = execSync("openclaw cron list --json --all 2>/dev/null", {
       encoding: "utf8",
       timeout: 5000,
-      env: { ...process.env, PATH: `${process.env.HOME}/.npm-global/bin:${process.env.PATH || "/usr/bin:/bin"}` },
+      env: { ...process.env, PATH: `${extraPaths}:${process.env.PATH || "/usr/bin:/bin"}` },
     });
   } catch {
     return { version: 1, updated: new Date().toISOString(), jobs: [] };
@@ -588,6 +608,44 @@ function loadHistory(limit, token, agent) {
 
         // Strip noise (same filters as Mac StatusServer.swift)
         text = text.replace(/<final>/g, "").replace(/<\/final>/g, "").trim();
+        // Strip OpenClaw's "[Bootstrap pending]" auto-injection block
+        // that prefixes user messages when an agent's workspace has
+        // BOOTSTRAP.md. The block ends at either a "Sender (untrusted
+        // metadata):" json fence (newer openclaw) or directly before
+        // the user's actual content (older openclaw). The user's real
+        // message is what follows — strip the system noise so the chat
+        // bubble shows what the user actually typed.
+        if (text.startsWith("[Bootstrap pending]")) {
+          // Newer openclaw: bootstrap block + Sender json + user text
+          const senderIdx = text.indexOf("Sender (untrusted metadata):");
+          if (senderIdx !== -1) {
+            // Skip past the sender JSON block (```json ... ```) to the
+            // user's actual message that follows.
+            const afterSender = text.slice(senderIdx);
+            const fenceEnd = afterSender.indexOf("```\n", afterSender.indexOf("```json"));
+            if (fenceEnd !== -1) {
+              text = afterSender.slice(fenceEnd + 4).trim();
+            } else {
+              text = afterSender.replace(/^Sender \(untrusted metadata\):[\s\S]*?\n\n/, "").trim();
+            }
+          } else {
+            // Older openclaw: bootstrap block then user text after a
+            // blank line. Drop everything before the LAST blank line
+            // since the bootstrap text itself contains blank lines.
+            const lines = text.split("\n");
+            // Find the last "[ctx ...]" / "[YYYY-MM-DD" timestamp
+            // marker which delimits user content; if none, fall back
+            // to the last line.
+            let userStart = -1;
+            for (let i = lines.length - 1; i >= 0; i--) {
+              if (/^\[(ctx|\d{4}-\d{2}-\d{2}|🎙️|👁️|💬|Sat|Sun|Mon|Tue|Wed|Thu|Fri)\b/.test(lines[i].trim())) {
+                userStart = i;
+                break;
+              }
+            }
+            text = userStart >= 0 ? lines.slice(userStart).join("\n").trim() : (lines[lines.length - 1] || "").trim();
+          }
+        }
         if (!text) continue;
         if (text === "HEARTBEAT_OK" || text === "NO_REPLY") continue;
         if (text.includes("Read HEARTBEAT.md if it exists")) continue;
@@ -653,14 +711,12 @@ const fileMap = {
   "/cron": "carapace-cron-tracker.json"
 };
 
-// Check if user has paid tier (reads ~/.carapace/tier.json)
+// Tier gating REMOVED from Mac as of 2026-04 — Carapace macOS is no
+// longer a paid app; every feature is unlocked. Function kept (always
+// returns true) so we don't have to chase down every call site, and
+// so we can re-introduce gating later for non-Mac surfaces if needed.
 function isTierPaid() {
-  try {
-    const tierFile = path.join(DIR, "tier.json");
-    if (!fs.existsSync(tierFile)) return true; // No tier file = Linux headless = always full access
-    const data = JSON.parse(fs.readFileSync(tierFile, "utf8"));
-    return data.tier && data.tier !== "free";
-  } catch { return true; }
+  return true;
 }
 const EMPTY_PROJECTS = JSON.stringify({version:1,updated:"",projects:[]});
 const EMPTY_CRON = JSON.stringify({version:1,updated:"",jobs:[]});
@@ -1073,18 +1129,8 @@ function sseWatchDirRecursive(dirPath, onJsonl, onSessionsJson) {
   attach();
 }
 
-// Watch each known agent's PROJECTS.md so SSE projects.updated
-// fires whenever any agent's board changes. Main + every per-agent
-// workspace. New agents added later won't get a watcher until next
-// status-server restart — acceptable; iOS polls /projects on session
-// switch anyway and will pick up new agents that way.
-sseWatchFile(projectsFilePath("main"), sseProjectsChanged);
-try {
-  for (const reg of getRegisteredAgents()) {
-    if (!reg || !reg.id || reg.id === "main") continue;
-    sseWatchFile(projectsFilePath(reg.id), sseProjectsChanged);
-  }
-} catch {}
+// Project tracking is machine-wide → only one file to watch.
+sseWatchFile(projectsFilePath(), sseProjectsChanged);
 sseWatchFile(path.join(DIR, "carapace-cron-tracker.json"), sseCronChanged);
 sseWatchFile(IDENTITY_PATH, sseIdentityChanged);
 sseWatchDirRecursive(path.join(OC_DIR, "agents"), sseHistoryChanged, sseAgentsChanged);

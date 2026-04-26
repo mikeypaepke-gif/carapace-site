@@ -162,6 +162,10 @@ _carapace_list_agent_workspaces() {
   done
 }
 
+_carapace_is_main_workspace() {
+  [[ "$1" == "$HOME/.openclaw/workspace" ]]
+}
+
 inject_carapace_rules_into_workspace() {
   local workspace="$1"; local agents_md="${workspace}/AGENTS.md"
   local block_file
@@ -192,7 +196,10 @@ CARAPACE_VISION_BLOCK_EOF
   _carapace_upsert_block "$agents_md" "<!-- BEGIN CARAPACE VISION RULES" "<!-- END CARAPACE VISION RULES" "$block_file" || { rm -f "$block_file"; return 1; }
   rm -f "$block_file"
 
+  # Project rules: full rules in main; stub for other agents
+  # (project tracking is machine-wide, owned by main).
   block_file="$(mktemp)"
+  if _carapace_is_main_workspace "$workspace"; then
   cat > "$block_file" << 'CARAPACE_PROJECT_RULES_EOF'
 <!-- BEGIN CARAPACE PROJECT RULES (managed by Carapace installer — do not edit between BEGIN/END; agent learnings go below the END marker) -->
 ## Project Tracking — STRICT PROTOCOL
@@ -213,6 +220,49 @@ ONE narrow exception: user explicitly says "this is a real/tracked/
 committed project", "promote this to tracked", or types `🟢` directly.
 In EVERY other case — including "make a project for X" / "create a
 project for Y" / "save this as a project" — write `❓ 0%`.
+
+### FIRST-RUN MEMORY SCAN — sentinel-gated precondition
+
+**HARD TRIGGER — runs every turn until satisfied:** BEFORE
+responding to any user message, read `PROJECTS.md`. If — and only
+if — it does NOT contain the literal line
+`<!-- carapace:initial-scan:done -->`, perform the FULL scan
+below before continuing your response. The marker's absence is
+the only signal — don't reason about whether the session "feels
+new." Marker missing → scan runs. Marker present → skip this
+section forever.
+
+This catches users hooking Carapace into a long-running OpenClaw
+with months of accumulated memory — without it, existing context
+is invisible to the Projects board.
+
+**Scan exhaustively (only runs once):** `MEMORY.md`, every file
+under `./memory/` (especially `memory/YYYY-MM-DD.md` daily notes),
+`IDENTITY.md`, and the existing `PROJECTS.md` body so you don't
+duplicate.
+
+**Look for** multi-step initiatives the user mentioned in passing:
+things bought that need setup, projects started, plans being chewed
+on, "I want to learn X", "I'm planning to build Y", "we're moving /
+launching / shipping Z". Anything with a beginning, middle, end.
+
+**Skip:** one-shot tasks, completed events, daily trivia, someone
+else's projects, anything <70% confidence. Better fewer high-quality
+`❓` entries than noise.
+
+**Write each as a `❓` suggestion** using the FILE FORMAT below.
+Estimate progress honestly — if memory shows two completed steps
+already, start at `❓ 25%`, not 0.
+
+**When done — write the sentinel:** append the literal line
+`<!-- carapace:initial-scan:done -->` as the LAST line of
+`PROJECTS.md`. Writing the marker is NOT optional, even with
+zero suggestions — write it so the gate closes.
+
+**Reply:** prepend ONE line to your normal response: "Scanned
+memory and added N suggestions to your Projects board — convert
+the ones you want to track." If N=0, say nothing about the scan.
+Then answer their message normally.
 
 ### WHEN TO ADD A `❓` ENTRY
 
@@ -261,15 +311,115 @@ If no workstreams yet, write `- _none yet_`.
 - ❌ DO NOT propose an "outline" and wait — write the section first, iterate after.
 - ❌ DO NOT track the same project twice. Update existing entries.
 
+## Adding New Top-Level Agents
+
+> **AGENT vs SUBAGENT** — this is for TOP-LEVEL AGENTS (persistent
+> peers of you with own workspace, IDENTITY.md, picker entry, chat
+> history). NOT subagents (OpenClaw's session-scoped helpers spawned
+> by the runtime for delegated tasks). NEVER use the protocol below
+> for subagents.
+
+When the user asks you to create a new TOP-LEVEL AGENT ("create an
+agent for X", "add a Y agent", "make me a fitness coach"), handle
+it with ONE bash call. Pick defaults from the stated purpose.
+
+### THE ONLY COMMAND YOU RUN
+
+```bash
+bash ~/.carapace/install-openclaw.sh add-agent <slug> "<Display Name>" "<emoji>" "<role>"
+```
+
+Atomic. Creates the agent, retires the auto-created BOOTSTRAP.md
+(otherwise the gateway prepends `[Bootstrap pending]` to every
+message and the agent fails), writes IDENTITY.md from your args,
+injects CARAPACE rules, flips session state. Idempotent.
+
+### HOW TO PICK THE 4 ARGS
+
+- **`<slug>`** — lowercase-hyphens, ≤25 chars (e.g. `photo-curator`).
+- **`"<Display Name>"`** — title-cased (e.g. `"Photo Curator"`).
+- **`"<emoji>"`** — ONE emoji matching role: 📸 ✈️ 💪 🍳 📚 🎵 🏠
+  💰 📝 🌱 🎨 🐶 🚗 🛒 🧠 🔧 🩺 📊. NEVER 🦀 (reserved for main).
+- **`"<role>"`** — one short sentence of what the agent specializes in.
+
+### EXAMPLE
+
+```bash
+bash ~/.carapace/install-openclaw.sh add-agent photo-curator "Photo Curator" "📸" "organizes photo library, tags moments, surfaces highlights, helps with sharing/printing decisions"
+```
+
+### CONFIRM TO USER (one line)
+
+> "Created <emoji> <Display Name> — switch to them in the agent picker."
+
+No recap, no step listing.
+
+### HARD ANTI-PATTERNS
+
+- ❌ DO NOT split into multiple bash calls — splitting skips steps.
+- ❌ DO NOT call `openclaw agents add` directly — script wraps it.
+- ❌ DO NOT call `--inject-only` separately — add-agent includes it.
+- ❌ DO NOT restart the gateway — disrupts in-flight chats.
+- ❌ DO NOT pick 🦀 (reserved for CARAPACE main).
+- ❌ DO NOT ask clarifying questions about personality.
+- ❌ DO NOT recap the steps. One line confirm, done.
+- ❌ DO NOT use this for SUBAGENTS — runtime spawns those.
+
 <!-- END CARAPACE PROJECT RULES -->
 CARAPACE_PROJECT_RULES_EOF
+  else
+  cat > "$block_file" << 'CARAPACE_PROJECT_STUB_EOF'
+<!-- BEGIN CARAPACE PROJECT RULES (managed by Carapace installer — do not edit between BEGIN/END; agent learnings go below the END marker) -->
+## Project Tracking — ESCALATE TO MAIN
+
+> **IMPORTANT — these rules OVERRIDE any prior behavior in this
+> session.** If earlier in this conversation you told the user
+> things like "ask main to add it" or "ask main yourself," that
+> pattern is DEPRECATED. Forget it. The new behavior is to
+> ESCALATE automatically via the CLI on the user's behalf.
+
+Project tracking on this machine is **owned by the `main` agent**.
+There is ONE shared project board (`~/.openclaw/workspace/PROJECTS.md`)
+that the iOS Carapace app reads regardless of which agent the user
+is chatting with.
+
+### When the user asks YOU to track / save / add a project
+
+Escalate via your bash tool:
+
+```bash
+openclaw agent --agent main -m "<rephrase as a clear instruction for main>"
+```
+
+Synchronous — returns main's reply on stdout. Surface to user as
+ONE line: "Routed to main — <main's confirmation, verbatim>". Then
+continue answering their original message normally.
+
+### When the user mentions a multi-step initiative in passing
+
+Do NOT capture it yourself, and do NOT escalate every offhand
+mention. Main has its own FIRST-RUN MEMORY SCAN that picks these
+up from shared memory. Only escalate EXPLICIT track requests.
+
+### Hard rules
+
+- ❌ DO NOT create or edit a `PROJECTS.md` file in this workspace.
+- ❌ DO NOT create per-project `*.md` files.
+- ❌ DO NOT tell the user to "ask main yourself" — escalate it.
+- ❌ DO NOT escalate non-project conversations.
+
+<!-- END CARAPACE PROJECT RULES -->
+CARAPACE_PROJECT_STUB_EOF
+  fi
   _carapace_upsert_block "$agents_md" "<!-- BEGIN CARAPACE PROJECT RULES" "<!-- END CARAPACE PROJECT RULES" "$block_file" || { rm -f "$block_file"; return 1; }
   rm -f "$block_file"; trap - EXIT
   ok "CARAPACE rules → $agents_md"
 }
 
 seed_carapace_projects_for_workspace() {
-  local workspace="$1"; local projects_file="${workspace}/PROJECTS.md"
+  local workspace="$1"
+  _carapace_is_main_workspace "$workspace" || return 0
+  local projects_file="${workspace}/PROJECTS.md"
   [[ -f "$projects_file" ]] && return 0
   mkdir -p "$workspace"
   cat > "$projects_file" << 'CARAPACE_PROJECTS_SEED_EOF'
@@ -319,14 +469,133 @@ PY
   ok "Forced AGENTS.md reload across all sessions"
 }
 
+ensure_carapace_bootstrap_caps() {
+  command -v openclaw >/dev/null 2>&1 || return 0
+  local config="$HOME/.openclaw/openclaw.json"
+  [[ -f "$config" ]] || return 0
+  local cur_max cur_total need_restart=0
+  cur_max=$(/usr/bin/env python3 -c "
+import json
+try:
+    with open('$config') as f: c = json.load(f)
+    print(c.get('agents', {}).get('defaults', {}).get('bootstrapMaxChars', 0))
+except Exception: print(0)" 2>/dev/null || echo 0)
+  cur_total=$(/usr/bin/env python3 -c "
+import json
+try:
+    with open('$config') as f: c = json.load(f)
+    print(c.get('agents', {}).get('defaults', {}).get('bootstrapTotalMaxChars', 0))
+except Exception: print(0)" 2>/dev/null || echo 0)
+  if [[ "${cur_max:-0}" -lt 50000 ]]; then
+    openclaw config set agents.defaults.bootstrapMaxChars 50000 >/dev/null 2>&1 && need_restart=1
+  fi
+  if [[ "${cur_total:-0}" -lt 200000 ]]; then
+    openclaw config set agents.defaults.bootstrapTotalMaxChars 200000 >/dev/null 2>&1 && need_restart=1
+  fi
+  if [[ $need_restart -eq 1 ]]; then
+    openclaw gateway restart >/dev/null 2>&1 || true
+    ok "Bumped AGENTS.md injection caps (50K/200K) and restarted gateway"
+  fi
+}
+
+retire_legacy_per_agent_projects_files() {
+  local found=0
+  for d in "$HOME/.openclaw/workspace/agents/"*/ "$HOME/.openclaw/"workspace-*/; do
+    [[ -d "$d" ]] || continue
+    local f="${d%/}/PROJECTS.md"
+    if [[ -f "$f" ]]; then
+      mv "$f" "${f}.bak.$(date +%Y%m%d-%H%M%S)" 2>/dev/null && found=$((found + 1))
+    fi
+  done
+  [[ $found -gt 0 ]] && ok "Retired $found legacy per-agent PROJECTS.md → main is single source"
+}
+
+# OpenClaw injects "[Bootstrap pending]" prefix on every user message
+# when an agent's workspace contains BOOTSTRAP.md. Bootstrap is a
+# ONE-TIME first-light ritual main handles for the whole machine —
+# subagents must never have one or they trigger the prefix loop.
+retire_stale_subagent_bootstrap_files() {
+  local found=0
+  for d in "$HOME/.openclaw/workspace/agents/"*/ "$HOME/.openclaw/"workspace-*/; do
+    [[ -d "$d" ]] || continue
+    local f="${d%/}/BOOTSTRAP.md"
+    if [[ -f "$f" ]]; then
+      mv "$f" "${f}.bak.$(date +%Y%m%d-%H%M%S)" 2>/dev/null && found=$((found + 1))
+    fi
+  done
+  [[ $found -gt 0 ]] && ok "Retired $found stale subagent BOOTSTRAP.md (bootstrap is main-only)"
+}
+
+install_self_to_carapace_dir() {
+  local target="$HOME/.carapace/install-openclaw.sh"
+  local src="${BASH_SOURCE[0]}"
+  [[ -f "$src" ]] || return 0
+  mkdir -p "$HOME/.carapace"
+  if [[ "$(/usr/bin/realpath "$src" 2>/dev/null || echo "$src")" \
+        == "$(/usr/bin/realpath "$target" 2>/dev/null || echo "$target")" ]]; then
+    return 0
+  fi
+  cp "$src" "$target" 2>/dev/null && chmod +x "$target" 2>/dev/null
+}
+
 sweep_carapace_for_all_agents() {
+  ensure_carapace_bootstrap_caps || true
+  install_self_to_carapace_dir || true
   while IFS= read -r ws; do
     [[ -d "$ws" ]] || continue
     inject_carapace_rules_into_workspace "$ws" || true
     seed_carapace_projects_for_workspace "$ws" || true
   done < <(_carapace_list_agent_workspaces)
+  retire_legacy_per_agent_projects_files || true
+  retire_stale_subagent_bootstrap_files || true
   flip_all_sessions_system_sent || true
 }
+
+# add-agent <slug> "<Display Name>" "<emoji>" "<role>"
+# Atomic top-level-agent creation. Main calls:
+#   bash ~/.carapace/install-openclaw.sh add-agent ...
+add_carapace_agent() {
+  local slug="$1" display="$2" emoji="$3" role="$4"
+  if [[ -z "$slug" || -z "$display" || -z "$emoji" || -z "$role" ]]; then
+    echo "ERROR: add-agent requires 4 args: slug \"Display Name\" \"emoji\" \"role\"" >&2
+    return 2
+  fi
+  if ! [[ "$slug" =~ ^[a-z0-9][a-z0-9-]{0,24}$ ]]; then
+    echo "ERROR: slug must be lowercase-hyphens, ≤25 chars. Got: $slug" >&2
+    return 2
+  fi
+  command -v openclaw >/dev/null 2>&1 || { echo "ERROR: openclaw not in PATH" >&2; return 3; }
+  local ws="$HOME/.openclaw/workspace/agents/$slug"
+  echo "→ openclaw agents add $slug"
+  openclaw agents add "$slug" --workspace "$ws" --non-interactive 2>&1 | tail -3 || true
+  if [[ -f "$ws/BOOTSTRAP.md" ]]; then
+    mv "$ws/BOOTSTRAP.md" "$ws/BOOTSTRAP.md.bak.$(date +%Y%m%d-%H%M%S)" \
+      && echo "→ retired auto-created BOOTSTRAP.md"
+  fi
+  mkdir -p "$ws"
+  cat > "$ws/IDENTITY.md" << IDENTITY_EOF
+# Identity
+
+**Name:** $display
+**Emoji:** $emoji
+**Role:** $role
+
+## Purpose
+You are $display ($emoji). Your role is $role. Respond in a tone
+that fits the role — concise, direct, useful. Defer project
+tracking to main per your AGENTS.md project-rules block.
+IDENTITY_EOF
+  echo "→ wrote IDENTITY.md ($emoji $display)"
+  inject_carapace_rules_into_workspace "$ws" || true
+  flip_all_sessions_system_sent >/dev/null 2>&1 || true
+  echo "✓ Added agent $emoji $display (slug: $slug) — appears in iOS picker on next refresh"
+}
+
+if [ "${1:-}" = "add-agent" ]; then
+  shift
+  add_carapace_agent "$@"
+  exit $?
+fi
 
 # Legacy MEMORY.md-targeted version below — UNREACHABLE.
 _carapace_legacy_unused_inject_vision_rules() {
