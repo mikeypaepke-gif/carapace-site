@@ -37,8 +37,12 @@ const TRACKER_PORT = 18795; // python project-tracker-server (legacy fallback)
 // Owner defaults to `main` when omitted.
 const IDENTITY_PATH = path.join(OC_DIR, "workspace", "IDENTITY.md");
 const PROMPT_META_PATH = path.join(DIR, "project-prompt-meta.json");
-const EMOJI_TO_STATUS = { "🟢": "green", "🟡": "yellow", "🔴": "red", "⚪": "idle" };
-const STATUS_TO_EMOJI = { green: "🟢", yellow: "🟡", red: "🔴", idle: "⚪" };
+// "suggested" = the agent inferred a possible project from conversation
+// but hasn't been told to commit it as a tracked project. iOS renders
+// these with a teal `?` instead of a status dot so the user can long-
+// press to either Convert (promote to a real status) or Delete.
+const EMOJI_TO_STATUS = { "🟢": "green", "🟡": "yellow", "🔴": "red", "⚪": "idle", "❓": "suggested" };
+const STATUS_TO_EMOJI = { green: "🟢", yellow: "🟡", red: "🔴", idle: "⚪", suggested: "❓" };
 
 /// Resolve the PROJECTS.md path for a given agent id. Reuses the
 /// same workspace-resolution logic that powers per-agent identity.
@@ -55,7 +59,7 @@ function projectsFilePath(agentId) {
 function projectsParseSection(text) {
   const lines = text.split("\n");
   if (!lines.length) return null;
-  const headerMatch = lines[0].match(/^([^\s·]+)\s*·\s*(.+?)\s*·\s*(🟢|🟡|🔴|⚪)\s*(\d+)%\s*$/);
+  const headerMatch = lines[0].match(/^([^\s·]+)\s*·\s*(.+?)\s*·\s*(🟢|🟡|🔴|⚪|❓)\s*(\d+)%\s*$/);
   if (!headerMatch) return null;
   const [, id, name, emoji, progressStr] = headerMatch;
   const project = {
@@ -86,7 +90,7 @@ function projectsParseSection(text) {
   while (i < lines.length) {
     const ln = lines[i];
     if (ln.match(/^\*\*Workstreams:\*\*/)) { i++; continue; }
-    const bm = ln.match(/^- `([^`]+)`\s*·\s*(.+?)\s*·\s*(🟢|🟡|🔴|⚪)\s*(\d+)%\s*(?:·\s*@([\w-]+)\s*)?(?:—\s*(.*))?$/);
+    const bm = ln.match(/^- `([^`]+)`\s*·\s*(.+?)\s*·\s*(🟢|🟡|🔴|⚪|❓)\s*(\d+)%\s*(?:·\s*@([\w-]+)\s*)?(?:—\s*(.*))?$/);
     if (bm) {
       const [, wid, wname, wemoji, wprogress, wowner, wfocus] = bm;
       project.workstreams.push({
@@ -247,6 +251,28 @@ function projectsUpdateWorkstreamPrompt(agentId, projectId, workstreamId, newPro
   const ns = (agentId && String(agentId).trim()) || "main";
   const m = projectsBumpMeta(`${ns}:${projectId}:${workstreamId}`);
   return { ok: true, id: projectId, wid: workstreamId, agent: ns, promptVersion: m.version, promptUpdatedAt: m.updatedAt };
+}
+
+/// Promote a "suggested" project to a normal tracked status (or
+/// flip status freely between any of the known emojis). iOS calls
+/// this when the user picks "Convert" on a suggested project's
+/// long-press menu — typically newStatus = "green", optional
+/// progress reset to 0.
+function projectsUpdateStatus(agentId, projectId, newStatus, newProgress) {
+  const validStatuses = Object.keys(STATUS_TO_EMOJI);
+  if (!validStatuses.includes(newStatus)) {
+    return { error: `invalid status (must be one of: ${validStatuses.join(", ")})`, status: 400 };
+  }
+  const projects = projectsRead(agentId);
+  const proj = projects.find(p => p.id === projectId);
+  if (!proj) return { error: "project not found", status: 404 };
+  proj.status = newStatus;
+  if (typeof newProgress === "number" && Number.isFinite(newProgress)) {
+    proj.progress = Math.max(0, Math.min(100, Math.round(newProgress)));
+  }
+  projectsWrite(projects, agentId);
+  const ns = (agentId && String(agentId).trim()) || "main";
+  return { ok: true, id: projectId, agent: ns, status: newStatus, progress: proj.progress };
 }
 
 function projectsDelete(agentId, projectId) {
@@ -1413,6 +1439,30 @@ http.createServer((req, res) => {
             const [, pid] = projMatch;
             result = projectsUpdateProjectPrompt(agentParam, decodeURIComponent(pid), payload.divePrompt || payload.focusPrompt);
           }
+          if (result.error) { res.writeHead(result.status || 500); res.end(JSON.stringify(result)); return; }
+          res.end(JSON.stringify(result));
+        } catch (e) {
+          res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+        }
+        return;
+      }
+    }
+
+    // PATCH /projects/:id/status?agent=<id> — flip status (e.g.
+    // promote a "suggested" project to "green" when the user taps
+    // Convert in the iOS long-press menu). Body: {status: "green"
+    // [, progress: 0]}.
+    if (req.method === "PATCH") {
+      const statusMatch = p.match(/^\/projects\/([^/]+)\/status\/?$/);
+      if (statusMatch) {
+        try {
+          const payload = JSON.parse(body || "{}");
+          const result = projectsUpdateStatus(
+            agentParam,
+            decodeURIComponent(statusMatch[1]),
+            payload.status,
+            payload.progress
+          );
           if (result.error) { res.writeHead(result.status || 500); res.end(JSON.stringify(result)); return; }
           res.end(JSON.stringify(result));
         } catch (e) {
