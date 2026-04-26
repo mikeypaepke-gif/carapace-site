@@ -707,11 +707,12 @@ function getLiveAgentStatus() {
           if (ident && ident.emoji) node.emoji = ident.emoji;
           agents[agentKey] = node;
         } else if (isSubagent) {
-          // 5-min visibility window: keep the subagent on the spinal
-          // map for 5 min after its last activity (idle = greyed by
-          // iOS), then drop. Per Mike's spec.
-          const fiveMinutes = 5 * 60 * 1000;
-          if (!isRunning && ageMs > fiveMinutes) continue;
+          // 90-second visibility window: keep the subagent on the
+          // spinal map for 90 seconds after its last activity (idle
+          // = greyed by iOS), then drop. Was 5 min, but stale ghosts
+          // hung around too long in practice.
+          const visibilityMs = 90 * 1000;
+          if (!isRunning && ageMs > visibilityMs) continue;
           if (isRunning && ageMs > 24 * 60 * 60 * 1000) continue;
 
           // Parent — prefer OpenClaw's explicit `spawnedBy` field,
