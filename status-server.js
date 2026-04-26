@@ -528,6 +528,63 @@ const EMPTY_PROJECTS = JSON.stringify({version:1,updated:"",projects:[]});
 const EMPTY_CRON = JSON.stringify({version:1,updated:"",jobs:[]});
 const EMPTY_AGENTS = JSON.stringify({agents:{},updated:""});
 
+/// Derive a short nickname from OpenClaw's spawn label
+/// (e.g. "research-ai-wearables" → "Research AI"). Mirror of the
+/// helper in carapace-mac/Resources/status-server.js — keep them
+/// in sync (this file is what the curl-bash installer pulls).
+function deriveSubagentNickname(label, fallbackId) {
+  if (!label || typeof label !== "string") return `Subagent ${fallbackId}`;
+  const segments = label.split("-").filter(Boolean).slice(0, 2);
+  if (segments.length === 0) return `Subagent ${fallbackId}`;
+  return segments
+    .map(s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/// Pick an emoji for a subagent by keyword-matching its spawn label.
+function deriveSubagentEmoji(label) {
+  if (!label) return "🌱";
+  const lower = label.toLowerCase();
+  const map = [
+    ["research", "🔍"], ["analy", "📊"], ["audit", "🔎"],
+    ["strategy", "🎯"], ["plan", "🗺"], ["roadmap", "🗺"],
+    ["scrap", "🕷"], ["extract", "⛏"], ["fetch", "📥"],
+    ["bootstrap", "🚀"], ["launch", "🚀"], ["deploy", "🚀"],
+    ["announce", "📢"], ["broadcast", "📡"],
+    ["screenshot", "📸"], ["image", "🖼"], ["video", "🎥"],
+    ["bot", "🤖"], ["agent", "🤖"],
+    ["vision", "👁"], ["see", "👁"],
+    ["summar", "📝"], ["digest", "📝"], ["transcrib", "📝"],
+    ["email", "✉️"], ["mail", "✉️"], ["message", "💬"], ["chat", "💬"],
+    ["review", "✅"], ["approve", "✅"],
+    ["bug", "🐛"], ["fix", "🔧"], ["repair", "🔧"], ["patch", "🩹"],
+    ["test", "🧪"], ["benchmark", "⏱"],
+    ["security", "🔒"], ["auth", "🔐"], ["lock", "🔒"],
+    ["design", "🎨"], ["color", "🎨"], ["theme", "🎨"],
+    ["data", "🗄"], ["db", "🗄"], ["sql", "🗄"],
+    ["report", "📋"], ["summary", "📋"],
+    ["compet", "🏁"],
+    ["reject", "❌"], ["error", "⚠️"], ["fail", "⚠️"],
+    ["aso", "📈"], ["growth", "📈"], ["metric", "📈"],
+    ["multiuser", "👥"], ["multi", "👥"], ["team", "👥"],
+    ["user", "👤"], ["account", "👤"],
+    ["admin", "⚙"], ["config", "⚙"], ["setting", "⚙"],
+    ["code", "💻"], ["refactor", "💻"], ["script", "💻"],
+    ["doc", "📄"], ["readme", "📄"], ["spec", "📄"],
+    ["money", "💰"], ["price", "💰"], ["cost", "💰"], ["bill", "💰"],
+    ["health", "🩺"], ["medical", "🩺"],
+    ["project", "📁"], ["tracker", "📌"], ["task", "✓"],
+    ["wedding", "💍"], ["calendar", "📅"], ["note", "🗒"],
+    ["sticker", "🏷"], ["frame", "🖼"], ["camera", "📷"],
+    ["voice", "🎙"], ["audio", "🔊"], ["sound", "🔊"],
+    ["map", "🗺"], ["nav", "🧭"], ["weather", "☀"],
+  ];
+  for (const [kw, emoji] of map) {
+    if (lower.includes(kw)) return emoji;
+  }
+  return "🌱";
+}
+
 /// Read every agent registered in ~/.openclaw/openclaw.json. This is
 /// the canonical list — agents listed here exist whether or not
 /// they've ever started a session. Used by getLiveAgentStatus and
@@ -590,25 +647,35 @@ function getLiveAgentStatus() {
             updated: new Date(updatedAt).toLocaleTimeString()
           };
         } else if (isSubagent) {
-          // Subagents: only show if running AND updated within last 2 hours (stale ghost filter)
-          // Show subagents while running OR within 20 seconds of completion
-          if (ageMs > twoHours) continue;
-          if (!isRunning && ageMs > 20000) continue;
-          // Parent = the agent that actually spawned this subagent.
-          // Session keys are `agent:<spawner>:subagent:<uuid>`, so
-          // splitting yields ["agent", "<spawner>", ...]. Falls back
-          // to the directory we're iterating (which is the spawner
-          // anyway — subagent sessions live under the spawner's
-          // sessions.json) and ultimately to "main" if neither is
-          // discoverable.
-          const keyParts = sessionKey.split(":");
-          const spawnerFromKey = keyParts[1];
-          const parent = spawnerFromKey || agent || "main";
+          // 5-min visibility window: keep the subagent on the spinal
+          // map for 5 min after its last activity (idle = greyed by
+          // iOS), then drop. Per Mike's spec.
+          const fiveMinutes = 5 * 60 * 1000;
+          if (!isRunning && ageMs > fiveMinutes) continue;
+          if (isRunning && ageMs > 24 * 60 * 60 * 1000) continue;
+
+          // Parent — prefer OpenClaw's explicit `spawnedBy` field,
+          // fall back to session-key parsing, then to the iterating
+          // directory.
+          const spawnerFromSpawnedBy = (typeof entry.spawnedBy === "string")
+            ? entry.spawnedBy.split(":")[1]
+            : null;
+          const spawnerFromKey = sessionKey.split(":")[1];
+          const parent = spawnerFromSpawnedBy || spawnerFromKey || agent || "main";
+
+          // Nickname + emoji from OpenClaw's spawn label.
+          const label = entry.label || null;
+          const nickname = deriveSubagentNickname(label, agentId);
+          const emoji = deriveSubagentEmoji(label);
+
           agents[agentId] = {
-            name: `Subagent ${agentId}`,
-            status: "active",
-            detail: entry.lastChannel || "isolated task",
+            name: nickname,
+            status: isRunning ? "active" : "idle",
+            detail: label
+              ? `${label} · spawned by ${parent}`
+              : (entry.lastChannel || "isolated task"),
             parent: parent,
+            emoji: emoji,
             updated: new Date(updatedAt).toLocaleTimeString()
           };
         }
