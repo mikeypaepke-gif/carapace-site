@@ -195,28 +195,60 @@ CARAPACE_VISION_BLOCK_EOF
   block_file="$(mktemp)"
   cat > "$block_file" << 'CARAPACE_PROJECT_RULES_EOF'
 <!-- BEGIN CARAPACE PROJECT RULES (managed by Carapace installer — do not edit between BEGIN/END; agent learnings go below the END marker) -->
-## Project Tracking Rules
+## Project Tracking — STRICT PROTOCOL
 
-The user's iOS app surfaces a **Projects** tab — one board PER AGENT. You maintain YOUR OWN board.
+You maintain a project board for the user. The iOS app's **Projects** tab reads ONE specific file, and ONE only:
 
-**File:** `PROJECTS.md` in this workspace. Read + edit with file tools. Other agents have their own PROJECTS.md — you don't see theirs.
+> **`PROJECTS.md`** (in this workspace directory)
 
-**Format (strict — iOS parses):**
+You append + edit projects in that file. **NEVER create per-project `*.md` files** — those are invisible to the iOS app and break the user's board.
+
+### EXPLICIT TRIGGERS — act WITHOUT asking
+
+When the user says ANY of these (paraphrases count), immediately append a new section to `PROJECTS.md`:
+- "make a project for X" / "create a project for X" / "track this as a project"
+- "start a project to ship/launch/build X"
+- "let's track X" / "add X to my projects"
+- "save this as a project" / "this is a new project"
+
+Do NOT ask "should I confirm?" or "does this outline sound good?" — just write the entry.
+
+### IMPLICIT TRIGGERS — write WITHOUT being asked
+
+When the user mentions a multi-step initiative they're starting ("I just bought X and need to set it up", "we're launching Y next month"), proactively add a project entry on the same turn AND tell them: "Added to your projects board — `<slug-id>`."
+
+### THE WORKFLOW (every project add)
+
+1. Read `PROJECTS.md` to see existing slugs (don't collide).
+2. Pick a slug: lowercase-hyphens, ≤25 chars. Example: "Pixi Laser Setup" → `pixi-laser-setup`.
+3. Append a new `###` section using the format below.
+4. Write the file via your file-edit tool. Do NOT confirm with the user before writing.
+5. Tell the user one line: "Added `<slug-id>` to your projects."
+
+### FILE FORMAT (strict — iOS parses this exactly)
+
 ```
 ### <slug-id> · <Name> · <emoji> <progress>%
-<one-paragraph description>
+<one-line description>
 
-**Focus:** <prompt the user can launch a chat with>
+**Focus:** <prompt template the user can tap to start a chat about this>
 
 **Workstreams:**
-- `<slug-id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus>
+- `<sub-slug>` · <name> · <emoji> <progress>% [· @<owner>] — <focus>
 ```
 
+If no workstreams yet, write `- _none yet_`.
+
 **Status emojis:** 🟢 green · 🟡 yellow · 🔴 red · ⚪ idle
-**Slugs:** lowercase-hyphens, stable, never rename.
-**Add a project** when the user names a multi-step initiative.
-**Update progress** only when concrete work lands.
-**Focus prompts** = launch templates the user taps in iOS — write as the OPENING line you want the chat to have.
+**Progress:** 0 = brand new · 25 = early · 50 = halfway · 75 = closing in · 100 = done.
+**Slugs:** lowercase-hyphens, stable forever — NEVER rename.
+
+### HARD ANTI-PATTERNS
+
+- ❌ DO NOT create files like `<thing>_project.md` or `<thing>.md`. ONLY edit `PROJECTS.md`.
+- ❌ DO NOT ask for confirmation before adding a project the user explicitly requested.
+- ❌ DO NOT propose an "outline" and wait — write the section first, iterate after.
+- ❌ DO NOT track the same project twice. Update existing entries.
 
 <!-- END CARAPACE PROJECT RULES -->
 CARAPACE_PROJECT_RULES_EOF
