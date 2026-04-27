@@ -44,6 +44,21 @@ step() {
 }
 ok()    { echo -e "  ${GREEN}✓${RESET} $*"; }
 warn()  { echo -e "  ${YELLOW}⚠${RESET} $*"; }
+# Hard-stop helper. Use when continuing past a failure would silently
+# produce a broken install (e.g., no Tailscale = no /chat route = iOS
+# 404s with no recovery path that doesn't involve uninstalling first).
+# Better to abort loud and let the user fix the prerequisite, then
+# re-run install.sh — than to leave them with a half-broken VPS that
+# looks "successfully installed."
+fatal() {
+  echo "" >&2
+  echo -e "  ${RED}╔══════════════════════════════════════════════════════════╗${RESET}" >&2
+  echo -e "  ${RED}║  INSTALL ABORTED                                         ║${RESET}" >&2
+  echo -e "  ${RED}╚══════════════════════════════════════════════════════════╝${RESET}" >&2
+  echo -e "  ${RED}✗${RESET} $*" >&2
+  echo "" >&2
+  exit 1
+}
 fail()  { echo -e "  ${RED}✗${RESET} $*"; exit 1; }
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -1798,7 +1813,17 @@ else
     ok "Tailscale installed"
     TAILSCALE_INSTALLED=true
   else
-    warn "Tailscale install failed — continuing without it. Run: curl -fsSL https://tailscale.com/install.sh | sh"
+    # HARD STOP. Continuing past this point produces a "successful"
+    # install with no Tailscale, which means no HTTPS endpoint, no
+    # serve routes, no /chat path for iOS — the bridge is functionally
+    # unreachable from a phone. Better to fail loud here than ship a
+    # broken setup that looks fine until the user opens iOS.
+    fatal "Tailscale install failed. CARAPACE requires Tailscale for the iOS bridge.
+
+  Try installing it manually:
+    curl -fsSL https://tailscale.com/install.sh | sh
+
+  Then re-run this installer."
   fi
 fi
 
@@ -1858,9 +1883,13 @@ if $TAILSCALE_INSTALLED; then
       echo ""
     fi
 
-    echo -e "  ${DIM}Waiting for authentication (up to 3 minutes)...${RESET}"
+    # 90s wait. 3 minutes was too long — if the user has the URL open
+    # they'll click within 30s; if they don't, an extra 2 minutes won't
+    # change the outcome. Re-running install.sh after authing is the
+    # right recovery, not a longer in-script wait.
+    echo -e "  ${DIM}Waiting for authentication (up to 90 seconds)...${RESET}"
     WAIT_COUNT=0
-    WAIT_MAX=120
+    WAIT_MAX=90
     while (( WAIT_COUNT < WAIT_MAX )); do
       if ! kill -0 "$TS_UP_PID" 2>/dev/null; then
         wait "$TS_UP_PID" 2>/dev/null && TAILSCALE_CONNECTED=true || true
@@ -1893,10 +1922,32 @@ if $TAILSCALE_INSTALLED; then
       TS_HOSTNAME="$(ts_hostname)"
       ok "Tailscale connected as ${TS_HOSTNAME}"
     else
-      warn "Tailscale authentication timed out — skipping. Run manually: $SUDO tailscale up"
-      TAILSCALE_CONNECTED=false
+      # HARD STOP. Same reasoning as the install-failure case above:
+      # Tailscale is non-optional for the iOS path. Continuing without
+      # it gives the user a bridge that systemd thinks is "running"
+      # but iOS can never reach. Force the user to authenticate first,
+      # then re-run.
+      fatal "Tailscale authentication did not complete within 90 seconds.
+
+  CARAPACE requires Tailscale to be connected for the iOS bridge.
+
+  To finish authentication:
+    $SUDO tailscale up
+
+  Open the URL it prints in a browser, sign in, then re-run:
+    curl -fsSL https://carapace.info/install.sh | bash"
     fi
   fi
+fi
+
+# Belt-and-suspenders invariant check: if we reach this line,
+# Tailscale MUST be connected. Anywhere downstream that depends on
+# this assumption (HTTPS, serve config, /chat smoke test) can rely
+# on it without re-checking. If somehow we slipped through with
+# TAILSCALE_CONNECTED=false, abort here loudly rather than producing
+# a half-broken install.
+if ! $TAILSCALE_CONNECTED; then
+  fatal "Tailscale not connected after Step 3 (internal invariant violated). Bug — please report at github.com/mikeypaepke-gif/carapace-site/issues"
 fi
 
 # ══════════════════════════════════════════════════════════
