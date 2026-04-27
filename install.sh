@@ -2668,6 +2668,20 @@ fi
 # app will hit.
 GW_TOKEN=$(python3 -c "import json; print(json.load(open('$HOME/.openclaw/openclaw.json'))['gateway']['auth']['token'])" 2>/dev/null)
 if [ -n "$GW_TOKEN" ] && [ "$MODEL" != "" ] && [ "$MODEL" != "null" ]; then
+  # ── Re-assert Tailscale serve routes for /chat + /cognitive ──
+  # These two routes were added later than the rest of the serve config;
+  # any VPS that ran a pre-cognitive install.sh has Tailscale config
+  # without them, and `tailscale serve --bg --set-path /chat` is a no-op
+  # on duplicates. Always re-running here means re-installing on an old
+  # box upgrades the routes — without this, iOS hits /chat through
+  # Tailscale and falls through to the catch-all proxy at :18789, which
+  # returns 404 because OpenClaw has no /chat route. (This was the
+  # 404 storm that bit production after we shipped cognitive memory.)
+  if command -v tailscale >/dev/null 2>&1 && tailscale serve status >/dev/null 2>&1; then
+    sudo tailscale serve --bg --set-path=/chat http://127.0.0.1:18794/chat >/dev/null 2>&1 || true
+    sudo tailscale serve --bg --set-path=/cognitive http://127.0.0.1:18794/cognitive >/dev/null 2>&1 || true
+  fi
+
   echo "  → Smoke-testing model routing ($MODEL)…"
   SMOKE_HTTP=$(curl -sS -o /tmp/.cara-smoke.json -w "%{http_code}" --max-time 60 \
     -X POST http://127.0.0.1:18789/v1/chat/completions \
@@ -2690,6 +2704,44 @@ if [ -n "$GW_TOKEN" ] && [ "$MODEL" != "" ] && [ "$MODEL" != "null" ]; then
     echo "      then restart: systemctl --user restart openclaw-gateway"
   fi
   rm -f /tmp/.cara-smoke.json
+
+  # ── Smoke test #2: /chat through the actual Tailscale URL iOS hits ──
+  # Distinct from the model-routing test above. This catches the case
+  # where the model works fine when called locally but Tailscale's
+  # serve config is missing /chat → public URL returns 404 even though
+  # the gateway and status-server are both healthy.
+  TAILNET_HOST=$(tailscale status --json 2>/dev/null | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    n = (d.get('Self', {}).get('DNSName') or '').rstrip('.')
+    print(n)
+except Exception:
+    print('')
+" 2>/dev/null)
+  if [ -n "$TAILNET_HOST" ]; then
+    echo "  → Smoke-testing /chat via https://$TAILNET_HOST/chat …"
+    CHAT_HTTP=$(curl -sSk -o /tmp/.cara-chat-smoke.json -w "%{http_code}" --max-time 30 \
+      -X POST "https://$TAILNET_HOST/chat" \
+      -H "Authorization: Bearer $GW_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"messages":[{"role":"user","content":"ping"}],"stream":false}' \
+      2>/dev/null || echo "000")
+    if [ "$CHAT_HTTP" = "200" ]; then
+      echo "  ✓ /chat route healthy (Tailscale → status-server → gateway)"
+    else
+      CHAT_BODY=$(head -c 240 /tmp/.cara-chat-smoke.json 2>/dev/null || echo "<no body>")
+      echo "  ✗ /chat via Tailscale FAILED (HTTP $CHAT_HTTP)"
+      echo "    Body: $CHAT_BODY"
+      echo ""
+      echo "    iOS will see this exact 404. Most common cause:"
+      echo "    • Tailscale serve has no /chat route (old install before"
+      echo "      cognitive memory shipped). Fix:"
+      echo "        sudo tailscale serve --bg --set-path=/chat http://127.0.0.1:18794/chat"
+      echo "        sudo tailscale serve --bg --set-path=/cognitive http://127.0.0.1:18794/cognitive"
+    fi
+    rm -f /tmp/.cara-chat-smoke.json
+  fi
 fi
 
 # Validate auth-profiles format (must have type field, key not apiKey)
