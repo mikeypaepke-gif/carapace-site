@@ -2247,10 +2247,30 @@ with open(home + "/.carapace/sync-trackers.sh", "w") as f:
 os.chmod(home + "/.carapace/sync-trackers.sh", 0o755)
 PYEOF
 
+# Migrate from the legacy `carapace-status-server.service` if it
+# exists from older installs (we used to install BOTH this and
+# `carapace-status.service`, both binding :18794 — they conflicted on
+# port. Now there's only one service; clean up the legacy one).
+if have_cmd systemctl && systemctl list-unit-files carapace-status-server.service >/dev/null 2>&1; then
+  $SUDO systemctl stop carapace-status-server >/dev/null 2>&1 || true
+  $SUDO systemctl disable carapace-status-server >/dev/null 2>&1 || true
+  $SUDO rm -f /etc/systemd/system/carapace-status-server.service
+  $SUDO systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+# Evict any stale process on 18794 before (re)starting so systemd
+# can bind cleanly. Without this the new service crashloops with
+# EADDRINUSE on a re-install over a manually-launched node process.
+if have_cmd ss; then
+  STALE_PID=$(ss -lntp 2>/dev/null | awk '/127.0.0.1:18794/ {print}' | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
+  [[ -n "${STALE_PID:-}" ]] && kill -9 "$STALE_PID" 2>/dev/null || true
+fi
+
 $SUDO tee /etc/systemd/system/carapace-status.service > /dev/null << EOF
 [Unit]
 Description=CARAPACE Status Server
 After=network.target
+StartLimitIntervalSec=0
 [Service]
 Type=simple
 ExecStart=$NODE_BIN $HOME/.carapace/status-server.js
@@ -2258,6 +2278,8 @@ Restart=always
 RestartSec=5
 User=$(whoami)
 Environment=HOME=$HOME
+StandardOutput=journal
+StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -2324,57 +2346,20 @@ fi
 [[ -f "$HOME/.carapace/carapace-project-tracker.json" ]] || \
   echo '{"version":1,"updated":"","projects":[]}' > "$HOME/.carapace/carapace-project-tracker.json"
 
-# systemd unit — runs as root like the gateway unit above.
-if $IS_ROOT && have_cmd systemctl && [[ -f "$HOME/.carapace/status-server.js" ]]; then
-  # Evict any stale process on 18794 before starting
-  STALE_PID=$(ss -lntp 2>/dev/null | awk '/127.0.0.1:18794/ {print}' | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
-  [[ -n "$STALE_PID" ]] && kill -9 "$STALE_PID" 2>/dev/null || true
-
-  NODE_PATH="$(command -v node 2>/dev/null)"
-  [[ -z "$NODE_PATH" ]] && for _d in "$HOME"/.nvm/versions/node/*/bin; do
-    [[ -x "$_d/node" ]] && NODE_PATH="$_d/node" && break
-  done
-
-  cat > /etc/systemd/system/carapace-status-server.service <<EOF
-[Unit]
-Description=Carapace Status Server (port 18794)
-After=network.target
-StartLimitIntervalSec=0
-
-[Service]
-Type=simple
-Restart=always
-RestartSec=5
-User=root
-WorkingDirectory=/root
-Environment=HOME=/root
-ExecStart=$NODE_PATH $HOME/.carapace/status-server.js
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  systemctl daemon-reload
-  systemctl enable carapace-status-server >/dev/null 2>&1 || true
-  systemctl restart carapace-status-server >/dev/null 2>&1 || true
-
-  # Wait for bind
-  for _ss in $(seq 1 10); do
-    curl -sf --max-time 1 http://127.0.0.1:18794/health >/dev/null 2>&1 && \
-      { ok "Status server running on 18794"; break; }
-    sleep 1
-  done
-
-  # Pre-cache tailscale status so the /pair endpoint can answer without
-  # having to exec the tailscale binary from a PATH-minimal systemd env.
-  # status-server.js will still fall back to `tailscale status --json`
-  # via explicit-path lookup if this file is missing, but caching saves a
-  # few ms per call and works around completely locked-down environments.
-  if have_cmd tailscale; then
-    tailscale status --json > "$HOME/.carapace/tailscale-status.json" 2>/dev/null || true
-  fi
+# Pre-cache tailscale status so the /pair endpoint can answer without
+# having to exec the tailscale binary from a PATH-minimal systemd env.
+# status-server.js will still fall back to `tailscale status --json`
+# via explicit-path lookup if this file is missing, but caching saves a
+# few ms per call and works around completely locked-down environments.
+# Useful for both root and non-root installs.
+if have_cmd tailscale; then
+  tailscale status --json > "$HOME/.carapace/tailscale-status.json" 2>/dev/null || true
 fi
+# (The legacy `carapace-status-server.service` block that used to live
+# here was a duplicate of the canonical `carapace-status.service`
+# defined ~80 lines above. Both bound :18794 and conflicted on port.
+# Migration to single service handled in the legacy-cleanup block
+# above the canonical service definition.)
 
 # ── Tailscale Serve ─────────────────────────────────────
 # `tailscale serve` writes to /var/lib/tailscale/serve.json which is
