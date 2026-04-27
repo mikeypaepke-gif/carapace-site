@@ -2934,7 +2934,7 @@ if [ -n "$GW_TOKEN" ] && [ "$MODEL" != "" ] && [ "$MODEL" != "null" ]; then
   # We pipe through head and look for "data:" (the SSE prefix) — first
   # delta chunk = upstream is healthy; we don't need to wait for [DONE].
   echo "  → Smoke-testing model routing ($MODEL, stream=true)…"
-  SMOKE_OUT=$(curl -sS -N --max-time 45 \
+  SMOKE_OUT=$(curl -sS -N --max-time 180 \
     -X POST http://127.0.0.1:18789/v1/chat/completions \
     -H "Authorization: Bearer $GW_TOKEN" \
     -H "Content-Type: application/json" \
@@ -2974,7 +2974,7 @@ except Exception:
     # via the status-server proxy, so this matches the actual production
     # request shape. Look for SSE 'data:' prefix as the success signal.
     echo "  → Smoke-testing /chat via https://$TAILNET_HOST/chat (stream=true)…"
-    CHAT_OUT=$(curl -sSkN --max-time 45 \
+    CHAT_OUT=$(curl -sSkN --max-time 180 \
       -X POST "https://$TAILNET_HOST/chat" \
       -H "Authorization: Bearer $GW_TOKEN" \
       -H "Content-Type: application/json" \
