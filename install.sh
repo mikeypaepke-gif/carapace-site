@@ -2631,14 +2631,16 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   )
   ROUTES_OK=0; ROUTES_FAIL=0; FAILED_ROUTES=""
   for entry in "${CARAPACE_SERVE_ROUTES[@]}"; do
-    # Split on whitespace
+    # Split on whitespace. NOTE: `local` would be a bash error here —
+    # this loop runs in the install's main body, not inside a function.
+    # Plain variables it is.
     set -- $entry
-    local route_path="$1" backend="$2"
-    if $SUDO tailscale serve --bg --set-path "$route_path" "$backend" >/dev/null 2>&1; then
+    ROUTE_PATH="$1"; BACKEND="$2"
+    if $SUDO tailscale serve --bg --set-path "$ROUTE_PATH" "$BACKEND" >/dev/null 2>&1; then
       ROUTES_OK=$((ROUTES_OK + 1))
     else
       ROUTES_FAIL=$((ROUTES_FAIL + 1))
-      FAILED_ROUTES="${FAILED_ROUTES}${route_path} "
+      FAILED_ROUTES="${FAILED_ROUTES}${ROUTE_PATH} "
     fi
   done
   if [[ $ROUTES_FAIL -eq 0 ]]; then
