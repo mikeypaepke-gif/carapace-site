@@ -2174,7 +2174,13 @@ setup_tailscale_cognitive_routes() {
 }
 
 install_carapace_cognitive
-setup_tailscale_cognitive_routes
+# Tailscale routes for /chat + /cognitive get added in the main
+# Tailscale Serve block ~200 lines below (which runs AFTER `tailscale
+# serve --bg http://127.0.0.1:18789` initializes the serve config).
+# Calling setup_tailscale_cognitive_routes() here is a no-op on fresh
+# installs because `tailscale serve status` returns 1 with no config.
+# The function is kept defined for terminal-based re-runs, but not
+# invoked from the curl|bash path.
 
 python3 - << 'PYEOF'
 import os, textwrap
@@ -2407,6 +2413,14 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   $SUDO tailscale serve --bg --set-path /status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
   # Pair at root too, in case the peer is hitting https://host/pair (no prefix).
   $SUDO tailscale serve --bg --set-path /pair http://127.0.0.1:18794/pair >/dev/null 2>&1 || true
+  # Cognitive memory endpoints — /chat (mode-aware OpenClaw forwarder
+  # with visual+auditory memory injection) and /cognitive/* (direct
+  # ingest + introspection). iOS uses /chat as its primary chat
+  # endpoint when the Cognitive Memory toggle is on. Without these,
+  # iOS hits the gateway URL and gets 404 because Tailscale's catch-all
+  # `/` proxies to OpenClaw at :18789, which doesn't know /chat.
+  $SUDO tailscale serve --bg --set-path /chat http://127.0.0.1:18794/chat >/dev/null 2>&1 || true
+  $SUDO tailscale serve --bg --set-path /cognitive http://127.0.0.1:18794/cognitive >/dev/null 2>&1 || true
   ok "Tailscale serve → status server paths"
 
   # CARAPACE intentionally stays TAILNET-ONLY (no Funnel). Funnel would
