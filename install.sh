@@ -1795,7 +1795,16 @@ else
   # Install without postinstall first to avoid OOM on low-RAM VPS
   # The postinstall-bundled-plugins.mjs script uses too much memory on first pass
   export NODE_OPTIONS="--max-old-space-size=768"
-  retry 3 timeout 240 npm install -g openclaw --no-fund --loglevel=error --ignore-scripts
+  # PIN to v2026.4.24 — v2026.4.25 (released 2026-04-27) introduced a
+  # broken `memory-core` plugin + agent runtime regression that pegs
+  # the gateway at 100%+ CPU in a tight rename() loop on session
+  # state, making the TUI unusable and HTTP /chat unresponsive after
+  # the first turn. Took us hours to find — yesterday's v2026.4.24
+  # was clean. Unpin once OpenClaw ships a fix (track upstream).
+  #
+  # Override at install-time with:  OPENCLAW_VERSION=latest curl ... | bash
+  : "${OPENCLAW_VERSION:=2026.4.24}"
+  retry 3 timeout 240 npm install -g "openclaw@${OPENCLAW_VERSION}" --no-fund --loglevel=error --ignore-scripts
   # Run postinstall separately with explicit memory cap and swap already active
   if [ -f "$HOME/.npm-global/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs" ]; then
     echo -e "  ${DIM}Running openclaw postinstall...${RESET}"
