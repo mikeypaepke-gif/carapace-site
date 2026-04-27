@@ -2150,6 +2150,27 @@ else
   ok "Existing model preserved: $EXISTING_MODEL"
 fi
 
+# ── Disable bonjour on Linux (headless / VPS / cloud) ──────────────────
+# OpenClaw's `bonjour` plugin advertises the gateway over mDNS for
+# local-network discovery. Useful on a Mac/desktop where you want other
+# machines on the same LAN to find the gateway by name. Useless on:
+#   • A cloud VPS (no LAN to broadcast on)
+#   • A Tailscale-only deployment (Tailscale handles discovery)
+#   • Any headless server install
+# Worse than useless: on Linux v2026.4.x, the @homebridge/ciao mDNS
+# library hits an "AssertionError: CIAO PROBING CANCELLED" → unhandled
+# promise rejection → gateway exits → systemd restarts → infinite crash
+# loop within ~30s of every startup. We disable it preemptively before
+# the gateway ever has a chance to crash on it.
+#
+# Mac users who legitimately want LAN discovery can re-enable manually:
+#   openclaw plugins enable bonjour
+if openclaw plugins list 2>/dev/null | grep -q "bonjour"; then
+  if openclaw plugins disable bonjour >/dev/null 2>&1; then
+    ok "Bonjour mDNS plugin disabled (not useful on headless Linux)"
+  fi
+fi
+
 # ══════════════════════════════════════════════════════════
 # Step 6: Status Server
 # ══════════════════════════════════════════════════════════
@@ -3101,36 +3122,28 @@ PYEOF
   echo -e "  ${BOLD}Paste your ${PROVIDER} API key${RESET} ${DIM}(${KEY_HINT})${RESET}"
   echo -e "  ${DIM}(each character echoes as * — paste + press Enter)${RESET}"
   API_KEY=""
-  # Char-by-char read so the user gets visual feedback on paste. Without
-  # this, `read -s` is completely silent and users legitimately can't
-  # tell whether their paste landed. Echo '*' per character, handle
-  # backspace/delete, handle Enter as submit.
+  # Read the full key as a single line. We previously did char-by-char
+  # with `read -rs -n1` for live `*` echo feedback, but on long pastes
+  # over SSH the per-char loop breaks early — bracketed-paste escape
+  # sequences (ESC[200~ … ESC[201~) and other terminal control bytes
+  # mid-paste make `read -n1` return an empty char, which the loop
+  # interpreted as "Enter pressed" and broke at the wrong byte. This
+  # silently truncated 84-char xAI keys to 41 chars, causing every
+  # downstream xAI request to 400 with "Incorrect API key provided".
+  #
+  # Single `read -rs` reads atomically until a real newline. No per-char
+  # feedback, but the masked preview below confirms what was captured
+  # so the user still gets visual confirmation before commit.
   read_masked() {
-    local prompt="$1" input="" char
+    local prompt="$1"
     local tty_src="${2:-}"
     printf "%b" "$prompt"
-    while true; do
-      if [[ -n "$tty_src" ]]; then
-        IFS= read -rs -n1 char < "$tty_src" || break
-      else
-        IFS= read -rs -n1 char || break
-      fi
-      if [[ -z "$char" ]]; then
-        # Empty read = Enter pressed (or EOF)
-        echo
-        break
-      elif [[ "$char" == $'\177' || "$char" == $'\b' ]]; then
-        # Backspace / delete
-        if [[ -n "$input" ]]; then
-          input="${input%?}"
-          printf '\b \b'
-        fi
-      else
-        input+="$char"
-        printf '*'
-      fi
-    done
-    API_KEY="$input"
+    if [[ -n "$tty_src" ]]; then
+      IFS= read -rs API_KEY < "$tty_src" || API_KEY=""
+    else
+      IFS= read -rs API_KEY || API_KEY=""
+    fi
+    echo
   }
   # Read the key, show a masked preview, let the user confirm or re-enter.
   # One bad paste shouldn't mean re-running the whole installer — loop here
