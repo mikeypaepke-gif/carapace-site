@@ -2742,28 +2742,34 @@ if [ -n "$GW_TOKEN" ] && [ "$MODEL" != "" ] && [ "$MODEL" != "null" ]; then
     sudo tailscale serve --bg --set-path=/cognitive http://127.0.0.1:18794/cognitive >/dev/null 2>&1 || true
   fi
 
-  echo "  → Smoke-testing model routing ($MODEL)…"
-  SMOKE_HTTP=$(curl -sS -o /tmp/.cara-smoke.json -w "%{http_code}" --max-time 60 \
+  # Smoke test uses stream=true. iOS chat ALWAYS streams (SSE), and on
+  # several OpenClaw v2026.4.x builds the non-stream path hangs while
+  # the stream path returns instantly. Testing with stream=false would
+  # produce false negatives — the install would wrongly report failure
+  # for a perfectly healthy gateway just because non-stream is sluggish.
+  # We pipe through head and look for "data:" (the SSE prefix) — first
+  # delta chunk = upstream is healthy; we don't need to wait for [DONE].
+  echo "  → Smoke-testing model routing ($MODEL, stream=true)…"
+  SMOKE_OUT=$(curl -sS -N --max-time 45 \
     -X POST http://127.0.0.1:18789/v1/chat/completions \
     -H "Authorization: Bearer $GW_TOKEN" \
     -H "Content-Type: application/json" \
-    -d '{"model":"openclaw","messages":[{"role":"user","content":"ping"}],"stream":false}' \
-    2>/dev/null || echo "000")
-  if [ "$SMOKE_HTTP" = "200" ]; then
-    echo "  ✓ Model routing healthy ($MODEL → 200 OK)"
+    -d '{"model":"openclaw","messages":[{"role":"user","content":"ping"}],"stream":true}' \
+    2>/dev/null | head -c 800 || echo "")
+  if echo "$SMOKE_OUT" | grep -q '^data:'; then
+    echo "  ✓ Model routing healthy ($MODEL → SSE stream OK)"
   else
-    SMOKE_BODY=$(head -c 240 /tmp/.cara-smoke.json 2>/dev/null || echo "<no body>")
-    echo "  ✗ Model routing FAILED (HTTP $SMOKE_HTTP, model=$MODEL)"
-    echo "    Body: $SMOKE_BODY"
+    echo "  ✗ Model routing FAILED (model=$MODEL, no SSE response within 45s)"
+    echo "    Response head: $(echo "$SMOKE_OUT" | head -c 200)"
     echo ""
-    echo "    This is the bug that breaks iOS chat with 404. Most common cause:"
-    echo "    • OpenAI API key (option 4) was selected, but the auth profile is"
-    echo "      'openai-codex' — those routes are different. Re-run install and"
-    echo "      pick option 2 (OpenAI Codex / OAuth) instead, OR set the model"
-    echo "      manually:    openclaw config set agents.defaults.model openai-codex/gpt-5.5"
-    echo "      then restart: systemctl --user restart openclaw-gateway"
+    echo "    This is the bug that breaks iOS chat. Most common causes:"
+    echo "    • Wrong model id for the configured provider (e.g. OpenAI API"
+    echo "      option 4 + openai/gpt-* won't route through openai-codex auth)."
+    echo "      Fix:  openclaw config set agents.defaults.model openai-codex/gpt-5.5"
+    echo "    • Provider plugin can't reach upstream (network egress / API key)."
+    echo "      Check: openclaw gateway logs"
+    echo "    Then restart: systemctl --user restart openclaw-gateway"
   fi
-  rm -f /tmp/.cara-smoke.json
 
   # ── Smoke test #2: /chat through the actual Tailscale URL iOS hits ──
   # Distinct from the model-routing test above. This catches the case
@@ -2780,27 +2786,30 @@ except Exception:
     print('')
 " 2>/dev/null)
   if [ -n "$TAILNET_HOST" ]; then
-    echo "  → Smoke-testing /chat via https://$TAILNET_HOST/chat …"
-    CHAT_HTTP=$(curl -sSk -o /tmp/.cara-chat-smoke.json -w "%{http_code}" --max-time 30 \
+    # Same stream=true approach as above. iOS hits /chat with stream=true
+    # via the status-server proxy, so this matches the actual production
+    # request shape. Look for SSE 'data:' prefix as the success signal.
+    echo "  → Smoke-testing /chat via https://$TAILNET_HOST/chat (stream=true)…"
+    CHAT_OUT=$(curl -sSkN --max-time 45 \
       -X POST "https://$TAILNET_HOST/chat" \
       -H "Authorization: Bearer $GW_TOKEN" \
       -H "Content-Type: application/json" \
-      -d '{"messages":[{"role":"user","content":"ping"}],"stream":false}' \
-      2>/dev/null || echo "000")
-    if [ "$CHAT_HTTP" = "200" ]; then
-      echo "  ✓ /chat route healthy (Tailscale → status-server → gateway)"
+      -d '{"messages":[{"role":"user","content":"ping"}],"stream":true}' \
+      2>/dev/null | head -c 800 || echo "")
+    if echo "$CHAT_OUT" | grep -q '^data:'; then
+      echo "  ✓ /chat route healthy (Tailscale → status-server → gateway → model)"
     else
-      CHAT_BODY=$(head -c 240 /tmp/.cara-chat-smoke.json 2>/dev/null || echo "<no body>")
-      echo "  ✗ /chat via Tailscale FAILED (HTTP $CHAT_HTTP)"
-      echo "    Body: $CHAT_BODY"
+      echo "  ✗ /chat via Tailscale FAILED (no SSE response within 45s)"
+      echo "    Response head: $(echo "$CHAT_OUT" | head -c 200)"
       echo ""
-      echo "    iOS will see this exact 404. Most common cause:"
+      echo "    iOS will see this same failure. Most common causes:"
       echo "    • Tailscale serve has no /chat route (old install before"
       echo "      cognitive memory shipped). Fix:"
       echo "        sudo tailscale serve --bg --set-path=/chat http://127.0.0.1:18794/chat"
       echo "        sudo tailscale serve --bg --set-path=/cognitive http://127.0.0.1:18794/cognitive"
+      echo "    • status-server.js is down on :18794. Check:"
+      echo "        systemctl --user status carapace-status"
     fi
-    rm -f /tmp/.cara-chat-smoke.json
   fi
 fi
 
