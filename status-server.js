@@ -1751,22 +1751,137 @@ http.createServer((req, res) => {
       return;
     }
 
-    // DELETE /cron/:id — delete a cron job from both openclaw and tracker
+    // POST /cron/:id/run — fire a cron job once, right now (debug + iOS button)
+    if (req.method === "POST" && p.match(/^\/cron\/[^/]+\/run\/?$/)) {
+      const id = decodeURIComponent(p.split("/")[2]);
+      if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "missing id" })); return; }
+      const { execFileSync } = require("child_process");
+      const ocCandidates = [
+        path.join(os.homedir(), ".npm-global/bin/openclaw"),
+        "/opt/homebrew/bin/openclaw",
+        "/usr/local/bin/openclaw",
+      ];
+      let ocBin = null;
+      for (const c of ocCandidates) {
+        try { fs.accessSync(c, fs.constants.X_OK); ocBin = c; break; } catch {}
+      }
+      if (!ocBin) {
+        res.writeHead(500); res.end(JSON.stringify({ error: "openclaw binary not found" })); return;
+      }
+      try {
+        const env = { ...process.env, PATH: path.dirname(process.execPath) + ":" + (process.env.PATH || "") };
+        execFileSync(ocBin, ["cron", "run", id], { stdio: "pipe", timeout: 10000, env });
+        res.end(JSON.stringify({ ok: true, ran: id }));
+      } catch (e) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ error: e.stderr?.toString() || e.message }));
+      }
+      return;
+    }
+
+    // PATCH /cron/:id — toggle enabled OR reschedule.
+    // Body: { "enabled": true | false } → enable/disable
+    // Body: { "schedule": "0 9 * * *" }  → cron expression
+    // Body: { "schedule": "every 30m" }  → interval
+    if (req.method === "PATCH" && p.match(/^\/cron\/[^/]+\/?$/)) {
+      const id = decodeURIComponent(p.split("/")[2]);
+      if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "missing id" })); return; }
+      let parsed;
+      try { parsed = JSON.parse(body || "{}"); }
+      catch { res.writeHead(400); res.end(JSON.stringify({ error: "bad body" })); return; }
+      const { execFileSync } = require("child_process");
+      const ocCandidates = [
+        path.join(os.homedir(), ".npm-global/bin/openclaw"),
+        "/opt/homebrew/bin/openclaw",
+        "/usr/local/bin/openclaw",
+      ];
+      let ocBin = null;
+      for (const c of ocCandidates) {
+        try { fs.accessSync(c, fs.constants.X_OK); ocBin = c; break; } catch {}
+      }
+      if (!ocBin) {
+        res.writeHead(500); res.end(JSON.stringify({ error: "openclaw binary not found" })); return;
+      }
+      const env = { ...process.env, PATH: path.dirname(process.execPath) + ":" + (process.env.PATH || "") };
+      try {
+        // 1) Reschedule branch
+        if (typeof parsed.schedule === "string" && parsed.schedule.trim().length > 0) {
+          const sched = parsed.schedule.trim();
+          // Detect "every Xm" / "every Xh" / "every Xd" → --every flag
+          const everyMatch = sched.toLowerCase().match(/^every\s+(\d+)\s*(m|min|minute|h|hr|hour|d|day)/);
+          if (everyMatch) {
+            const n = everyMatch[1];
+            const unit = everyMatch[2].startsWith("m") ? "m"
+                       : everyMatch[2].startsWith("h") ? "h" : "d";
+            execFileSync(ocBin, ["cron", "edit", id, "--every", n + unit], { stdio: "pipe", timeout: 8000, env });
+          } else {
+            // Treat as cron expression
+            const parts = sched.split(/\s+/);
+            if (parts.length !== 5) {
+              res.writeHead(400); res.end(JSON.stringify({ error: "schedule must be 5-field cron (e.g. '0 9 * * *') or 'every Xm/h/d'" }));
+              return;
+            }
+            execFileSync(ocBin, ["cron", "edit", id, "--cron", sched], { stdio: "pipe", timeout: 8000, env });
+          }
+        }
+        // 2) Enabled toggle branch (independent — can fire alongside schedule change)
+        if (typeof parsed.enabled === "boolean") {
+          execFileSync(ocBin, ["cron", parsed.enabled ? "enable" : "disable", id], { stdio: "pipe", timeout: 8000, env });
+        }
+        res.end(JSON.stringify({ ok: true, id, ...parsed }));
+      } catch (e) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ error: e.stderr?.toString() || e.message }));
+      }
+      return;
+    }
+
+    // DELETE /cron/:id — delete a cron job
+    //
+    // BUG FIX: previously edited ~/.openclaw/cron/jobs.json directly.
+    // OpenClaw's cron service holds the jobs in memory and writes its
+    // state back to jobs.json on its own schedule, RESURRECTING any
+    // job we deleted by file edit. The tombstone file existed but
+    // didn't prevent the resurrection (deleted IDs were popping right
+    // back into the iOS Cron tab a few seconds after delete).
+    //
+    // Now: shells out to `openclaw cron rm <id>` which goes through
+    // the gateway's proper API and tells OpenClaw to actually drop
+    // the job from its in-memory state. Then we mirror the change to
+    // the carapace tracker file + tombstone for belt-and-suspenders.
     if (req.method === "DELETE" && p.startsWith("/cron/")) {
       const id = decodeURIComponent(p.slice("/cron/".length));
       if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "missing id" })); return; }
       let deleted = false;
-      // Remove from openclaw jobs.json
-      try {
-        const ocfp = path.join(OC_DIR, "cron", "jobs.json");
-        if (fs.existsSync(ocfp)) {
-          const data = JSON.parse(fs.readFileSync(ocfp, "utf8"));
-          const before = (data.jobs || []).length;
-          data.jobs = (data.jobs || []).filter(j => j.id !== id);
-          if (data.jobs.length < before) { fs.writeFileSync(ocfp, JSON.stringify(data)); deleted = true; }
+      const { execSync, execFileSync } = require("child_process");
+      // 1) Tell OpenClaw to actually delete it (via the proper API).
+      //    PATH must include common locations because the LaunchAgent /
+      //    systemd unit gets a minimal env. Try common openclaw locations
+      //    in order.
+      const ocCandidates = [
+        path.join(os.homedir(), ".npm-global/bin/openclaw"),
+        "/opt/homebrew/bin/openclaw",
+        "/usr/local/bin/openclaw",
+      ];
+      let ocBin = null;
+      for (const c of ocCandidates) {
+        try { fs.accessSync(c, fs.constants.X_OK); ocBin = c; break; } catch {}
+      }
+      if (ocBin) {
+        try {
+          // Add the node binary's dir to PATH so openclaw's `#!/usr/bin/env node`
+          // shebang resolves under restricted envs.
+          const env = { ...process.env, PATH: path.dirname(process.execPath) + ":" + (process.env.PATH || "") };
+          execFileSync(ocBin, ["cron", "rm", id], { stdio: "pipe", timeout: 8000, env });
+          deleted = true;
+        } catch (e) {
+          // openclaw may complain if the id doesn't exist — that's fine
+          // (we'll still write the tombstone). Capture stderr for debug.
+          console.error("[cron rm] openclaw cron rm failed:", e.stderr?.toString() || e.message);
         }
-      } catch (e) {}
-      // Always remove from carapace tracker too (may be stale)
+      }
+      // 2) Mirror the deletion to ~/.carapace/carapace-cron-tracker.json
+      //    so the next iOS poll doesn't show the stale entry briefly.
       try {
         const tfp = path.join(DIR, "carapace-cron-tracker.json");
         if (fs.existsSync(tfp)) {
@@ -1776,7 +1891,10 @@ http.createServer((req, res) => {
           if (data.jobs.length < before) { fs.writeFileSync(tfp, JSON.stringify(data)); deleted = true; }
         }
       } catch (e) {}
-      // Always write tombstone — even if job wasn't in files (may be in gateway memory)
+      // 3) Tombstone — sync-trackers.sh checks this list and won't
+      //    re-add an ID that's been tombstoned, even if it briefly
+      //    reappears in `openclaw cron list` output (race during
+      //    OpenClaw's in-memory state propagation).
       try {
         const tombfp = path.join(DIR, "deleted-cron-ids.json");
         const tomb = fs.existsSync(tombfp) ? JSON.parse(fs.readFileSync(tombfp, "utf8")) : { ids: [] };
