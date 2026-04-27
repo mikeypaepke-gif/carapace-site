@@ -2076,6 +2076,15 @@ Restart=always
 RestartSec=5
 User=root
 WorkingDirectory=/root
+# Disable Bonjour/mDNS at the env level — third layer of defense
+# beyond the config file edit and `openclaw plugins disable bonjour`
+# we run during install. Per https://docs.openclaw.ai/gateway/bonjour
+# this is the documented per-process kill switch. On Linux v2026.4.x
+# the bonjour plugin's @homebridge/ciao library throws an unhandled
+# rejection ("CIAO PROBING CANCELLED") that crashes the gateway in
+# a 30-second restart loop. This env var prevents that even if the
+# config file ever gets reset by `openclaw onboard` or similar.
+Environment=OPENCLAW_DISABLE_BONJOUR=1
 ExecStart=/usr/local/bin/openclaw-gateway-run
 StandardOutput=journal
 StandardError=journal
@@ -2113,6 +2122,27 @@ else
       fi
     fi
   fi
+
+  # ── Drop-in override: bonjour env-var on the user systemd unit ─────
+  # `openclaw gateway install` creates ~/.config/systemd/user/openclaw-gateway.service
+  # from a stock template that does NOT set OPENCLAW_DISABLE_BONJOUR.
+  # On Linux v2026.4.x bonjour crashes the gateway in a 30-second loop,
+  # so we layer a systemd drop-in override (the proper way per
+  # https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html)
+  # that sets the env var WITHOUT modifying the openclaw-managed unit
+  # file. Drop-ins survive `openclaw gateway install` re-runs, which
+  # would otherwise overwrite any direct edits to the unit file.
+  USER_DROPIN_DIR="$HOME/.config/systemd/user/openclaw-gateway.service.d"
+  mkdir -p "$USER_DROPIN_DIR"
+  cat > "$USER_DROPIN_DIR/carapace-bonjour-off.conf" << 'DROPIN_EOF'
+# Set by the CARAPACE installer. Disables the bonjour mDNS advertiser
+# which crashes the gateway on Linux. See:
+#   https://docs.openclaw.ai/gateway/bonjour
+[Service]
+Environment=OPENCLAW_DISABLE_BONJOUR=1
+DROPIN_EOF
+  systemctl --user daemon-reload 2>/dev/null || true
+
   timeout 15 openclaw gateway start >/dev/null 2>&1 || true
 fi
 
@@ -2179,23 +2209,54 @@ fi
 
 # ── Disable bonjour on Linux (headless / VPS / cloud) ──────────────────
 # OpenClaw's `bonjour` plugin advertises the gateway over mDNS for
-# local-network discovery. Useful on a Mac/desktop where you want other
-# machines on the same LAN to find the gateway by name. Useless on:
+# local-network discovery. Useful on a Mac/desktop where other machines
+# on the same LAN should find the gateway by name. Useless on:
 #   • A cloud VPS (no LAN to broadcast on)
 #   • A Tailscale-only deployment (Tailscale handles discovery)
 #   • Any headless server install
-# Worse than useless: on Linux v2026.4.x, the @homebridge/ciao mDNS
+# Worse than useless: on Linux v2026.4.x the @homebridge/ciao mDNS
 # library hits an "AssertionError: CIAO PROBING CANCELLED" → unhandled
 # promise rejection → gateway exits → systemd restarts → infinite crash
-# loop within ~30s of every startup. We disable it preemptively before
-# the gateway ever has a chance to crash on it.
+# loop within ~30s of every startup. We disable it three ways
+# (config file, env var, CLI) so any single-method failure doesn't
+# leave us with a crashing gateway.
 #
-# Mac users who legitimately want LAN discovery can re-enable manually:
+# Per https://docs.openclaw.ai/gateway/bonjour the official knobs are:
+#   1. `openclaw plugins disable bonjour` (CLI, persists in config)
+#   2. `OPENCLAW_DISABLE_BONJOUR=1` env var (per-process)
+#   3. `plugins.bonjour.enabled = false` in openclaw.json
+#
+# Mac users who legitimately want LAN discovery can re-enable with:
 #   openclaw plugins enable bonjour
-if openclaw plugins list 2>/dev/null | grep -q "bonjour"; then
-  if openclaw plugins disable bonjour >/dev/null 2>&1; then
-    ok "Bonjour mDNS plugin disabled (not useful on headless Linux)"
+echo -e "  ${DIM}Disabling Bonjour mDNS plugin (causes crash loop on Linux)…${RESET}"
+BONJOUR_DISABLED=false
+# Method 1: direct config file edit (atomic, no CLI failure modes)
+if [ -f "$HOME/.openclaw/openclaw.json" ]; then
+  python3 - "$HOME/.openclaw/openclaw.json" <<'BONJOUR_PY' 2>/dev/null && BONJOUR_DISABLED=true
+import json, sys
+fp = sys.argv[1]
+d = json.load(open(fp))
+d.setdefault("plugins", {}).setdefault("bonjour", {})["enabled"] = False
+json.dump(d, open(fp, "w"), indent=2)
+BONJOUR_PY
+fi
+# Method 2: openclaw CLI (also writes config — belt-and-suspenders;
+#           keep the output visible this time so a real failure can be
+#           seen in the install log instead of swallowed by /dev/null)
+if command -v openclaw >/dev/null 2>&1; then
+  if openclaw plugins disable bonjour 2>&1 | grep -qE "Disabled plugin|already disabled"; then
+    BONJOUR_DISABLED=true
   fi
+fi
+# Method 3: gateway systemd unit env var — added later in the gateway
+#           install block below (search for OPENCLAW_DISABLE_BONJOUR=1).
+#           That ensures even if config gets reset, the env var still
+#           prevents the crash.
+if $BONJOUR_DISABLED; then
+  ok "Bonjour mDNS plugin disabled (config + CLI; env var added to systemd unit too)"
+else
+  warn "Could not disable bonjour automatically — gateway may crash-loop. Manual fix:"
+  warn "    openclaw plugins disable bonjour && systemctl --user restart openclaw-gateway"
 fi
 
 # ══════════════════════════════════════════════════════════
