@@ -987,6 +987,31 @@ CARAPACE_PROJECTS_SEED_EOF
 # is the script.
 inject_carapace_bootstrap() {
   local bootstrap_file="$HOME/.openclaw/workspace/BOOTSTRAP.md"
+  local identity_file="$HOME/.openclaw/workspace/IDENTITY.md"
+
+  # Bootstrap-already-completed guard. If IDENTITY.md exists AND has a
+  # Name field set to anything OTHER than the install seed value
+  # ("Main"), the user already ran the first-light hatch — the agent
+  # has a name, the user has been greeted, the relationship is
+  # established. Re-writing BOOTSTRAP.md would trigger the FIRST-LIGHT
+  # block to fire on the next turn and ask "what's your name?" again,
+  # potentially overwriting IDENTITY.md/USER.md with whatever the
+  # confused user types in response. That's worse than not re-running
+  # the bootstrap at all.
+  #
+  # Skip silently in that case. The user can always FORCE a re-bootstrap
+  # by deleting both IDENTITY.md and any sentinel-stripped BOOTSTRAP.md
+  # before re-running install.sh.
+  if [[ -f "$identity_file" ]]; then
+    local current_name
+    current_name=$(grep -m1 -E "^- \*\*Name:\*\* " "$identity_file" 2>/dev/null \
+                   | sed -E "s/^- \*\*Name:\*\* +//;s/[[:space:]]+$//")
+    if [[ -n "$current_name" && "$current_name" != "Main" ]]; then
+      ok "CARAPACE bootstrap skipped (agent named '$current_name', already hatched)."
+      return 0
+    fi
+  fi
+
   if [[ -f "$bootstrap_file" ]]; then
     # If it's ALREADY ours (has our sentinel), leave alone — agent
     # may be mid-flight on first hatch and we don't want to clobber
@@ -3119,14 +3144,58 @@ PYEOF
   fi
 fi
 
-# Interactive picker — only if we didn't already configure via env var
-if [[ ! -s "$AUTH_FILE" ]] || ! python3 -c "
+# Skip the picker entirely when the user already has BOTH a working
+# auth profile AND a configured model. Re-running the installer
+# previously walked the user through the picker again and silently
+# rewrote agents.defaults.model + the auth profile entry — which
+# clobbered deliberate user choices (e.g., we kept resetting Mike's
+# xai/grok-4.20-0309-reasoning back to xai/grok-4-fast). The right
+# behavior on re-install is "don't touch what's working."
+#
+# Re-prompt only when:
+#   - auth-profiles.json missing or empty (no provider configured)
+#   - OR agents.defaults.model is empty/null (no model picked yet)
+#
+# To force the picker on a re-run anyway, the user can either delete
+# the auth-profiles.json or run `openclaw config set agents.defaults.model ""`.
+HAS_PROFILES=false; HAS_MODEL=false
+if [[ -s "$AUTH_FILE" ]] && python3 -c "
 import json, sys
 try:
   d = json.load(open(sys.argv[1]))
   sys.exit(0 if d.get('profiles') else 1)
 except: sys.exit(1)
 " "$AUTH_FILE" 2>/dev/null; then
+  HAS_PROFILES=true
+fi
+CURRENT_MODEL=$(python3 -c "
+import json, sys
+try:
+  d = json.load(open('$HOME/.openclaw/openclaw.json'))
+  m = d.get('agents', {}).get('defaults', {}).get('model', '')
+  # Model can be a string OR a {'primary': '...'} dict in this codebase
+  if isinstance(m, dict): m = m.get('primary', '')
+  print(m or '')
+except: print('')
+" 2>/dev/null | tr -d '"{}: ')
+if [[ -n "$CURRENT_MODEL" && "$CURRENT_MODEL" != "null" ]]; then
+  HAS_MODEL=true
+fi
+if $HAS_PROFILES && $HAS_MODEL; then
+  ok "AI provider already configured ($CURRENT_MODEL) — skipping picker"
+elif false; then
+  : # placeholder, real entry condition below
+fi
+
+# Interactive picker — only if we didn't already configure via env var
+# AND the user doesn't have a working setup (per the guard above).
+if ! ($HAS_PROFILES && $HAS_MODEL) && ( [[ ! -s "$AUTH_FILE" ]] || ! python3 -c "
+import json, sys
+try:
+  d = json.load(open(sys.argv[1]))
+  sys.exit(0 if d.get('profiles') else 1)
+except: sys.exit(1)
+" "$AUTH_FILE" 2>/dev/null); then
   echo ""
   echo -e "  ${BOLD}Pick your AI provider:${RESET}"
   echo -e "    ${DIM}1)${RESET} Google Gemini    ${DIM}(free tier, recommended)${RESET}"
