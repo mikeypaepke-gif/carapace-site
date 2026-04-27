@@ -2600,14 +2600,96 @@ done
 # Gateway health passes before model is fully loaded — wait for full init
 sleep 5
 echo ""
-# Verify model was configured by onboard — set default if missing
+# Verify model was configured by onboard — set default if missing.
+#
+# We also INFER the right default from the auth profile that's actually
+# present (matched by provider id), instead of silently falling back to
+# Gemini. This was the bug behind a long-running 404 storm: install
+# completed with `model=""` because onboard skipped (no TTY, key paste
+# failed, etc.), then the fallback hard-coded Gemini even though the
+# user's only auth profile was openai-codex. iOS chat → /chat → openclaw
+# → 404 because no usable Gemini key existed. Match-by-provider keeps the
+# default sane regardless of which provider the user authed with.
 MODEL=$(openclaw config get agents.defaults.model 2>/dev/null | head -1 | tr -d '"{ ')
-if [ -n "$MODEL" ] && [ "$MODEL" != "null" ]; then
+infer_model_from_auth_profile() {
+  local auth="$HOME/.openclaw/agents/main/agent/auth-profiles.json"
+  [ -f "$auth" ] || { echo ""; return; }
+  python3 - "$auth" 2>/dev/null <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    profiles = d.get("profiles", {})
+    if not profiles: print(""); raise SystemExit
+    # Prefer openai-codex if present (free Plus/Pro tier — most common Mike setup)
+    order = ["openai-codex", "google", "anthropic", "xai", "openai"]
+    found = None
+    for prov in order:
+        for key in profiles.keys():
+            if key.startswith(prov + ":"):
+                found = prov; break
+        if found: break
+    if not found:
+        # fall back to first profile's provider
+        first = next(iter(profiles.values()), {})
+        found = first.get("provider", "google")
+    # Mike's directive: ANY OpenAI selection routes through openai-codex/gpt-5.5.
+    defaults = {
+        "google":       "google/gemini-2.5-flash",
+        "openai-codex": "openai-codex/gpt-5.5",
+        "openai":       "openai-codex/gpt-5.5",
+        "anthropic":    "anthropic/claude-haiku-4-5",
+        "xai":          "xai/grok-4-fast",
+    }
+    print(defaults.get(found, "google/gemini-2.5-flash"))
+except Exception:
+    print("")
+PY
+}
+if [ -n "$MODEL" ] && [ "$MODEL" != "null" ] && [ "$MODEL" != "" ]; then
   echo "  ✓ Gateway running with model: $MODEL"
 else
-  echo "  Setting default model: google/gemini-2.5-flash"
-  openclaw config set agents.defaults.model google/gemini-2.5-flash 2>/dev/null || true
-  echo "  ✓ Default model set: google/gemini-2.5-flash"
+  INFERRED=$(infer_model_from_auth_profile)
+  TARGET="${INFERRED:-google/gemini-2.5-flash}"
+  echo "  Setting default model: $TARGET (inferred from auth profile)"
+  openclaw config set agents.defaults.model "$TARGET" 2>/dev/null || true
+  echo "  ✓ Default model set: $TARGET"
+  MODEL="$TARGET"
+  # Restart gateway so the new model is picked up before the smoke test below.
+  systemctl --user restart openclaw-gateway >/dev/null 2>&1 || \
+    sudo systemctl restart openclaw-gateway >/dev/null 2>&1 || true
+  sleep 4
+fi
+
+# ── Post-install smoke test ──────────────────────────────────────────
+# Hit /v1/chat/completions with a 1-token prompt. Fail loudly with a
+# diagnostic if the gateway returns non-2xx — catches the classic
+# "wrong model id for the provider" 404 that bit us before. This runs
+# AFTER the model is set, so we're testing the actual routing the iOS
+# app will hit.
+GW_TOKEN=$(python3 -c "import json; print(json.load(open('$HOME/.openclaw/openclaw.json'))['gateway']['auth']['token'])" 2>/dev/null)
+if [ -n "$GW_TOKEN" ] && [ "$MODEL" != "" ] && [ "$MODEL" != "null" ]; then
+  echo "  → Smoke-testing model routing ($MODEL)…"
+  SMOKE_HTTP=$(curl -sS -o /tmp/.cara-smoke.json -w "%{http_code}" --max-time 60 \
+    -X POST http://127.0.0.1:18789/v1/chat/completions \
+    -H "Authorization: Bearer $GW_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"openclaw","messages":[{"role":"user","content":"ping"}],"stream":false}' \
+    2>/dev/null || echo "000")
+  if [ "$SMOKE_HTTP" = "200" ]; then
+    echo "  ✓ Model routing healthy ($MODEL → 200 OK)"
+  else
+    SMOKE_BODY=$(head -c 240 /tmp/.cara-smoke.json 2>/dev/null || echo "<no body>")
+    echo "  ✗ Model routing FAILED (HTTP $SMOKE_HTTP, model=$MODEL)"
+    echo "    Body: $SMOKE_BODY"
+    echo ""
+    echo "    This is the bug that breaks iOS chat with 404. Most common cause:"
+    echo "    • OpenAI API key (option 4) was selected, but the auth profile is"
+    echo "      'openai-codex' — those routes are different. Re-run install and"
+    echo "      pick option 2 (OpenAI Codex / OAuth) instead, OR set the model"
+    echo "      manually:    openclaw config set agents.defaults.model openai-codex/gpt-5.5"
+    echo "      then restart: systemctl --user restart openclaw-gateway"
+  fi
+  rm -f /tmp/.cara-smoke.json
 fi
 
 # Validate auth-profiles format (must have type field, key not apiKey)
@@ -2810,17 +2892,23 @@ except: sys.exit(1)
 
   # Default models: picked for safe / cheap / stable.
   # - Haiku over Sonnet/Opus (cheapest Claude tier, dated stable rev)
-  # - gpt-5-mini over gpt-5 (much cheaper, same family)
   # - openai-codex/gpt-5.5 (current default for ChatGPT OAuth — bumped
   #   from 5.4 since OpenAI rolled out 5.5 to all ChatGPT plans and
   #   it's a meaningful capability jump for free.)
   # - grok-4-fast (fast/cheap tier of flagship family, big context)
+  #
+  # Mike's directive: ANY OpenAI selection (option 2 OAuth OR option 4
+  # API-key) routes through openai-codex/gpt-5.5. The bare openai/gpt-5*
+  # model id was returning 404 from OpenClaw's gateway because the
+  # provider's prefix routing couldn't reach it cleanly. Codex 5.5 is
+  # the only OpenAI surface verified working end-to-end.
+  #
   # Users can always switch later via `openclaw onboard` or the dashboard.
   SKIP_AI=false
   case "$PROV_CHOICE" in
     2) PROVIDER="openai-codex"; MODEL="openai-codex/gpt-5.5";         KEY_HINT="(OAuth — no key needed)" ;;
     3) PROVIDER="anthropic";    MODEL="anthropic/claude-haiku-4-5";   KEY_HINT="sk-ant-..." ;;
-    4) PROVIDER="openai";       MODEL="openai/gpt-5-mini";            KEY_HINT="sk-..." ;;
+    4) PROVIDER="openai";       MODEL="openai-codex/gpt-5.5";         KEY_HINT="sk-..." ;;
     5) PROVIDER="xai";          MODEL="xai/grok-4-fast";              KEY_HINT="xai-..." ;;
     6) SKIP_AI=true ;;
     *) PROVIDER="google";       MODEL="google/gemini-2.5-flash";      KEY_HINT="AIza..." ;;
