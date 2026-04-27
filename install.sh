@@ -2256,12 +2256,27 @@ fi
 echo -e "  ${DIM}Disabling Bonjour mDNS plugin (causes crash loop on Linux)…${RESET}"
 BONJOUR_DISABLED=false
 # Method 1: direct config file edit (atomic, no CLI failure modes)
+#
+# CRITICAL — schema is `plugins.entries.bonjour.enabled`, NOT
+# `plugins.bonjour.enabled`. The OpenClaw docs at
+# https://docs.openclaw.ai/gateway/bonjour show the latter, but the
+# actual config schema (verified by `openclaw config set` rejecting
+# `plugins.bonjour` with "Unrecognized key") puts plugin entries
+# under `plugins.entries.<name>`. Writing the wrong path corrupts
+# the config such that `openclaw plugins disable bonjour` then
+# fails with a validation error AND the gateway can't boot. Took
+# us hours to track that one down — pin the correct schema here
+# and clean up any prior bad writes.
 if [ -f "$HOME/.openclaw/openclaw.json" ]; then
   python3 - "$HOME/.openclaw/openclaw.json" <<'BONJOUR_PY' 2>/dev/null && BONJOUR_DISABLED=true
 import json, sys
 fp = sys.argv[1]
 d = json.load(open(fp))
-d.setdefault("plugins", {}).setdefault("bonjour", {})["enabled"] = False
+# Strip any prior bad write at the wrong path
+if "plugins" in d and isinstance(d["plugins"], dict) and "bonjour" in d["plugins"]:
+    del d["plugins"]["bonjour"]
+# Set the CORRECT path: plugins.entries.bonjour.enabled = false
+d.setdefault("plugins", {}).setdefault("entries", {}).setdefault("bonjour", {})["enabled"] = False
 json.dump(d, open(fp, "w"), indent=2)
 BONJOUR_PY
 fi
