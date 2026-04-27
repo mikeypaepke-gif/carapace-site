@@ -1779,8 +1779,17 @@ else
   clean_dirty_install
   echo -e "  ${DIM}Installing OpenClaw...${RESET}"
   [[ -s "$HOME/.nvm/nvm.sh" ]] && source "$HOME/.nvm/nvm.sh" 2>/dev/null
-  # Set user-local prefix to avoid permission issues
-  npm config set prefix "$HOME/.npm-global" 2>/dev/null || true
+  # Set user-local prefix to avoid permission issues. Use env var
+  # (NPM_CONFIG_PREFIX) instead of `npm config set prefix` because the
+  # latter writes a `prefix=` line to ~/.npmrc that nvm complains
+  # about on EVERY shell login + every nvm-managed npm invocation:
+  #   "Your user's .npmrc file has a `globalconfig` and/or `prefix`
+  #    setting, which are incompatible with nvm.
+  #    Run `nvm use --delete-prefix v22.22.2 --silent` to unset it."
+  # Three copies of that message per shell login is brutal UX. The
+  # env-var form gives us the same effect for THIS install + future
+  # npm installs that source nvm, without dirtying global config.
+  export NPM_CONFIG_PREFIX="$HOME/.npm-global"
   export PATH="$HOME/.npm-global/bin:$PATH"
   # Limit node memory during install to avoid OOM on low-RAM VPS
   # Install without postinstall first to avoid OOM on low-RAM VPS
@@ -3593,6 +3602,21 @@ fi
 sweep_carapace_for_all_agents
 inject_carapace_bootstrap
 inject_carapace_first_light
+
+# ── Final cleanup: silence the nvm-vs-npm-prefix warning forever ──
+# Even if our env-var-only prefix worked for THIS install, an old
+# install may have left `prefix=` in ~/.npmrc. nvm spams this warning
+# 3× on every shell login + every `npm` invocation, which makes the
+# carapace SSH session look noisy and broken. Strip the offending
+# lines unconditionally — npm-global packages installed at our env-
+# var-prefix are still discoverable via PATH.
+if [[ -f "$HOME/.npmrc" ]]; then
+  sed -i '/^prefix=/d;/^globalconfig=/d' "$HOME/.npmrc" 2>/dev/null || true
+  # If the file is now empty, remove it entirely (nvm only complains
+  # when the file exists with one of those keys).
+  [[ -s "$HOME/.npmrc" ]] || rm -f "$HOME/.npmrc"
+fi
+
 echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
 echo -e "  ${GREEN}${BOLD}  ✓ CARAPACE is ready!${RESET}"
 echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
