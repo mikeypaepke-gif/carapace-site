@@ -3324,16 +3324,19 @@ PYEOF
   API_KEY=""
   # Read the full key as a single line. We previously did char-by-char
   # with `read -rs -n1` for live `*` echo feedback, but on long pastes
-  # over SSH the per-char loop breaks early — bracketed-paste escape
+  # over SSH the per-char loop broke early — bracketed-paste escape
   # sequences (ESC[200~ … ESC[201~) and other terminal control bytes
-  # mid-paste make `read -n1` return an empty char, which the loop
+  # mid-paste made `read -n1` return an empty char, which the loop
   # interpreted as "Enter pressed" and broke at the wrong byte. This
   # silently truncated 84-char xAI keys to 41 chars, causing every
   # downstream xAI request to 400 with "Incorrect API key provided".
   #
-  # Single `read -rs` reads atomically until a real newline. No per-char
-  # feedback, but the masked preview below confirms what was captured
-  # so the user still gets visual confirmation before commit.
+  # Atomic single `read -rs` reads until a real newline (no truncation),
+  # then we print a length-matched row of asterisks AFTER the paste
+  # lands so the user gets visual confirmation that their paste was
+  # captured at the right length before the masked-preview confirm
+  # step. Not as nice as live per-char dots, but the dots come within
+  # ~50ms of pressing Enter — feels real-time enough and is bulletproof.
   read_masked() {
     local prompt="$1"
     local tty_src="${2:-}"
@@ -3343,7 +3346,15 @@ PYEOF
     else
       IFS= read -rs API_KEY || API_KEY=""
     fi
-    echo
+    # Visual confirmation — one `*` per captured character, then newline.
+    # Cap at 100 dots so an absurd paste doesn't wrap the terminal weirdly.
+    if [[ -n "$API_KEY" ]]; then
+      local _n=${#API_KEY}
+      (( _n > 100 )) && _n=100
+      printf "%${_n}s\n" "" | tr ' ' '*'
+    else
+      echo
+    fi
   }
   # Read the key, show a masked preview, let the user confirm or re-enter.
   # One bad paste shouldn't mean re-running the whole installer — loop here
