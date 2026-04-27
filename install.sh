@@ -2489,47 +2489,64 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   ok "Tailscale serve → gateway connected"
   SERVE_OK=true
 
-  # Expose status server paths. The status server runs on 18794 with
-  # routes at root (/health, /history, /pair, /sessions, etc.). Tailscale
-  # Serve's --set-path strips the matched prefix from the incoming URL
-  # and forwards the remainder to the destination; if the destination
-  # URL has its own path, that path is PREPENDED to the forwarded
-  # remainder. Earlier versions set destination to
-  # http://127.0.0.1:18794/carapace which meant /carapace/pair ended up
-  # at /carapace/pair on the backend (404). Point all /carapace/*
-  # catch-all mappings at the bare http://127.0.0.1:18794 root so the
-  # forwarded remainder lines up with the real routes.
-  $SUDO tailscale serve --bg --set-path /health http://127.0.0.1:18794/health >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /history http://127.0.0.1:18794/history >/dev/null 2>&1 || true
-  # Catch-all for /carapace/* — forwards everything under the prefix
-  # (including /carapace/pair needed for tailnet auto-pair) to the
-  # status server's matching root route.
-  $SUDO tailscale serve --bg --set-path /carapace http://127.0.0.1:18794 >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /carapace/projects http://127.0.0.1:18794/projects >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /carapace/cron http://127.0.0.1:18794/cron >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /carapace/agents http://127.0.0.1:18794/agents >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /carapace/status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /carapace/history http://127.0.0.1:18794/history >/dev/null 2>&1 || true
-  # Explicit /carapace/pair — belt-and-suspenders so auto-pair works
-  # even if the /carapace catch-all above ever gets reverted.
-  $SUDO tailscale serve --bg --set-path /carapace/pair http://127.0.0.1:18794/pair >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /sessions http://127.0.0.1:18794/sessions >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /carapace/sessions http://127.0.0.1:18794/sessions >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /projects http://127.0.0.1:18794/projects >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /cron http://127.0.0.1:18794/cron >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /agents http://127.0.0.1:18794/agents >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /status http://127.0.0.1:18794/status >/dev/null 2>&1 || true
-  # Pair at root too, in case the peer is hitting https://host/pair (no prefix).
-  $SUDO tailscale serve --bg --set-path /pair http://127.0.0.1:18794/pair >/dev/null 2>&1 || true
-  # Cognitive memory endpoints — /chat (mode-aware OpenClaw forwarder
-  # with visual+auditory memory injection) and /cognitive/* (direct
-  # ingest + introspection). iOS uses /chat as its primary chat
-  # endpoint when the Cognitive Memory toggle is on. Without these,
-  # iOS hits the gateway URL and gets 404 because Tailscale's catch-all
-  # `/` proxies to OpenClaw at :18789, which doesn't know /chat.
-  $SUDO tailscale serve --bg --set-path /chat http://127.0.0.1:18794/chat >/dev/null 2>&1 || true
-  $SUDO tailscale serve --bg --set-path /cognitive http://127.0.0.1:18794/cognitive >/dev/null 2>&1 || true
-  ok "Tailscale serve → status server paths"
+  # ── Single source of truth for ALL Tailscale serve routes ────────
+  # Previously these were strewn across 3 places (this block, a separate
+  # cognitive-routes function, and a re-assert hidden in the smoke test).
+  # When any one place drifted (e.g. /chat got added later than the rest),
+  # iOS would 404 in production with no clear repro. Now every route lives
+  # in one array and gets applied in one batched call with explicit error
+  # capture — if a route fails to register, we know which one and why.
+  #
+  # IMPORTANT — destination URL path semantics:
+  #   `tailscale serve --set-path /X http://...:18794/Y` strips /X from
+  #   the incoming request, then PREPENDS /Y to the forwarded path.
+  #   So /chat → /Y for backend = exactly the right shape if we want
+  #   /chat to land at /chat on the status server. The /carapace
+  #   catch-all uses bare http://...:18794 (no path) so /carapace/foo
+  #   forwards as /foo on the backend (matching the actual routes).
+  CARAPACE_SERVE_ROUTES=(
+    # path                               backend_url
+    "/health                              http://127.0.0.1:18794/health"
+    "/history                             http://127.0.0.1:18794/history"
+    "/sessions                            http://127.0.0.1:18794/sessions"
+    "/projects                            http://127.0.0.1:18794/projects"
+    "/cron                                http://127.0.0.1:18794/cron"
+    "/agents                              http://127.0.0.1:18794/agents"
+    "/status                              http://127.0.0.1:18794/status"
+    "/pair                                http://127.0.0.1:18794/pair"
+    "/chat                                http://127.0.0.1:18794/chat"
+    "/cognitive                           http://127.0.0.1:18794/cognitive"
+    # /carapace catch-all + explicit children. Catch-all goes to bare
+    # :18794 root so /carapace/foo → /foo on the backend (correct).
+    "/carapace                            http://127.0.0.1:18794"
+    "/carapace/health                     http://127.0.0.1:18794/health"
+    "/carapace/history                    http://127.0.0.1:18794/history"
+    "/carapace/sessions                   http://127.0.0.1:18794/sessions"
+    "/carapace/projects                   http://127.0.0.1:18794/projects"
+    "/carapace/cron                       http://127.0.0.1:18794/cron"
+    "/carapace/agents                     http://127.0.0.1:18794/agents"
+    "/carapace/status                     http://127.0.0.1:18794/status"
+    "/carapace/pair                       http://127.0.0.1:18794/pair"
+  )
+  ROUTES_OK=0; ROUTES_FAIL=0; FAILED_ROUTES=""
+  for entry in "${CARAPACE_SERVE_ROUTES[@]}"; do
+    # Split on whitespace
+    set -- $entry
+    local route_path="$1" backend="$2"
+    if $SUDO tailscale serve --bg --set-path "$route_path" "$backend" >/dev/null 2>&1; then
+      ROUTES_OK=$((ROUTES_OK + 1))
+    else
+      ROUTES_FAIL=$((ROUTES_FAIL + 1))
+      FAILED_ROUTES="${FAILED_ROUTES}${route_path} "
+    fi
+  done
+  if [[ $ROUTES_FAIL -eq 0 ]]; then
+    ok "Tailscale serve → status server paths ($ROUTES_OK routes)"
+  else
+    warn "Tailscale serve: $ROUTES_OK ok, $ROUTES_FAIL FAILED → $FAILED_ROUTES"
+    warn "  Re-run the failed ones manually:"
+    warn "    sudo tailscale serve --bg --set-path <PATH> <BACKEND>"
+  fi
 
   # CARAPACE intentionally stays TAILNET-ONLY (no Funnel). Funnel would
   # expose the gateway to the public internet via Tailscale's edge nodes,
@@ -2600,6 +2617,15 @@ ExecStartPost=/usr/bin/tailscale serve --bg --set-path /projects http://127.0.0.
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /cron http://127.0.0.1:18794/cron
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /agents http://127.0.0.1:18794/agents
 ExecStartPost=/usr/bin/tailscale serve --bg --set-path /status http://127.0.0.1:18794/status
+# Cognitive memory endpoints — /chat (mode-aware OpenClaw forwarder
+# with visual+auditory memory injection) and /cognitive/* (direct
+# ingest + introspection). MUST live in this systemd unit too,
+# otherwise every Tailscale restart replays the unit and clobbers
+# the imperative `tailscale serve --bg` calls we made during install,
+# leaving iOS with a 404 on /chat. THE root cause of the long-running
+# "/chat keeps vanishing" bug.
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /chat http://127.0.0.1:18794/chat
+ExecStartPost=/usr/bin/tailscale serve --bg --set-path /cognitive http://127.0.0.1:18794/cognitive
 
 [Install]
 WantedBy=multi-user.target
