@@ -2123,6 +2123,59 @@ else
   exit 1
 fi
 
+# ── COGNITIVE MEMORY MODULES (brain-region architecture) ──────────────
+# Fetched from carapace.info/cognitive/ — same trust model as the
+# main install script. Modules implement: hippocampus (episodic memory),
+# parahippocampal place area (place schemas), entorhinal grid cells
+# (cognitive map), amygdala (affect tags), and the assembler that
+# stitches it all into a per-turn injection. status-server.js loads
+# them lazily on first /cognitive/* or /chat call.
+install_carapace_cognitive() {
+  local DEST="$HOME/.carapace/cognitive"
+  mkdir -p "$DEST/data"
+  local BASE="${COG_BASE:-https://carapace.info/cognitive}"
+  local files="schema.sql geohash.mjs visits.mjs ingest.mjs sub_area.mjs auditory.mjs assemble.mjs affect.mjs consolidate.mjs"
+  local ok=0 fail=0
+  for f in $files; do
+    if curl -fsSL "$BASE/$f" -o "$DEST/$f"; then
+      ok=$((ok+1))
+    else
+      fail=$((fail+1))
+      echo "  ✗ cognitive/$f"
+    fi
+  done
+  if [ "$fail" -gt 0 ]; then
+    echo "⚠ Cognitive modules: $ok installed, $fail failed — /chat + /cognitive endpoints may not work"
+  else
+    echo "✓ Cognitive modules ($ok files) installed → $DEST"
+  fi
+  # better-sqlite3 npm dep — status-server requires it for cognitive endpoints
+  if [ ! -f "$HOME/.carapace/package.json" ]; then
+    cat > "$HOME/.carapace/package.json" << 'PKG'
+{ "name": "carapace-status-server", "private": true, "dependencies": { "better-sqlite3": "^11.5.0" } }
+PKG
+  fi
+  if (cd "$HOME/.carapace" && npm install --silent >/dev/null 2>&1); then
+    echo "✓ better-sqlite3 installed for cognitive memory"
+  else
+    echo "⚠ npm install in ~/.carapace failed — cognitive endpoints will return errors"
+  fi
+}
+
+# Add Tailscale serve routes for /chat + /cognitive so iOS can reach
+# the new endpoints over the Tailscale URL. No-op when Tailscale isn't
+# installed or `tailscale serve` isn't already configured.
+setup_tailscale_cognitive_routes() {
+  command -v tailscale >/dev/null 2>&1 || return 0
+  tailscale serve status >/dev/null 2>&1 || return 0
+  sudo tailscale serve --bg --set-path=/chat "http://localhost:18794/chat" >/dev/null 2>&1 || true
+  sudo tailscale serve --bg --set-path=/cognitive "http://localhost:18794/cognitive" >/dev/null 2>&1 || true
+  echo "✓ Tailscale serve routes added: /chat and /cognitive → :18794"
+}
+
+install_carapace_cognitive
+setup_tailscale_cognitive_routes
+
 python3 - << 'PYEOF'
 import os, textwrap
 

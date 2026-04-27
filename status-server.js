@@ -1,6 +1,207 @@
 const http = require("http"), fs = require("fs"), path = require("path"), os = require("os");
 const DIR = path.join(os.homedir(), ".carapace");
 const OC_DIR = path.join(os.homedir(), ".openclaw");
+
+// ════════════════════════════════════════════════════════════════════
+// COGNITIVE MEMORY MODULE
+// Brain-region cognitive architecture: visual + auditory memory,
+// place schemas, sub-areas, routine patterns, affect tags.
+// Lazy-loaded since the modules are ESM and this file is CommonJS.
+// ════════════════════════════════════════════════════════════════════
+const COG_DIR = path.join(DIR, "cognitive");
+const COG_DB_PATH = path.join(COG_DIR, "data", "cognitive.db");
+let _cog = null;          // { db, ingestFrame, ingestUtterance, assembleInjection, detectAffect, ingestAffect }
+let _cogReady = false;
+async function loadCognitive() {
+  if (_cog) return _cog;
+  const Database = require(path.join(DIR, "node_modules", "better-sqlite3"));
+  // Initialize DB if missing — read schema.sql + create tables
+  if (!fs.existsSync(COG_DB_PATH)) {
+    fs.mkdirSync(path.dirname(COG_DB_PATH), { recursive: true });
+    const schema = fs.readFileSync(path.join(COG_DIR, "schema.sql"), "utf8");
+    const tmp = new Database(COG_DB_PATH);
+    tmp.exec(schema);
+    tmp.close();
+    console.log("[cog] initialized fresh DB at", COG_DB_PATH);
+  }
+  const db = new Database(COG_DB_PATH);
+  // Dynamic import the ESM modules (file:// URLs)
+  const fileUrl = (rel) => "file://" + path.join(COG_DIR, rel);
+  const ingestM = await import(fileUrl("ingest.mjs"));
+  const audM = await import(fileUrl("auditory.mjs"));
+  const asmM = await import(fileUrl("assemble.mjs"));
+  const affectM = await import(fileUrl("affect.mjs"));
+  _cog = {
+    db,
+    ingestFrame: ingestM.ingestFrame,
+    ingestUtterance: audM.ingestUtterance,
+    assembleInjection: asmM.assembleInjection,
+    detectAffect: affectM.detectAffect,
+    ingestAffect: affectM.ingestAffect,
+  };
+  _cogReady = true;
+  console.log("[cog] modules loaded — episodic_memory has",
+    db.prepare("SELECT COUNT(*) as c FROM episodic_memory").get().c, "frames");
+  return _cog;
+}
+// Boot the cognitive module asynchronously at startup so first request is fast
+loadCognitive().catch(e => console.error("[cog] load failed:", e.message));
+
+// Forward chat request to local OpenClaw (port 18789), prepending visual
+// memory injection as a system message. Returns the parsed response.
+let _ocToken = null;
+function getOcToken() {
+  if (_ocToken !== null) return _ocToken;
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(OC_DIR, "openclaw.json"), "utf8"));
+    _ocToken = cfg?.gateway?.auth?.token || "";
+  } catch { _ocToken = ""; }
+  return _ocToken;
+}
+
+
+// Distill the visual-memory injection into a compact 1-3 line thinking
+// summary that we'll prepend as a synthetic <think> block. This way
+// iOS brain toggle ALWAYS shows what context was used in chat mode,
+// regardless of whether Gemini chose to emit its own thinking.
+function buildThinkingSummary(injection) {
+  if (!injection) return null;
+  const lines = injection.split("\n");
+  const here = lines.find(l => l.startsWith("[HERE:"));
+  const now = lines.find(l => l.startsWith("[NOW:"));
+  const routine = lines.find(l => l.trim().startsWith("ROUTINE:"));
+  const others = lines.find(l => l.trim().startsWith("other rooms here:"));
+  const said = lines.find(l => l.trim().startsWith("recently said here:"));
+  const nearby = lines.find(l => l.includes("NEARBY ~5km"));
+  const correction = lines.find(l => l.includes("⚠ correction"));
+
+  const bits = [];
+  if (here) bits.push(here.replace(/^\[HERE:\s*/, "").replace(/\]$/, "").trim());
+  if (now) bits.push(now.replace(/^\[NOW:\s*/, "").replace(/\]$/, "").trim());
+  if (routine) bits.push(routine.trim());
+  if (others) bits.push(others.trim());
+  if (correction) bits.push(correction.trim());
+  if (said) bits.push(said.trim());
+  if (nearby) bits.push("nearby places included");
+  if (bits.length === 0) return null;
+  return "Memory pulled:\n  " + bits.slice(0, 6).join("\n  ");
+}
+
+// Streaming variant — pipes OpenClaw's SSE stream directly to the
+// caller's response. Used when client requests stream:true.
+function forwardToOpenClawStream(messages, agent_id, sessionKey, clientRes, mode = null, thinkingSummaryForChat = null) {
+  const body = JSON.stringify({ model: "openclaw" + (agent_id ? "/" + agent_id : ""), messages, stream: true });
+  const tok = getOcToken();
+  const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) };
+  if (tok) headers["Authorization"] = "Bearer " + tok;
+  if (sessionKey) headers["x-openclaw-session-key"] = sessionKey;
+  return new Promise((resolve, reject) => {
+    const r = http.request({
+      hostname: "127.0.0.1", port: 18789, path: "/v1/chat/completions", method: "POST", headers,
+    }, ocRes => {
+      // Forward status + SSE headers
+      clientRes.statusCode = ocRes.statusCode;
+      clientRes.setHeader("Content-Type", ocRes.headers["content-type"] || "text/event-stream");
+      clientRes.setHeader("Cache-Control", "no-cache");
+      clientRes.setHeader("Connection", "keep-alive");
+      // For chat mode, pipe untouched so <think> blocks reach iOS for
+      // brain-toggle display. For voice/vision, strip aggressively.
+      if (mode === "chat") {
+        // Chat mode pipes untouched — no synthetic thinking, no strip.
+        ocRes.on("data", chunk => clientRes.write(chunk));
+        ocRes.on("end", () => { clientRes.end(); resolve(); });
+        return;
+      }
+      // Pipe with line-buffered <think>...</think> stripping. SSE chunks
+      // arrive as 'data: {...json...}\n\n' lines. We accumulate, parse
+      // each delta's content, drop any <think>...</think> region, then
+      // forward. Belt-and-suspenders: even if model emits thinking
+      // tags despite our instructions, they never reach iOS.
+      let buf = "";
+      let inThink = false;
+      ocRes.on("data", chunk => {
+        buf += chunk.toString();
+        let nl;
+        while ((nl = buf.indexOf("\n\n")) >= 0) {
+          const line = buf.slice(0, nl + 2);
+          buf = buf.slice(nl + 2);
+          // Process SSE 'data: {...}' lines
+          if (line.startsWith("data: ")) {
+            const payload = line.slice(6).trim();
+            if (payload === "[DONE]") { clientRes.write(line); continue; }
+            try {
+              const j = JSON.parse(payload);
+              const delta = j?.choices?.[0]?.delta?.content;
+              if (typeof delta === "string") {
+                let cleaned = delta;
+                // State machine across deltas — track if we're inside a think block
+                if (inThink) {
+                  const closeIdx = cleaned.indexOf("</think>");
+                  if (closeIdx >= 0) {
+                    cleaned = cleaned.slice(closeIdx + 8);
+                    inThink = false;
+                  } else {
+                    cleaned = "";  // entire delta is inside think
+                  }
+                }
+                // Strip complete <think>...</think> within this delta
+                cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "");
+                // Detect unclosed <think> opening
+                const openIdx = cleaned.indexOf("<think>");
+                if (openIdx >= 0) {
+                  cleaned = cleaned.slice(0, openIdx);
+                  inThink = true;
+                }
+                // Also drop bare leading '<' or '<t' / '<th' / '<thi' / '<thin' / '<think'
+                // partial-tag fragments at start of cleaned (these stream through
+                // before we know if it's a think tag).
+                const partial = cleaned.match(/^<th?i?n?k?>?$/);
+                if (partial) cleaned = "";
+                if (cleaned !== delta) {
+                  if (cleaned === "") continue;  // skip empty delta
+                  j.choices[0].delta.content = cleaned;
+                  clientRes.write("data: " + JSON.stringify(j) + "\n\n");
+                  continue;
+                }
+              }
+            } catch {}
+          }
+          clientRes.write(line);
+        }
+      });
+      ocRes.on("end", () => {
+        if (buf) clientRes.write(buf);
+        clientRes.end();
+        resolve();
+      });
+      ocRes.on("error", reject);
+    });
+    r.on("error", reject);
+    r.write(body);
+    r.end();
+  });
+}
+
+async function forwardToOpenClaw(messages, agent_id) {
+  const body = JSON.stringify({ model: "openclaw" + (agent_id ? "/" + agent_id : ""), messages });
+  const tok = getOcToken();
+  const ocReq = await new Promise((resolve, reject) => {
+    const r = http.request({
+      hostname: "127.0.0.1", port: 18789, path: "/v1/chat/completions", method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body),
+        ...(tok ? { "Authorization": "Bearer " + tok } : {}) },
+    }, res => {
+      let d = "";
+      res.on("data", c => d += c);
+      res.on("end", () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({ raw: d }); } });
+    });
+    r.on("error", reject);
+    r.write(body);
+    r.end();
+  });
+  return ocReq;
+}
+
 const TRACKER_PORT = 18795; // python project-tracker-server (legacy fallback)
 
 // ============================================================================
@@ -1148,7 +1349,7 @@ setInterval(() => {
 http.createServer((req, res) => {
   let body = "";
   req.on("data", d => { body += d; });
-  req.on("end", () => {
+  req.on("end", async () => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
@@ -1160,6 +1361,132 @@ http.createServer((req, res) => {
     const token = (req.headers["authorization"] || "").replace("Bearer ", "").trim() || null;
 
     if (p === "/health") { res.end(JSON.stringify({ ok: true })); return; }
+
+    // ── COGNITIVE MEMORY endpoints ────────────────────────────────────
+    if (p === "/cognitive/health") {
+      try {
+        const cog = await loadCognitive();
+        const stats = {
+          episodic_memory: cog.db.prepare("SELECT COUNT(*) as c FROM episodic_memory").get().c,
+          sub_areas: cog.db.prepare("SELECT COUNT(*) as c FROM sub_areas").get().c,
+          cognitive_map: cog.db.prepare("SELECT COUNT(*) as c FROM cognitive_map").get().c,
+          place_schemas: cog.db.prepare("SELECT COUNT(*) as c FROM place_schemas").get().c,
+          routine_patterns: cog.db.prepare("SELECT COUNT(*) as c FROM routine_patterns").get().c,
+          affect_tags: cog.db.prepare("SELECT COUNT(*) as c FROM affect_tags").get().c,
+        };
+        res.end(JSON.stringify({ ok: true, ready: _cogReady, stats }));
+      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+    if (p === "/cognitive/ingest-frame" && req.method === "POST") {
+      try {
+        const cog = await loadCognitive();
+        const b = JSON.parse(body || "{}");
+        const r = cog.ingestFrame(cog.db, b);
+        res.end(JSON.stringify({ ok: true, ...r }));
+      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+    if (p === "/cognitive/ingest-utterance" && req.method === "POST") {
+      try {
+        const cog = await loadCognitive();
+        const b = JSON.parse(body || "{}");
+        const r = cog.ingestUtterance(cog.db, b);
+        res.end(JSON.stringify({ ok: true, ...r }));
+      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+    if (p === "/cognitive/correction" && req.method === "POST") {
+      try {
+        const cog = await loadCognitive();
+        const b = JSON.parse(body || "{}");
+        const r = cog.ingestAffect(cog.db, { ts: Date.now(), lat: b.lat, lon: b.lon,
+          signal_type: "user_correction", valence: -0.5,
+          signal_text: b.signal_text || null, was_response_text: b.was_response_text || null,
+          corrected_to_text: b.corrected_to_text || b.correction || null });
+        res.end(JSON.stringify({ ok: true, ...r }));
+      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+    if (p === "/cognitive/injection") {
+      try {
+        const cog = await loadCognitive();
+        const lat = parseFloat(qs.get("lat")), lon = parseFloat(qs.get("lon"));
+        const scene = qs.get("scene");
+        const objs = qs.get("objects")?.split(",").filter(Boolean) || null;
+        const ts = parseInt(qs.get("ts")) || Date.now();
+        const inj = cog.assembleInjection(cog.db, { lat: isNaN(lat) ? null : lat, lon: isNaN(lon) ? null : lon, ts, scene, objects: objs });
+        res.end(JSON.stringify({ injection: inj || null }));
+      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+    // Main chat endpoint — visual+auditory memory injection + forward to OpenClaw
+    if (p === "/chat" && req.method === "POST") {
+      try {
+        const cog = await loadCognitive();
+        const b = JSON.parse(body || "{}");
+        const messages = b.messages || [];
+        const lat = b.carapace_context?.lat ?? b.lat ?? null;
+        const lon = b.carapace_context?.lon ?? b.lon ?? null;
+        const scene = b.carapace_context?.scene ?? b.scene ?? null;
+        const objects = b.carapace_context?.objects ?? b.objects ?? null;
+        const agent_id = b.agent_id || null;
+        const wantStream = b.stream === true;
+        const sessionKey = req.headers["x-openclaw-session-key"] || null;
+        const ts = Date.now();
+        // Find latest user + prev assistant. Vision attaches images
+        // as a multimodal content array — extract just the text parts
+        // so cognitive functions see a string. Crashed otherwise.
+        const extractText = (c) => {
+          if (typeof c === "string") return c;
+          if (Array.isArray(c)) return c.filter(p => p?.type === "text").map(p => p.text || "").join(" ");
+          return "";
+        };
+        const lastUser = [...messages].reverse().find(m => m.role === "user");
+        const prevAsst = [...messages].reverse().find(m => m.role === "assistant");
+        const lastUserText = extractText(lastUser?.content);
+        const prevAsstText = extractText(prevAsst?.content);
+        // Detect affect (correction / satisfaction) on this turn
+        const affect = lastUserText ? cog.detectAffect(lastUserText, prevAsstText) : null;
+        if (affect) {
+          cog.ingestAffect(cog.db, { ts, lat, lon, signal_type: affect.type, valence: affect.valence,
+            signal_text: lastUserText, was_response_text: prevAsstText || null,
+            corrected_to_text: affect.corrected_to || null });
+        }
+        // Ingest user message as utterance (auditory cortex)
+        if (lastUserText) {
+          cog.ingestUtterance(cog.db, { ts, lat, lon, transcript: lastUserText, source: "chat", agent_id });
+        }
+        // Build cognitive injection
+        const injection = cog.assembleInjection(cog.db, { lat, lon, ts, scene, objects });
+        // Prepend injection to existing system messages (or add as new system msg)
+        const enrichedMessages = injection
+          ? [{ role: "system", content: injection }, ...messages]
+          : messages;
+        // STREAM mode — pipe OpenClaw's SSE through to client. iOS uses this
+        // path for live streaming UI; cognitive metadata is logged server-side
+        // only (since SSE has no JSON envelope to attach metadata to).
+        if (wantStream) {
+          console.log("[cog/chat] stream injection_chars=" + (injection?.length || 0) +
+            " affect=" + (affect?.type || "none"));
+          await forwardToOpenClawStream(enrichedMessages, agent_id, sessionKey, res, b.carapace_context?.mode || null, (b.carapace_context?.mode || null) === "chat" ? buildThinkingSummary(injection) : null);
+          return;
+        }
+        // NON-STREAM mode — buffered JSON with cognitive metadata.
+        const ocResp = await forwardToOpenClaw(enrichedMessages, agent_id);
+        res.end(JSON.stringify({
+          ...ocResp,
+          _cognitive: {
+            injection_used: !!injection,
+            injection_chars: injection?.length || 0,
+            affect_detected: affect || null,
+          },
+        }));
+      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message, stack: e.stack })); }
+      return;
+    }
+
+
 
     // SSE — long-lived event stream. Sends real-time signals when
     // server-side data changes (projects, cron, agents) so iOS can
