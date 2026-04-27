@@ -2585,8 +2585,10 @@ fi
 SERVE_OK=false
 if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   echo -e "  ${DIM}Connecting Tailscale Serve...${RESET}"
-  # Always run tailscale serve for gateway
-  $SUDO tailscale serve --bg http://127.0.0.1:18789 >/dev/null 2>&1 || true
+  # Always run tailscale serve for gateway. 10s timeout in case the
+  # tailscale daemon is wedged — without it the install would hang
+  # indefinitely on a daemon that's not responding to control commands.
+  timeout 10 $SUDO tailscale serve --bg http://127.0.0.1:18789 >/dev/null 2>&1 || true
   ok "Tailscale serve → gateway connected"
   SERVE_OK=true
 
@@ -2629,6 +2631,11 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
     "/carapace/status                     http://127.0.0.1:18794/status"
     "/carapace/pair                       http://127.0.0.1:18794/pair"
   )
+  # Wrap each call in `timeout 10` — without it, a hung tailscale
+  # daemon (DNS lookup stuck, control plane unreachable, etc.) makes
+  # the loop hang indefinitely with zero output. The user sees "still
+  # pending" forever and has to Ctrl+C the whole install. 10s is
+  # plenty for a single serve registration on a healthy daemon.
   ROUTES_OK=0; ROUTES_FAIL=0; FAILED_ROUTES=""
   for entry in "${CARAPACE_SERVE_ROUTES[@]}"; do
     # Split on whitespace. NOTE: `local` would be a bash error here —
@@ -2636,7 +2643,7 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
     # Plain variables it is.
     set -- $entry
     ROUTE_PATH="$1"; BACKEND="$2"
-    if $SUDO tailscale serve --bg --set-path "$ROUTE_PATH" "$BACKEND" >/dev/null 2>&1; then
+    if timeout 10 $SUDO tailscale serve --bg --set-path "$ROUTE_PATH" "$BACKEND" >/dev/null 2>&1; then
       ROUTES_OK=$((ROUTES_OK + 1))
     else
       ROUTES_FAIL=$((ROUTES_FAIL + 1))
