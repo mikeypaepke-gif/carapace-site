@@ -164,7 +164,32 @@ PY
 }
 
 _carapace_list_agent_workspaces() {
+  # Main agent's workspace (the global one)
   echo "$HOME/.openclaw/workspace"
+
+  # Per-agent workspaces created by `openclaw agents add <name>`.
+  # OpenClaw drops these at ~/.openclaw/agents/<id>/ — each one gets
+  # its OWN AGENTS.md that the gateway reads when that agent runs a
+  # turn. Without this loop, sweep_carapace_for_all_agents would inject
+  # blocks into ONLY the main workspace, and any agent created via
+  # `openclaw agents add` would have a virgin AGENTS.md with zero
+  # CARAPACE rules — meaning the agent has no idea how to handle
+  # vision turns, no project tracking conventions, nothing.
+  #
+  # Skip the agent dir itself (the openclaw "agent" subdir holds
+  # auth-profiles.json + models.json) — only emit dirs that have a
+  # workspace-shaped AGENTS.md at their root.
+  if [[ -d "$HOME/.openclaw/agents" ]]; then
+    for d in "$HOME/.openclaw/agents/"*/; do
+      [[ -d "$d" ]] || continue
+      # Each agent dir has subdirs like `agent/` and `sessions/`.
+      # The workspace IS the agent dir itself when AGENTS.md lives at root.
+      [[ -f "${d}AGENTS.md" ]] || continue
+      echo "${d%/}"
+    done
+  fi
+
+  # Subagents nested under the main workspace (legacy layout).
   if [[ -d "$HOME/.openclaw/workspace/agents" ]]; then
     for d in "$HOME/.openclaw/workspace/agents/"*/; do
       [[ -d "$d" ]] || continue
@@ -172,6 +197,8 @@ _carapace_list_agent_workspaces() {
       echo "${d%/}"
     done
   fi
+
+  # Alternative workspace pattern (workspace-foo/, workspace-bar/).
   for d in "$HOME/.openclaw/"workspace-*/; do
     [[ -d "$d" ]] || continue; echo "${d%/}"
   done
