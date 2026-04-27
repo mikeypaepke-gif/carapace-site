@@ -1795,14 +1795,20 @@ else
   # Install without postinstall first to avoid OOM on low-RAM VPS
   # The postinstall-bundled-plugins.mjs script uses too much memory on first pass
   export NODE_OPTIONS="--max-old-space-size=768"
-  # OPENCLAW_VERSION defaults to "latest" — we used to pin v2026.4.24
-  # to dodge the v2026.4.25 memory-core plugin (which conflicts with
-  # CARAPACE's own ~/.carapace/cognitive/ layer and pegs CPU in a
-  # tight rename loop on workspace-state.json). Real fix is below:
-  # we disable the memory-core plugin in the gateway-config block
-  # below, exactly like we disable bonjour. CARAPACE's cognitive
-  # layer is the source of truth for memory injection.
-  : "${OPENCLAW_VERSION:=latest}"
+  # PIN to v2026.4.24. We tried Path C (rip out our cognitive layer +
+  # let openclaw memory-core own memory) hoping the v4.25 CPU spin was
+  # caused by our two memory layers fighting. Path C's still in place
+  # and is the right architecture, BUT v4.25's gateway has an upstream
+  # regression independent of memory-core: gateway pegs 120% CPU in a
+  # tight rename() loop (~18,800 syscalls/sec) even with our cognitive
+  # gone AND memory-core disabled. /chat then times out 180s+.
+  #
+  # v4.24 is the last clean release. Unpin once OpenClaw ships v4.26+
+  # with a fix — Path C codebase is forward-compatible with memory-core
+  # so the unpin will be a one-line change.
+  #
+  # Override at install time:  OPENCLAW_VERSION=latest curl ... | bash
+  : "${OPENCLAW_VERSION:=2026.4.24}"
   retry 3 timeout 240 npm install -g "openclaw@${OPENCLAW_VERSION}" --no-fund --loglevel=error --ignore-scripts
   # Run postinstall separately with explicit memory cap and swap already active
   if [ -f "$HOME/.npm-global/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs" ]; then
