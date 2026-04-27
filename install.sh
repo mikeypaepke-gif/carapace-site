@@ -2341,7 +2341,14 @@ NODE_BIN="$(command -v node)"
 # install.sh, same trust model — if you trust the install script,
 # you trust this fetch.
 mkdir -p "$HOME/.carapace"
-SS_URL="${SS_URL:-https://carapace.info/status-server.js}"
+# Default to raw.githubusercontent.com because carapace.info is fronted
+# by Cloudflare, which has been observed serving stale .js files even
+# with cf-cache-status: DYNAMIC headers (CF page rules + tiered cache
+# bite us when we push frequent updates). raw.githubusercontent serves
+# directly from the GitHub repo with much shorter TTLs — what hits
+# main is what gets installed within ~30s. Override with SS_URL=...
+# if you want the carapace.info-fronted version specifically.
+SS_URL="${SS_URL:-https://raw.githubusercontent.com/mikeypaepke-gif/carapace-site/main/status-server.js}"
 if curl -fsSL "$SS_URL" -o "$HOME/.carapace/status-server.js"; then
   echo "✓ Installed status-server.js from $SS_URL"
 else
