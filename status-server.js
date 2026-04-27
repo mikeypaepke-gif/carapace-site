@@ -8,44 +8,91 @@ const OC_DIR = path.join(os.homedir(), ".openclaw");
 // place schemas, sub-areas, routine patterns, affect tags.
 // Lazy-loaded since the modules are ESM and this file is CommonJS.
 // ════════════════════════════════════════════════════════════════════
-const COG_DIR = path.join(DIR, "cognitive");
-const COG_DB_PATH = path.join(COG_DIR, "data", "cognitive.db");
-let _cog = null;          // { db, ingestFrame, ingestUtterance, assembleInjection, detectAffect, ingestAffect }
-let _cogReady = false;
-async function loadCognitive() {
-  if (_cog) return _cog;
-  const Database = require(path.join(DIR, "node_modules", "better-sqlite3"));
-  // Initialize DB if missing — read schema.sql + create tables
-  if (!fs.existsSync(COG_DB_PATH)) {
-    fs.mkdirSync(path.dirname(COG_DB_PATH), { recursive: true });
-    const schema = fs.readFileSync(path.join(COG_DIR, "schema.sql"), "utf8");
-    const tmp = new Database(COG_DB_PATH);
-    tmp.exec(schema);
-    tmp.close();
-    console.log("[cog] initialized fresh DB at", COG_DB_PATH);
+// MEMORY ARCHITECTURE
+//
+// As of Apr 2026 we delegate long-term memory to OpenClaw's built-in
+// `memory-core` plugin (released in v2026.4.25). It indexes
+// ~/.openclaw/workspace/memory/*.md into a per-agent SQLite FTS5
+// store and exposes `memory.search` as a native agent tool.
+//
+// This file used to maintain a parallel "cognitive" SQLite layer
+// (~/.carapace/cognitive/) with brain-region tables (hippocampus,
+// place schemas, affect tags, etc.) — that's now retired in favor
+// of letting memory-core own persistence + retrieval. The two
+// systems were doubling memory work and racing on file watchers,
+// pegging the gateway at 100% CPU on v2026.4.25.
+//
+// Carapace's job in /chat is now narrower:
+//   1. Add a CURRENT-TURN context hint (lat/lon/scene/objects/mode)
+//      as a system-message prefix — the agent can't see these
+//      sensors otherwise.
+//   2. Append a structured turn record to memory/turns-<date>.md
+//      so memory-core indexes it and the agent can call
+//      memory.search() to recall past turns by location/content.
+//
+// Old /cognitive/* endpoints below are kept as no-op stubs so iOS
+// clients pinned to older builds don't 404 — they just return
+// empty/static data.
+
+// Build a compact "what's true right now" hint for the next agent
+// turn. Returns null when there's nothing to add (lets us skip the
+// system-message prepend entirely on plain text chats).
+function buildContextHint({ lat, lon, scene, objects, mode }) {
+  const bits = [];
+  if (lat != null && lon != null && !isNaN(lat) && !isNaN(lon)) {
+    bits.push(`location: ${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`);
   }
-  const db = new Database(COG_DB_PATH);
-  // Dynamic import the ESM modules (file:// URLs)
-  const fileUrl = (rel) => "file://" + path.join(COG_DIR, rel);
-  const ingestM = await import(fileUrl("ingest.mjs"));
-  const audM = await import(fileUrl("auditory.mjs"));
-  const asmM = await import(fileUrl("assemble.mjs"));
-  const affectM = await import(fileUrl("affect.mjs"));
-  _cog = {
-    db,
-    ingestFrame: ingestM.ingestFrame,
-    ingestUtterance: audM.ingestUtterance,
-    assembleInjection: asmM.assembleInjection,
-    detectAffect: affectM.detectAffect,
-    ingestAffect: affectM.ingestAffect,
-  };
-  _cogReady = true;
-  console.log("[cog] modules loaded — episodic_memory has",
-    db.prepare("SELECT COUNT(*) as c FROM episodic_memory").get().c, "frames");
-  return _cog;
+  if (scene) bits.push(`scene: ${String(scene).slice(0, 200)}`);
+  if (Array.isArray(objects) && objects.length) {
+    bits.push(`visible: ${objects.slice(0, 8).join(", ")}`);
+  }
+  if (mode && mode !== "chat") bits.push(`mode: ${mode}`);
+  if (!bits.length) return null;
+  return `[ctx] ${bits.join(" · ")}`;
 }
-// Boot the cognitive module asynchronously at startup so first request is fast
-loadCognitive().catch(e => console.error("[cog] load failed:", e.message));
+
+// Multimodal messages from iOS arrive as content arrays. Extract
+// just the text bits so we can write them to the turn record.
+function extractText(c) {
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) return c.filter(p => p?.type === "text").map(p => p.text || "").join(" ");
+  return "";
+}
+
+// Append a per-turn record to ~/.openclaw/workspace/memory/turns-YYYY-MM-DD.md.
+// memory-core's file watcher picks this up on its 1.5s debounce and
+// indexes it for FTS5 search. The format is structured-but-readable
+// markdown so it's both grep-friendly and reads well to a human
+// browsing memory/.
+//
+// Day-bucketed file (one .md per day) keeps individual files small
+// while still being temporally ordered. The agent can search across
+// all of them via memory.search.
+function appendTurnRecord({ ts, lat, lon, scene, objects, mode, userText, agent_id }) {
+  if (!userText || userText.length < 2) return; // skip empty / single-char turns
+  const memoryDir = path.join(OC_DIR, "workspace", "memory");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  const d = new Date(ts);
+  const day = d.toISOString().slice(0, 10);     // YYYY-MM-DD
+  const stamp = d.toISOString().slice(11, 19); // HH:MM:SS
+  const file = path.join(memoryDir, `turns-${day}.md`);
+  const lines = [`## ${day} ${stamp} UTC`];
+  if (mode && mode !== "chat") lines.push(`**Mode:** ${mode}`);
+  if (lat != null && lon != null && !isNaN(lat) && !isNaN(lon)) {
+    lines.push(`**Loc:** ${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`);
+  }
+  if (scene) lines.push(`**Scene:** ${String(scene).slice(0, 300)}`);
+  if (Array.isArray(objects) && objects.length) {
+    lines.push(`**Visible:** ${objects.slice(0, 12).join(", ")}`);
+  }
+  if (agent_id && agent_id !== "main") lines.push(`**Agent:** ${agent_id}`);
+  // Cap user text at 1000 chars per turn so a runaway dump doesn't
+  // bloat memory files. Full text still lives in the agent's session
+  // log; this is the searchable summary.
+  lines.push(`**User:** ${userText.replace(/\s+/g, " ").trim().slice(0, 1000)}`);
+  lines.push(""); // trailing blank for markdown breathing room
+  fs.appendFileSync(file, lines.join("\n") + "\n");
+}
 
 // Forward chat request to local OpenClaw (port 18789), prepending visual
 // memory injection as a system message. Returns the parsed response.
@@ -60,32 +107,10 @@ function getOcToken() {
 }
 
 
-// Distill the visual-memory injection into a compact 1-3 line thinking
-// summary that we'll prepend as a synthetic <think> block. This way
-// iOS brain toggle ALWAYS shows what context was used in chat mode,
-// regardless of whether Gemini chose to emit its own thinking.
-function buildThinkingSummary(injection) {
-  if (!injection) return null;
-  const lines = injection.split("\n");
-  const here = lines.find(l => l.startsWith("[HERE:"));
-  const now = lines.find(l => l.startsWith("[NOW:"));
-  const routine = lines.find(l => l.trim().startsWith("ROUTINE:"));
-  const others = lines.find(l => l.trim().startsWith("other rooms here:"));
-  const said = lines.find(l => l.trim().startsWith("recently said here:"));
-  const nearby = lines.find(l => l.includes("NEARBY ~5km"));
-  const correction = lines.find(l => l.includes("⚠ correction"));
-
-  const bits = [];
-  if (here) bits.push(here.replace(/^\[HERE:\s*/, "").replace(/\]$/, "").trim());
-  if (now) bits.push(now.replace(/^\[NOW:\s*/, "").replace(/\]$/, "").trim());
-  if (routine) bits.push(routine.trim());
-  if (others) bits.push(others.trim());
-  if (correction) bits.push(correction.trim());
-  if (said) bits.push(said.trim());
-  if (nearby) bits.push("nearby places included");
-  if (bits.length === 0) return null;
-  return "Memory pulled:\n  " + bits.slice(0, 6).join("\n  ");
-}
+// (buildThinkingSummary removed — was used to render the cognitive
+// injection as a synthetic <think> block for iOS's brain toggle.
+// memory-core handles memory now and we no longer build a synthetic
+// per-turn injection, so there's nothing to summarize.)
 
 // Streaming variant — pipes OpenClaw's SSE stream directly to the
 // caller's response. Used when client requests stream:true.
@@ -1362,125 +1387,88 @@ http.createServer((req, res) => {
 
     if (p === "/health") { res.end(JSON.stringify({ ok: true })); return; }
 
-    // ── COGNITIVE MEMORY endpoints ────────────────────────────────────
+    // ── COGNITIVE MEMORY endpoints (DEPRECATED — kept as no-ops) ────────
+    // Memory is now owned by OpenClaw's memory-core plugin. These
+    // endpoints stay around so iOS clients pinned to older builds
+    // don't get 404s; they just return empty/static success payloads.
+    // The next iOS major can drop the calls entirely.
     if (p === "/cognitive/health") {
-      try {
-        const cog = await loadCognitive();
-        const stats = {
-          episodic_memory: cog.db.prepare("SELECT COUNT(*) as c FROM episodic_memory").get().c,
-          sub_areas: cog.db.prepare("SELECT COUNT(*) as c FROM sub_areas").get().c,
-          cognitive_map: cog.db.prepare("SELECT COUNT(*) as c FROM cognitive_map").get().c,
-          place_schemas: cog.db.prepare("SELECT COUNT(*) as c FROM place_schemas").get().c,
-          routine_patterns: cog.db.prepare("SELECT COUNT(*) as c FROM routine_patterns").get().c,
-          affect_tags: cog.db.prepare("SELECT COUNT(*) as c FROM affect_tags").get().c,
-        };
-        res.end(JSON.stringify({ ok: true, ready: _cogReady, stats }));
-      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
+      res.end(JSON.stringify({
+        ok: true,
+        ready: true,
+        deprecated: true,
+        replaced_by: "openclaw memory-core",
+        stats: { episodic_memory: 0, sub_areas: 0, cognitive_map: 0, place_schemas: 0, routine_patterns: 0, affect_tags: 0 },
+      }));
       return;
     }
     if (p === "/cognitive/ingest-frame" && req.method === "POST") {
-      try {
-        const cog = await loadCognitive();
-        const b = JSON.parse(body || "{}");
-        const r = cog.ingestFrame(cog.db, b);
-        res.end(JSON.stringify({ ok: true, ...r }));
-      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
+      res.end(JSON.stringify({ ok: true, deprecated: true, ingested: false, note: "frame-level memory removed; per-turn context now flows through /chat" }));
       return;
     }
     if (p === "/cognitive/ingest-utterance" && req.method === "POST") {
-      try {
-        const cog = await loadCognitive();
-        const b = JSON.parse(body || "{}");
-        const r = cog.ingestUtterance(cog.db, b);
-        res.end(JSON.stringify({ ok: true, ...r }));
-      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
+      res.end(JSON.stringify({ ok: true, deprecated: true, ingested: false, note: "utterance-level memory removed; per-turn context now flows through /chat" }));
       return;
     }
     if (p === "/cognitive/correction" && req.method === "POST") {
-      try {
-        const cog = await loadCognitive();
-        const b = JSON.parse(body || "{}");
-        const r = cog.ingestAffect(cog.db, { ts: Date.now(), lat: b.lat, lon: b.lon,
-          signal_type: "user_correction", valence: -0.5,
-          signal_text: b.signal_text || null, was_response_text: b.was_response_text || null,
-          corrected_to_text: b.corrected_to_text || b.correction || null });
-        res.end(JSON.stringify({ ok: true, ...r }));
-      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
+      res.end(JSON.stringify({ ok: true, deprecated: true, ingested: false, note: "correction logging removed; agent learns via memory.search over turn records" }));
       return;
     }
     if (p === "/cognitive/injection") {
-      try {
-        const cog = await loadCognitive();
-        const lat = parseFloat(qs.get("lat")), lon = parseFloat(qs.get("lon"));
-        const scene = qs.get("scene");
-        const objs = qs.get("objects")?.split(",").filter(Boolean) || null;
-        const ts = parseInt(qs.get("ts")) || Date.now();
-        const inj = cog.assembleInjection(cog.db, { lat: isNaN(lat) ? null : lat, lon: isNaN(lon) ? null : lon, ts, scene, objects: objs });
-        res.end(JSON.stringify({ injection: inj || null }));
-      } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
+      res.end(JSON.stringify({ injection: null, deprecated: true, replaced_by: "openclaw memory-core via memory.search tool" }));
       return;
     }
     // Main chat endpoint — visual+auditory memory injection + forward to OpenClaw
     if (p === "/chat" && req.method === "POST") {
       try {
-        const cog = await loadCognitive();
         const b = JSON.parse(body || "{}");
         const messages = b.messages || [];
         const lat = b.carapace_context?.lat ?? b.lat ?? null;
         const lon = b.carapace_context?.lon ?? b.lon ?? null;
         const scene = b.carapace_context?.scene ?? b.scene ?? null;
         const objects = b.carapace_context?.objects ?? b.objects ?? null;
+        const mode = b.carapace_context?.mode || null;
         const agent_id = b.agent_id || null;
         const wantStream = b.stream === true;
         const sessionKey = req.headers["x-openclaw-session-key"] || null;
         const ts = Date.now();
-        // Find latest user + prev assistant. Vision attaches images
-        // as a multimodal content array — extract just the text parts
-        // so cognitive functions see a string. Crashed otherwise.
-        const extractText = (c) => {
-          if (typeof c === "string") return c;
-          if (Array.isArray(c)) return c.filter(p => p?.type === "text").map(p => p.text || "").join(" ");
-          return "";
-        };
+
+        // Build a compact CURRENT-TURN context hint (lat/lon/scene/objects).
+        // memory-core handles long-term recall via its own FTS5 index over
+        // ~/.openclaw/workspace/memory/*.md — we no longer maintain a
+        // parallel SQL memory layer. The agent can call memory.search()
+        // when it needs to recall past turns; this hint just tells it
+        // what's true RIGHT NOW that it can't see otherwise.
+        const ctxHint = buildContextHint({ lat, lon, scene, objects, mode });
+
+        // Append a structured per-turn record to memory/turns-<date>.md
+        // so memory-core picks it up on its next debounced reindex (~1.5s).
+        // Future agent.memory.search calls can find this turn by location,
+        // scene, or content. Failure here is non-fatal — the chat still
+        // runs even if disk write hiccups.
         const lastUser = [...messages].reverse().find(m => m.role === "user");
-        const prevAsst = [...messages].reverse().find(m => m.role === "assistant");
         const lastUserText = extractText(lastUser?.content);
-        const prevAsstText = extractText(prevAsst?.content);
-        // Detect affect (correction / satisfaction) on this turn
-        const affect = lastUserText ? cog.detectAffect(lastUserText, prevAsstText) : null;
-        if (affect) {
-          cog.ingestAffect(cog.db, { ts, lat, lon, signal_type: affect.type, valence: affect.valence,
-            signal_text: lastUserText, was_response_text: prevAsstText || null,
-            corrected_to_text: affect.corrected_to || null });
+        try {
+          appendTurnRecord({ ts, lat, lon, scene, objects, mode, userText: lastUserText, agent_id });
+        } catch (e) {
+          console.warn("[chat] turn-record write failed:", e.message);
         }
-        // Ingest user message as utterance (auditory cortex)
-        if (lastUserText) {
-          cog.ingestUtterance(cog.db, { ts, lat, lon, transcript: lastUserText, source: "chat", agent_id });
-        }
-        // Build cognitive injection
-        const injection = cog.assembleInjection(cog.db, { lat, lon, ts, scene, objects });
-        // Prepend injection to existing system messages (or add as new system msg)
-        const enrichedMessages = injection
-          ? [{ role: "system", content: injection }, ...messages]
+
+        // Prepend the hint as a system message — only when we have one.
+        // Empty hint = no enrichment, plain forward.
+        const enrichedMessages = ctxHint
+          ? [{ role: "system", content: ctxHint }, ...messages]
           : messages;
-        // STREAM mode — pipe OpenClaw's SSE through to client. iOS uses this
-        // path for live streaming UI; cognitive metadata is logged server-side
-        // only (since SSE has no JSON envelope to attach metadata to).
+
         if (wantStream) {
-          console.log("[cog/chat] stream injection_chars=" + (injection?.length || 0) +
-            " affect=" + (affect?.type || "none"));
-          await forwardToOpenClawStream(enrichedMessages, agent_id, sessionKey, res, b.carapace_context?.mode || null, (b.carapace_context?.mode || null) === "chat" ? buildThinkingSummary(injection) : null);
+          console.log("[chat] stream ctx=" + (ctxHint ? ctxHint.length : 0) + "ch mode=" + (mode || "?"));
+          await forwardToOpenClawStream(enrichedMessages, agent_id, sessionKey, res, mode, null);
           return;
         }
-        // NON-STREAM mode — buffered JSON with cognitive metadata.
         const ocResp = await forwardToOpenClaw(enrichedMessages, agent_id);
         res.end(JSON.stringify({
           ...ocResp,
-          _cognitive: {
-            injection_used: !!injection,
-            injection_chars: injection?.length || 0,
-            affect_detected: affect || null,
-          },
+          _carapace: { ctx_chars: ctxHint?.length || 0 },
         }));
       } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message, stack: e.stack })); }
       return;

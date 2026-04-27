@@ -1795,15 +1795,14 @@ else
   # Install without postinstall first to avoid OOM on low-RAM VPS
   # The postinstall-bundled-plugins.mjs script uses too much memory on first pass
   export NODE_OPTIONS="--max-old-space-size=768"
-  # PIN to v2026.4.24 — v2026.4.25 (released 2026-04-27) introduced a
-  # broken `memory-core` plugin + agent runtime regression that pegs
-  # the gateway at 100%+ CPU in a tight rename() loop on session
-  # state, making the TUI unusable and HTTP /chat unresponsive after
-  # the first turn. Took us hours to find — yesterday's v2026.4.24
-  # was clean. Unpin once OpenClaw ships a fix (track upstream).
-  #
-  # Override at install-time with:  OPENCLAW_VERSION=latest curl ... | bash
-  : "${OPENCLAW_VERSION:=2026.4.24}"
+  # OPENCLAW_VERSION defaults to "latest" — we used to pin v2026.4.24
+  # to dodge the v2026.4.25 memory-core plugin (which conflicts with
+  # CARAPACE's own ~/.carapace/cognitive/ layer and pegs CPU in a
+  # tight rename loop on workspace-state.json). Real fix is below:
+  # we disable the memory-core plugin in the gateway-config block
+  # below, exactly like we disable bonjour. CARAPACE's cognitive
+  # layer is the source of truth for memory injection.
+  : "${OPENCLAW_VERSION:=latest}"
   retry 3 timeout 240 npm install -g "openclaw@${OPENCLAW_VERSION}" --no-fund --loglevel=error --ignore-scripts
   # Run postinstall separately with explicit memory cap and swap already active
   if [ -f "$HOME/.npm-global/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs" ]; then
@@ -2350,64 +2349,35 @@ else
   exit 1
 fi
 
-# ── COGNITIVE MEMORY MODULES (brain-region architecture) ──────────────
-# Fetched from carapace.info/cognitive/ — same trust model as the
-# main install script. Modules implement: hippocampus (episodic memory),
-# parahippocampal place area (place schemas), entorhinal grid cells
-# (cognitive map), amygdala (affect tags), and the assembler that
-# stitches it all into a per-turn injection. status-server.js loads
-# them lazily on first /cognitive/* or /chat call.
-install_carapace_cognitive() {
-  local DEST="$HOME/.carapace/cognitive"
-  mkdir -p "$DEST/data"
-  local BASE="${COG_BASE:-https://carapace.info/cognitive}"
-  local files="schema.sql geohash.mjs visits.mjs ingest.mjs sub_area.mjs auditory.mjs assemble.mjs affect.mjs consolidate.mjs"
-  local ok=0 fail=0
-  for f in $files; do
-    if curl -fsSL "$BASE/$f" -o "$DEST/$f"; then
-      ok=$((ok+1))
-    else
-      fail=$((fail+1))
-      echo "  ✗ cognitive/$f"
-    fi
-  done
-  if [ "$fail" -gt 0 ]; then
-    echo "⚠ Cognitive modules: $ok installed, $fail failed — /chat + /cognitive endpoints may not work"
-  else
-    echo "✓ Cognitive modules ($ok files) installed → $DEST"
-  fi
-  # better-sqlite3 npm dep — status-server requires it for cognitive endpoints
-  if [ ! -f "$HOME/.carapace/package.json" ]; then
-    cat > "$HOME/.carapace/package.json" << 'PKG'
-{ "name": "carapace-status-server", "private": true, "dependencies": { "better-sqlite3": "^11.5.0" } }
-PKG
-  fi
-  if (cd "$HOME/.carapace" && npm install --silent >/dev/null 2>&1); then
-    echo "✓ better-sqlite3 installed for cognitive memory"
-  else
-    echo "⚠ npm install in ~/.carapace failed — cognitive endpoints will return errors"
-  fi
-}
-
-# Add Tailscale serve routes for /chat + /cognitive so iOS can reach
-# the new endpoints over the Tailscale URL. No-op when Tailscale isn't
-# installed or `tailscale serve` isn't already configured.
-setup_tailscale_cognitive_routes() {
-  command -v tailscale >/dev/null 2>&1 || return 0
-  tailscale serve status >/dev/null 2>&1 || return 0
-  sudo tailscale serve --bg --set-path=/chat "http://localhost:18794/chat" >/dev/null 2>&1 || true
-  sudo tailscale serve --bg --set-path=/cognitive "http://localhost:18794/cognitive" >/dev/null 2>&1 || true
-  echo "✓ Tailscale serve routes added: /chat and /cognitive → :18794"
-}
-
-install_carapace_cognitive
-# Tailscale routes for /chat + /cognitive get added in the main
-# Tailscale Serve block ~200 lines below (which runs AFTER `tailscale
-# serve --bg http://127.0.0.1:18789` initializes the serve config).
-# Calling setup_tailscale_cognitive_routes() here is a no-op on fresh
-# installs because `tailscale serve status` returns 1 with no config.
-# The function is kept defined for terminal-based re-runs, but not
-# invoked from the curl|bash path.
+# ── COGNITIVE MEMORY ─── RETIRED — owned by openclaw memory-core ──────
+# As of Apr 2026 we delegate long-term memory to OpenClaw's built-in
+# `memory-core` plugin (released v2026.4.25). It indexes
+# ~/.openclaw/workspace/memory/*.md into a per-agent SQLite FTS5 store
+# and exposes `memory.search` as a native agent tool — does the job
+# our brain-region SQL layer used to do, with one less moving piece.
+#
+# What we used to do here:
+#   - Download 9 .mjs modules + schema.sql from carapace.info/cognitive/
+#   - npm install better-sqlite3 in ~/.carapace
+#   - Maintain a parallel SQLite at ~/.carapace/cognitive/data/
+#   - status-server.js loaded the modules + queried the SQLite per /chat
+#
+# What replaces it:
+#   - status-server.js's /chat appends a structured per-turn record to
+#     ~/.openclaw/workspace/memory/turns-<date>.md
+#   - memory-core picks up the file change (1.5s debounce) + indexes
+#   - Agent calls memory.search() when it needs to recall past turns
+#
+# Removed: install_carapace_cognitive, setup_tailscale_cognitive_routes
+# (the /chat + /cognitive Tailscale routes are still set up in the
+# main serve block below — /cognitive endpoints stay as no-op stubs
+# for backward compat with older iOS clients).
+#
+# To clean up an existing install that has the old layer, the
+# bonjour-disable block above already handles plugin disable; for
+# the SQLite + .mjs files, just `rm -rf ~/.carapace/cognitive
+# ~/.carapace/node_modules ~/.carapace/package.json` — they're inert
+# now and only waste disk.
 
 python3 - << 'PYEOF'
 import os, textwrap
