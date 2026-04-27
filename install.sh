@@ -1883,15 +1883,21 @@ if $TAILSCALE_INSTALLED; then
       echo ""
     fi
 
-    # 90s wait. 3 minutes was too long — if the user has the URL open
-    # they'll click within 30s; if they don't, an extra 2 minutes won't
-    # change the outcome. Re-running install.sh after authing is the
-    # right recovery, not a longer in-script wait.
-    echo -e "  ${DIM}Waiting for authentication (up to 90 seconds)...${RESET}"
+    # No timer. The auth URL is right there on screen — the user clicks
+    # it, signs in, comes back. They might be doing MFA, looking for
+    # their password manager, switching browsers, whatever. There's no
+    # win to bailing out at 90s or 3min: either they finish or they
+    # Ctrl+C. We loop forever, polling every 3s, with a heartbeat dot
+    # every 30s so the terminal doesn't look frozen. The trap below
+    # ensures Ctrl+C cleans up the background `tailscale up`.
+    echo -e "  ${DIM}Waiting for authentication... (Ctrl+C to abort)${RESET}"
+    trap 'kill "$TS_UP_PID" 2>/dev/null || true; rm -f "$TS_UP_TMPFILE"; echo ""; fatal "Tailscale authentication aborted by user. Re-run when ready."' INT TERM
     WAIT_COUNT=0
-    WAIT_MAX=90
-    while (( WAIT_COUNT < WAIT_MAX )); do
+    while true; do
       if ! kill -0 "$TS_UP_PID" 2>/dev/null; then
+        # `tailscale up` exited on its own — either auth completed
+        # (success path) or it errored out (failure path). Use exit
+        # status to disambiguate.
         wait "$TS_UP_PID" 2>/dev/null && TAILSCALE_CONNECTED=true || true
         break
       fi
@@ -1901,17 +1907,21 @@ if $TAILSCALE_INSTALLED; then
       fi
       sleep 3
       WAIT_COUNT=$(( WAIT_COUNT + 3 ))
-      if (( WAIT_COUNT % 15 == 0 )); then
+      # Heartbeat every 30s so the user knows we're still alive
+      if (( WAIT_COUNT % 30 == 0 )); then
         if ! $URL_PRINTED; then
+          # Belt-and-suspenders: re-scrape the URL in case it appeared
+          # after the initial 15s polling window.
           TS_URL="$(grep -oE 'https://login\.tailscale\.com/[^ \n]+' "$TS_UP_TMPFILE" 2>/dev/null | head -1 || true)"
           if [[ -n "$TS_URL" ]]; then
             echo -e "  Auth URL: ${BOLD}${TS_URL}${RESET}"
             URL_PRINTED=true
           fi
         fi
-        echo -ne "${DIM}.${RESET}"
+        echo -e "  ${DIM}...still waiting (${WAIT_COUNT}s elapsed)${RESET}"
       fi
     done
+    trap - INT TERM
     echo ""
 
     kill "$TS_UP_PID" 2>/dev/null || true
@@ -1922,19 +1932,18 @@ if $TAILSCALE_INSTALLED; then
       TS_HOSTNAME="$(ts_hostname)"
       ok "Tailscale connected as ${TS_HOSTNAME}"
     else
-      # HARD STOP. Same reasoning as the install-failure case above:
-      # Tailscale is non-optional for the iOS path. Continuing without
-      # it gives the user a bridge that systemd thinks is "running"
-      # but iOS can never reach. Force the user to authenticate first,
-      # then re-run.
-      fatal "Tailscale authentication did not complete within 90 seconds.
+      # HARD STOP. We only reach this branch if `tailscale up` exited
+      # non-zero on its own — auth was declined, network error, the
+      # tailnet is locked, etc. The wait loop has no timer, so user
+      # patience isn't the failure mode here.
+      fatal "Tailscale authentication failed.
 
   CARAPACE requires Tailscale to be connected for the iOS bridge.
 
-  To finish authentication:
+  Try authenticating manually to see the underlying error:
     $SUDO tailscale up
 
-  Open the URL it prints in a browser, sign in, then re-run:
+  Once authenticated, re-run:
     curl -fsSL https://carapace.info/install.sh | bash"
     fi
   fi
