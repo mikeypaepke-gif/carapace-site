@@ -585,53 +585,20 @@ except Exception: print('False')" 2>/dev/null || echo False)
 }
 
 # ══════════════════════════════════════════════════════════
-# Carapace minimal provider picker (replaces `openclaw onboard`)
+# Carapace = a SHELL on top of OpenClaw
 # ══════════════════════════════════════════════════════════
-# We used to defer to `openclaw onboard` for provider/key/model.
-# It worked but had three footguns we kept hitting:
-#   1. The "Browse all models" picker surfaces beta/preview variants
-#      (e.g. xai/grok-4.20-beta) that hit safety filters or stall.
-#   2. The TUI fires a hatch turn IN-band during onboard so install
-#      can't catch failures before showing the QR.
-#   3. Auth changes don't hot-reload — they need a full gateway
-#      restart, which onboard doesn't always trigger.
+# We don't install openclaw, we don't pick providers, we don't
+# manage API keys. OpenClaw owns all of that. We're the
+# deployment recipe + workspace skin + iOS pairing layer that
+# sits on top.
 #
-# Our minimal picker: 4 providers, 1 recommended-stable model each,
-# write auth-profiles.json directly, ALWAYS restart, ALWAYS fire a
-# warmup turn from install.sh side with progress, ALWAYS validate
-# before showing QR. No TUI in install path.
+# Required precondition: user has already run
+#   npm install -g openclaw && openclaw onboard
+# and has at least one provider with an auth key configured.
 
-carapace_recommended_model_for() {
-  case "$1" in
-    xai)       echo "xai/grok-4-1-fast-non-reasoning" ;;
-    openai)    echo "openai/gpt-5-mini" ;;
-    anthropic) echo "anthropic/claude-haiku-4-5" ;;
-    google)    echo "google/gemini-2.5-flash" ;;
-    *) return 1 ;;
-  esac
-}
-
-carapace_key_prefix_for() {
-  case "$1" in
-    xai)       echo "xai-" ;;
-    openai)    echo "sk-" ;;
-    anthropic) echo "sk-ant-" ;;
-    google)    echo "AIza" ;;
-    *) return 1 ;;
-  esac
-}
-
-carapace_provider_label_for() {
-  case "$1" in
-    xai)       echo "xAI (Grok)" ;;
-    openai)    echo "OpenAI (GPT)" ;;
-    anthropic) echo "Anthropic (Claude)" ;;
-    google)    echo "Google (Gemini)" ;;
-    *) return 1 ;;
-  esac
-}
-
-# Returns 0 if any provider has a real key in auth-profiles.json
+# Returns 0 if any provider has a real key in auth-profiles.json.
+# We use this to verify the precondition (openclaw is configured)
+# before doing anything else.
 carapace_provider_already_configured() {
   local auth_file="$HOME/.openclaw/agents/main/agent/auth-profiles.json"
   [[ -f "$auth_file" ]] || return 1
@@ -649,95 +616,15 @@ print('0')" 2>/dev/null || echo "0")
   [[ "$has_key" == "1" ]]
 }
 
-# Sets globals: CARAPACE_PROVIDER, CARAPACE_KEY, CARAPACE_MODEL
-# Returns 0 if user picked + pasted a key, 1 if they skipped or aborted.
-carapace_prompt_provider_and_key() {
-  CARAPACE_PROVIDER=""
-  CARAPACE_KEY=""
-  CARAPACE_MODEL=""
-  echo ""
-  echo -e "  ${BOLD}Pick your AI provider:${RESET}"
-  echo -e "    ${BOLD}1${RESET}) xAI (Grok)         ${DIM}→ $(carapace_recommended_model_for xai)${RESET}"
-  echo -e "    ${BOLD}2${RESET}) OpenAI (GPT)       ${DIM}→ $(carapace_recommended_model_for openai)${RESET}"
-  echo -e "    ${BOLD}3${RESET}) Anthropic (Claude) ${DIM}→ $(carapace_recommended_model_for anthropic)${RESET}"
-  echo -e "    ${BOLD}4${RESET}) Google (Gemini)    ${DIM}→ $(carapace_recommended_model_for google)${RESET}"
-  echo -e "    ${BOLD}s${RESET}) Skip — set up later via ${BOLD}carapace-onboard${RESET}"
-  echo ""
-  local choice provider
-  read -rp "  Choice [1-4/s]: " choice < /dev/tty
-  case "$choice" in
-    1) provider="xai" ;;
-    2) provider="openai" ;;
-    3) provider="anthropic" ;;
-    4) provider="google" ;;
-    s|S|"") echo -e "  ${YELLOW}Skipped — run \`carapace-onboard\` later to configure${RESET}"; return 1 ;;
-    *) echo -e "  ${RED}Invalid choice — skipping${RESET}"; return 1 ;;
-  esac
-  echo ""
-  local label prefix
-  label="$(carapace_provider_label_for "$provider")"
-  prefix="$(carapace_key_prefix_for "$provider")"
-  echo -e "  ${BOLD}Paste your $label API key${RESET} ${DIM}(should start with ${BOLD}${prefix}${RESET}${DIM})${RESET}"
-  local key
-  read -rsp "  Key: " key < /dev/tty
-  echo ""
-  if [[ -z "$key" ]]; then
-    echo -e "  ${RED}Empty key — skipping${RESET}"
-    return 1
-  fi
-  # Catch the "pasted wrong provider's key" footgun (we hit this once already)
-  if [[ "${key:0:${#prefix}}" != "$prefix" ]]; then
-    echo -e "  ${YELLOW}⚠ Key doesn't start with ${BOLD}${prefix}${RESET}${YELLOW} — likely pasted wrong provider's key${RESET}"
-    local confirm
-    read -rp "  Continue anyway? [y/N]: " confirm < /dev/tty
-    [[ "$confirm" =~ ^[Yy]$ ]] || { echo "  Skipped — re-run install.sh to retry"; return 1; }
-  fi
-  CARAPACE_PROVIDER="$provider"
-  CARAPACE_KEY="$key"
-  CARAPACE_MODEL="$(carapace_recommended_model_for "$provider")"
-  return 0
-}
-
-# Args: provider, key, model
-# Writes auth-profiles.json + sets agents.defaults.model.
-# Idempotent — preserves other providers if they already exist.
-carapace_write_auth() {
-  local provider="$1" key="$2" model="$3"
-  local auth_dir="$HOME/.openclaw/agents/main/agent"
-  local auth_file="$auth_dir/auth-profiles.json"
-  mkdir -p "$auth_dir"
-  AUTH_PATH="$auth_file" PROVIDER="$provider" KEY="$key" /usr/bin/env python3 - <<'PYEOF'
-import json, os
-path = os.environ["AUTH_PATH"]
-provider = os.environ["PROVIDER"]
-key = os.environ["KEY"]
-data = {"version": 1, "profiles": {}}
-if os.path.exists(path):
-    try: data = json.load(open(path))
-    except Exception: pass
-data.setdefault("profiles", {})
-data["profiles"][f"{provider}:default"] = {
-    "type": "api_key",
-    "provider": provider,
-    "key": key,
-}
-json.dump(data, open(path, "w"), indent=2)
-PYEOF
-  chmod 600 "$auth_file" 2>/dev/null || true
-  # Register the profile in openclaw.json so the gateway resolves it
-  openclaw config set "auth.profiles.${provider}:default" "{\"provider\":\"${provider}\",\"mode\":\"api_key\"}" >/dev/null 2>&1 || true
-  # Set default model (our recommended-stable for this provider)
-  openclaw config set agents.defaults.model "$model" >/dev/null 2>&1
-}
-
-# Wipe stale session jsonl (corrupt fragments from prior failed key attempts
-# bloat chat.history loads to 30s+ and can break the TUI on next open).
+# Wipe stale session jsonl (corrupt fragments from prior failed
+# turns bloat chat.history loads to 30s+) and BOOTSTRAP.md (its
+# wrapper re-injects on every turn; we don't need it post-install).
 carapace_wipe_stale_sessions() {
   rm -f "$HOME/.openclaw/agents/main/sessions/"*.jsonl 2>/dev/null
   rm -f "$HOME/.openclaw/workspace/BOOTSTRAP.md" 2>/dev/null
 }
 
-# Restart gateway and wait for the agent runtime to be REALLY ready.
+# Restart gateway and wait for the agent runtime to truly be ready.
 # /health passes when HTTP binds (~6s) but the agent can't process
 # turns until the embedded acpx runtime registers (~70s). cron.list
 # only succeeds after the runtime is up, so it's our true-ready probe.
@@ -758,56 +645,6 @@ carapace_restart_gateway_and_wait_ready() {
     sleep 2
   done
   warn "Agent runtime didn't respond within ${max_wait}s — install will continue but first turn may be slow"
-  return 1
-}
-
-# Fire a warmup turn from install.sh side with a live progress indicator.
-# Validates the agent can complete a real round-trip before we dump the QR.
-# Returns 0 on success, 1 on failure. Always continues install.
-carapace_warmup_turn() {
-  local model token start http reply
-  model=$( (openclaw config get agents.defaults.model 2>/dev/null || true) | tr -d '"{ ' | head -1 )
-  if [[ -z "$model" || "$model" == "null" ]]; then
-    echo -e "  ${DIM}Skipping warmup — no model configured${RESET}"
-    return 1
-  fi
-  token=$(/usr/bin/env python3 -c "import json; print(json.load(open('$HOME/.openclaw/openclaw.json'))['gateway']['auth']['token'])" 2>/dev/null)
-  if [[ -z "$token" ]]; then
-    warn "No gateway token found — skipping warmup"
-    return 1
-  fi
-  echo -e "  ${DIM}Warming up your agent (cold-start = 60-180s, warm = 5-20s)...${RESET}"
-  local out_file="/tmp/carapace-warmup-$$.out"
-  local code_file="/tmp/carapace-warmup-$$.code"
-  rm -f "$out_file" "$code_file"
-  start=$(date +%s)
-  # Background curl so we can show progress
-  curl -sS --max-time 240 -o "$out_file" -w "%{http_code}" \
-    -X POST http://127.0.0.1:18789/v1/chat/completions \
-    -H "Authorization: Bearer $token" \
-    -H "Content-Type: application/json" \
-    -d '{"model":"openclaw","messages":[{"role":"user","content":"reply just ok"}]}' \
-    > "$code_file" 2>/dev/null &
-  local pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
-    printf "\r  ${DIM}  warming... %ds${RESET}" "$(( $(date +%s) - start ))"
-    sleep 2
-  done
-  wait "$pid" 2>/dev/null || true
-  printf "\r"
-  http=$(cat "$code_file" 2>/dev/null || echo "000")
-  reply=$(/usr/bin/env python3 -c "
-import json
-try: print(json.load(open('$out_file')).get('choices',[{}])[0].get('message',{}).get('content','')[:80].strip())
-except Exception: pass" 2>/dev/null)
-  local elapsed=$(( $(date +%s) - start ))
-  rm -f "$out_file" "$code_file"
-  if [[ "$http" == "200" && -n "$reply" ]]; then
-    ok "AI alive (${elapsed}s) — first reply: \"$reply\""
-    return 0
-  fi
-  warn "Warmup turn failed (HTTP=$http after ${elapsed}s) — install continues, but first iOS message may fail"
-  warn "  Diagnostic: \`openclaw gateway logs\` or \`carapace-onboard\` to reconfigure"
   return 1
 }
 
@@ -1636,10 +1473,21 @@ for nvmbin in "$HOME"/.nvm/versions/node/*/bin; do
 done
 
 # ══════════════════════════════════════════════════════════
-# Pre-flight: detect existing OpenClaw installation
+# Pre-flight: verify OpenClaw is installed and configured
 # ══════════════════════════════════════════════════════════
-SKIP_OPENCLAW_SETUP=false
+# Carapace is a SHELL on top of OpenClaw. OpenClaw owns your AI
+# provider, API key, model, and the gateway service. Carapace
+# layers on top: workspace prompts, Tailscale serve, iOS QR
+# pairing, status server, helper commands. If OpenClaw isn't
+# installed + configured first, bail with clear instructions.
 export PATH="$HOME/.npm-global/bin:$PATH"
+if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
+  source "$HOME/.nvm/nvm.sh" 2>/dev/null
+fi
+for nvmbin in "$HOME"/.nvm/versions/node/*/bin; do
+  [[ -d "$nvmbin" ]] && export PATH="$nvmbin:$PATH"
+done
+
 OC_EXISTING=""
 if command -v openclaw >/dev/null 2>&1; then
   OC_EXISTING="$(command -v openclaw)"
@@ -1647,72 +1495,59 @@ elif [[ -x "$HOME/.npm-global/bin/openclaw" ]]; then
   OC_EXISTING="$HOME/.npm-global/bin/openclaw"
 fi
 
-if [[ -n "$OC_EXISTING" ]] && curl -sf --max-time 3 http://127.0.0.1:18789/health >/dev/null 2>&1; then
-  OC_VER=$("$OC_EXISTING" --version 2>/dev/null || echo "unknown")
-  AUTH_EXISTS=false
-  [[ -s "$HOME/.openclaw/agents/main/agent/auth-profiles.json" ]] && AUTH_EXISTS=true
-
+if [[ -z "$OC_EXISTING" ]]; then
   echo ""
-  echo -e "  ${GREEN}${BOLD}✓ OpenClaw detected${RESET} ($OC_VER)"
-  echo -e "  ${DIM}Gateway running, health OK${RESET}"
-  $AUTH_EXISTS && echo -e "  ${DIM}AI keys configured${RESET}"
+  echo -e "${RED}${BOLD}━━━ OpenClaw not found ━━━${RESET}"
   echo ""
-  echo -e "  ${TEAL}${BOLD}Skip OpenClaw setup and just install CARAPACE support tools?${RESET}"
-  echo -e "  ${DIM}(Tailscale serve, status server, QR pairing, helper commands)${RESET}"
-  echo -e "  ${DIM}Your existing OpenClaw config will not be modified.${RESET}"
+  echo -e "  Carapace is a shell that runs on top of OpenClaw."
+  echo -e "  OpenClaw owns your AI provider, API key, and model picks."
+  echo -e "  Carapace adds: workspace prompts, Tailscale serve, iOS"
+  echo -e "  QR pairing, status server, helper commands."
   echo ""
-
-  if [ -t 0 ]; then
-    read -rp "  Skip to support tools? [Y/n]: " SKIP_CHOICE
-  elif [ -e /dev/tty ]; then
-    read -rp "  Skip to support tools? [Y/n]: " SKIP_CHOICE < /dev/tty || SKIP_CHOICE="y"
-  else
-    SKIP_CHOICE="y"  # No TTY anywhere (ssh -T, ansible, CI) — default yes, skip silently
-  fi
-
-  case "$SKIP_CHOICE" in
-    [nN]*)
-      # Destructive path — show the explicit list of state that will be
-      # replaced and require a clear "yes" before proceeding. Default is
-      # NO so a stray Enter won't nuke someone's working setup.
-      echo ""
-      echo -e "  ${YELLOW}${BOLD}⚠  WARNING — this will OVERWRITE your existing OpenClaw setup${RESET}"
-      echo -e "  ${DIM}The full install will replace:${RESET}"
-      echo -e "  ${DIM}  • ~/.openclaw/openclaw.json          (gateway config, default model)${RESET}"
-      echo -e "  ${DIM}  • ~/.openclaw/agents/main/...        (auth profiles may be rewritten)${RESET}"
-      echo -e "  ${DIM}  • systemd units for gateway + status server${RESET}"
-      echo -e "  ${DIM}  • tailscale serve routes${RESET}"
-      echo -e "  ${DIM}  • gateway auth token (iOS devices will need to re-pair via QR)${RESET}"
-      echo ""
-      echo -e "  ${DIM}If you just want Carapace's support tools (QR, status server, Tailscale${RESET}"
-      echo -e "  ${DIM}serve) layered on top of your existing OpenClaw, answer ${BOLD}N${RESET}${DIM} below.${RESET}"
-      echo ""
-      if [ -t 0 ]; then
-        read -rp "  Type 'yes' to overwrite, anything else to go back: " CONFIRM_OVERWRITE
-      elif [ -e /dev/tty ]; then
-        read -rp "  Type 'yes' to overwrite, anything else to go back: " CONFIRM_OVERWRITE < /dev/tty || CONFIRM_OVERWRITE=""
-      else
-        CONFIRM_OVERWRITE=""  # No TTY — treat as "don't overwrite" (safer default)
-      fi
-      case "$CONFIRM_OVERWRITE" in
-        [yY][eE][sS])
-          echo -e "  ${DIM}Running full install — your existing OpenClaw will be replaced.${RESET}"
-          ;;
-        *)
-          SKIP_OPENCLAW_SETUP=true
-          echo -e "  ${GREEN}✓ Keeping your OpenClaw intact — installing support tools only${RESET}"
-          ;;
-      esac
-      ;;
-    *)     SKIP_OPENCLAW_SETUP=true; echo -e "  ${GREEN}✓ Skipping OpenClaw setup — installing support tools only${RESET}" ;;
-  esac
+  echo -e "  ${BOLD}Install OpenClaw first, then re-run Carapace:${RESET}"
   echo ""
+  echo -e "      ${TEAL}npm install -g openclaw${RESET}"
+  echo -e "      ${TEAL}openclaw onboard${RESET}    ${DIM}(provider + key + model)${RESET}"
+  echo ""
+  echo -e "  Then re-run this installer."
+  echo ""
+  exit 1
 fi
 
-if ! $SKIP_OPENCLAW_SETUP; then
+OC_VER="$("$OC_EXISTING" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo 'installed')"
+export PATH="$(dirname "$OC_EXISTING"):$PATH"
+
+if ! carapace_provider_already_configured; then
+  echo ""
+  echo -e "${RED}${BOLD}━━━ OpenClaw not configured ━━━${RESET}"
+  echo ""
+  echo -e "  OpenClaw ${OC_VER} is installed but has no AI provider"
+  echo -e "  configured yet. Run OpenClaw's onboard wizard to pick a"
+  echo -e "  provider, paste your API key, and choose a model:"
+  echo ""
+  echo -e "      ${TEAL}openclaw onboard${RESET}"
+  echo ""
+  echo -e "  Then re-run this installer."
+  echo ""
+  exit 1
+fi
+
+# Make sure the gateway service is up (idempotent — no-op if running).
+# Carapace will restart it later anyway after writing config changes.
+"$OC_EXISTING" gateway start >/dev/null 2>&1 || true
+
+ok "OpenClaw ${OC_VER} detected + configured"
+echo ""
+
+if false; then
 # ══════════════════════════════════════════════════════════
-# Step 1: Node.js
+# (Legacy Step 1 + Step 2 — Node.js / OpenClaw install)
 # ══════════════════════════════════════════════════════════
+# Removed. Carapace now requires the user to install OpenClaw
+# themselves before running this script (see precondition check
+# above). The dead branch is kept inside `if false; then` purely
+# so all the historical logic + comments stay in source for future
+# reference if we ever decide to bundle openclaw install again.
 step "Node.js"
 
 # Install SYSTEM node (NOT nvm) and use it exclusively for openclaw.
@@ -1820,18 +1655,14 @@ else
   fi
 fi
 
-fi  # end SKIP_OPENCLAW_SETUP block (Steps 1-2)
+fi  # end of legacy `if false; then` block (Steps 1-2 retired)
 
-# ── Steps 3+ always run (support tools) ──
-
-# ALWAYS persist openclaw on PATH — runs whether we just installed,
-# upgraded, or kept the user's existing setup (SKIP_OPENCLAW_SETUP=true).
-# Earlier the persist call was nested inside the install branch, so
-# users who said "keep my existing OpenClaw" never got /etc/profile.d
-# written and got `openclaw: command not found` in fresh shells.
-OC_PATH_FINAL="${OC_PATH:-${OC_EXISTING:-}}"
-[[ -z "$OC_PATH_FINAL" ]] && OC_PATH_FINAL="$(find_openclaw 2>/dev/null || echo "")"
-persist_openclaw_path "$OC_PATH_FINAL"
+# Persist openclaw on PATH for fresh shells (writes /etc/profile.d/openclaw.sh).
+# The user already has openclaw installed (we verified above) but their PATH
+# may not include the npm-global bin dir in non-interactive shells, which
+# breaks the post-install carapace-qr command and any cron jobs that touch
+# openclaw.
+persist_openclaw_path "$OC_EXISTING"
 
 # ══════════════════════════════════════════════════════════
 # Step 3: Tailscale
@@ -2894,79 +2725,35 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════
-# Step 9: Configure Your AI (Carapace minimal flow)
+# Step 9: Carapace shell setup (workspace + caps + restart)
 # ══════════════════════════════════════════════════════════
-# Used to defer to `openclaw onboard` here. Replaced with our own
-# minimal picker because onboard's TUI introduced three classes of
-# bugs we kept hitting: model-picker showed unstable beta variants
-# (xai/grok-4.20-beta hits SAFETY_CHECK_TYPE_BIO and stalls), the
-# in-band hatch turn meant install couldn't catch failures before
-# showing the QR, and auth changes weren't picked up without a full
-# gateway restart that onboard didn't always trigger.
+# Carapace is a SHELL on top of OpenClaw. The user's provider, key,
+# model, and gateway are already configured (verified in pre-flight).
+# This step layers Carapace on top:
 #
-# Our flow:
-#   1. Bump bootstrap caps + inject workspace files
-#   2. Provider/key picker (skip if already configured + non-TTY)
-#   3. Wipe stale session jsonl + BOOTSTRAP.md (clean slate)
-#   4. Restart gateway → wait for true-ready (cron.list succeeds)
-#   5. Warmup turn with progress bar — validates auth+model before QR
-#   6. Hand off to Step 10 Connect (QR)
-step "Configure Your AI"
+#   1. Bump caps (timeoutSeconds=180, bootstrapMaxChars=50000,
+#      trustedProxies for Tailscale CGNAT) — required for the iOS
+#      app to reach the gateway over Tailscale and for cold-start
+#      tool calls to complete.
+#   2. Inject workspace files (AGENTS sentinel, BOOTSTRAP, etc.)
+#   3. Wipe stale session jsonl + BOOTSTRAP.md (clean slate so the
+#      Bootstrap-pending wrapper doesn't loop).
+#   4. Restart gateway, wait for the runtime to be truly ready.
+#
+# No provider/key prompts, no warmup turn. OpenClaw owns all of that.
+# The first real turn happens when the user's phone hits the gateway
+# after scanning the QR.
+step "Carapace shell setup"
 
-# 1. Caps + workspace injection
 ensure_carapace_bootstrap_caps || true
-echo -e "  ${DIM}Injecting CARAPACE workspace files + config...${RESET}"
+echo -e "  ${DIM}Injecting CARAPACE workspace files...${RESET}"
 inject_carapace_first_light
 inject_carapace_bootstrap
 sweep_carapace_for_all_agents
 ok "CARAPACE injections complete"
 
-# 2. Provider/key picker — only if TTY available + not already configured
-NEED_RESTART=false
-if ( : < /dev/tty ) 2>/dev/null; then
-  if carapace_provider_already_configured; then
-    echo -e "  ${DIM}A provider is already configured.${RESET}"
-    if read -rp "  Reconfigure? [y/N]: " RECONFIG < /dev/tty && [[ "$RECONFIG" =~ ^[Yy]$ ]]; then
-      if carapace_prompt_provider_and_key; then
-        carapace_write_auth "$CARAPACE_PROVIDER" "$CARAPACE_KEY" "$CARAPACE_MODEL"
-        ok "Configured ${CARAPACE_PROVIDER} → ${CARAPACE_MODEL}"
-        NEED_RESTART=true
-      fi
-    else
-      ok "Keeping existing provider config"
-    fi
-  else
-    if carapace_prompt_provider_and_key; then
-      carapace_write_auth "$CARAPACE_PROVIDER" "$CARAPACE_KEY" "$CARAPACE_MODEL"
-      ok "Configured ${CARAPACE_PROVIDER} → ${CARAPACE_MODEL}"
-      NEED_RESTART=true
-    fi
-  fi
-else
-  if carapace_provider_already_configured; then
-    ok "Provider already configured — skipping picker (no TTY)"
-  else
-    echo -e "  ${YELLOW}No TTY available + no provider configured.${RESET}"
-    echo -e "  Run this on the machine to set up your AI provider:"
-    echo -e "      ${BOLD}carapace-onboard${RESET}"
-  fi
-fi
-
-# 3. Wipe stale session jsonl (corrupt fragments from prior failed
-#    key attempts bloat chat.history loads to 30s+ and break the TUI).
-#    Always — cheap, idempotent.
 carapace_wipe_stale_sessions
-
-# 4. Restart gateway to pick up auth + model + caps changes,
-#    then wait for the agent runtime to truly be ready.
-if $NEED_RESTART; then
-  echo -e "  ${DIM}Restarting gateway to apply config...${RESET}"
-fi
 carapace_restart_gateway_and_wait_ready 120 || true
-
-# 5. Warmup turn — validates auth+model end-to-end before QR.
-#    Live progress bar so the user sees something is happening.
-carapace_warmup_turn || true
 
 # ══════════════════════════════════════════════════════════
 # Step 10: Connect
