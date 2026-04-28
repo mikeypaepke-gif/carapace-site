@@ -2659,6 +2659,16 @@ fi
 # in sync with upstream model availability automatically. We just
 # hand off.
 step "Configure Your AI"
+# Pre-bump bootstrap caps + agent timeout BEFORE openclaw onboard
+# launches the TUI. The TUI fires the first-ever turn ("Wake up,
+# my friend!") inside onboard's flow, and the agent uses tools to
+# read+delete BOOTSTRAP.md as part of the bootstrap ritual. Default
+# agent timeout is 30s — too short for a cold-start xAI call to
+# complete a tool round-trip, so the tool aborts mid-call and
+# BOOTSTRAP.md never gets deleted. The wrapper then re-injects on
+# every subsequent turn and the agent loops on the same greeting.
+# Setting timeoutSeconds=180 here closes that race.
+ensure_carapace_bootstrap_caps || true
 # Test whether /dev/tty is actually openable. `curl | bash` gives
 # bash a non-TTY stdin (the curl pipe), so `[ -t 0 ]` fails — but
 # /dev/tty IS openable because there's still a controlling terminal.
