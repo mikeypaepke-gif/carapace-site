@@ -3239,14 +3239,12 @@ if [ "${CODEX_OAUTH_NEEDED:-false}" = "true" ]; then
   echo ""
 fi
 
-# Offer TUI launch as optional
-if [ -t 0 ] || [ -e /dev/tty ]; then
+# Offer TUI launch as optional. Skip entirely if neither stdin nor
+# /dev/tty is openable (curl|bash from a script), since the prompt
+# would error and the read would block.
+if [ -t 0 ] && [ -r /dev/tty ]; then
   echo -e "  ${TEAL}Want to also launch the terminal chat? [y/N]${RESET}"
-  if [ -t 0 ]; then
-    read -rp "  " LAUNCH_TUI
-  else
-    read -rp "  " LAUNCH_TUI < /dev/tty || LAUNCH_TUI="n"
-  fi
+  read -rp "  " LAUNCH_TUI
   case "$LAUNCH_TUI" in
     [yY]*)
       echo ""
