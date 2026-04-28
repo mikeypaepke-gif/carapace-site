@@ -2853,9 +2853,13 @@ if command -v qrencode >/dev/null 2>&1; then
   echo "  Scan with CARAPACE iOS app:"
   echo ""
   qrencode -t ANSIUTF8 -m 2 "$LINK"
-else
-  echo "  Pair URL: $LINK"
+  echo ""
 fi
+# ALWAYS print the pair URL too — even when QR rendered, the URL is
+# useful for copy-paste (terminal scrolled QR off, color codes garbled
+# the QR, user is on a TTY without UTF8 etc).
+echo "  Pair URL (copy into iOS Carapace app if QR doesn't scan):"
+echo "    $LINK"
 echo ""
 QRCMD
 $SUDO chmod +x /usr/local/bin/carapace-qr
@@ -2949,6 +2953,24 @@ else
   echo -e "      ${BOLD}openclaw onboard${RESET}"
   echo ""
 fi
+
+# ══════════════════════════════════════════════════════════
+# Carapace post-onboard injection
+# ══════════════════════════════════════════════════════════
+# Run THIS BEFORE the pre-warm/liveness test, NOT at the end of the
+# script (where it used to live, after Step 10 Connect — the user had
+# already seen the QR + paired by then). Order matters:
+#   1. openclaw onboard   ← writes/overwrites stock AGENTS.md
+#   2. carapace inject    ← THIS BLOCK: layers our sentinel + BOOTSTRAP +
+#                           ensure_carapace_bootstrap_caps (trustedProxies,
+#                           timeoutSeconds, bootstrapMaxChars)
+#   3. liveness test      ← agent picks up our injections on first turn
+#   4. Step Connect       ← user sees QR with everything in place
+echo -e "  ${DIM}Injecting CARAPACE workspace files + config...${RESET}"
+inject_carapace_first_light  # sentinel into AGENTS.md
+inject_carapace_bootstrap    # BOOTSTRAP.md birth ritual
+sweep_carapace_for_all_agents # also sets bootstrap caps + trustedProxies + timeoutSeconds via ensure_carapace_bootstrap_caps
+ok "CARAPACE injections complete"
 
 # ══════════════════════════════════════════════════════════
 # Pre-warm the agent runtime
@@ -3092,9 +3114,11 @@ fi
 # block we install into MEMORY.md below tells the gateway agent how
 # to interpret the payload.
 
-sweep_carapace_for_all_agents
-inject_carapace_bootstrap
-inject_carapace_first_light
+# (sweep_carapace_for_all_agents + inject_carapace_bootstrap +
+#  inject_carapace_first_light moved to AFTER the openclaw onboard
+#  step, BEFORE the liveness test — used to live here, post-Step 10
+#  Connect, which meant the user already saw the QR and possibly
+#  paired before our config knobs and AGENTS.md sentinel got applied.)
 
 # ── Final cleanup: silence the nvm-vs-npm-prefix warning forever ──
 # Even if our env-var-only prefix worked for THIS install, an old
@@ -3174,6 +3198,20 @@ echo -e "    ${BOLD}carapace-qr${RESET}     — Show this QR code again"
 echo -e "    ${BOLD}carapace-onboard${RESET} — Re-run AI setup"
 echo ""
 echo -e "  ${DIM}Full install log: ${LOGFILE}${RESET}"
+echo ""
+
+# ── FINAL QR re-display ──────────────────────────────────────────────
+# Shown again at the very END of install so the user doesn't miss it.
+# The first display (above) gets buried under the "phone setup" + "other
+# options" + log-path sections, and on smaller terminals the QR has
+# scrolled off-screen by the time the install prompt reappears. This
+# gives users a guaranteed-visible final pair widget right where their
+# eyes land when the terminal stops printing.
+echo -e "  ${TEAL}${BOLD}══════════════════════════════════════════${RESET}"
+echo -e "  ${TEAL}${BOLD}  📱 Pair your iPhone — scan this QR:${RESET}"
+echo -e "  ${TEAL}${BOLD}══════════════════════════════════════════${RESET}"
+echo ""
+carapace-qr 2>/dev/null || true
 echo ""
 
 # ── Codex OAuth fallback ──
