@@ -616,11 +616,26 @@ print('0')" 2>/dev/null || echo "0")
   [[ "$has_key" == "1" ]]
 }
 
-# Wipe stale session jsonl (corrupt fragments from prior failed
-# turns bloat chat.history loads to 30s+) and BOOTSTRAP.md (its
-# wrapper re-injects on every turn; we don't need it post-install).
+# Clear bootstrap artifacts ONLY — never the user's session jsonl.
+# We used to also `rm sessions/*.jsonl` here to clean up corrupt
+# fragments from failed-key turns (those bloat chat.history loads
+# to 30s+ and break the TUI). But that's a destructive op for the
+# happy path: any real conversation the user had with openclaw
+# before installing carapace gets wiped, including iOS history tab
+# + TUI scrollback. Carapace is a SHELL — it should never destroy
+# user state on a layer-on install.
+#
+# BOOTSTRAP.md cleanup stays — its [Bootstrap pending] wrapper
+# fires on EVERY agent turn while it exists, and openclaw's stock
+# version doesn't reliably self-delete with the default tool
+# profile. Wiping the file post-install kills the wrapper loop
+# without touching anything else. The agent's persona, identity,
+# memory, and conversation history all stay intact.
+#
+# If a user has corrupt session jsonl from a failed-key incident
+# and chat.history is timing out, they can manually clear with:
+#   rm ~/.openclaw/agents/main/sessions/*.jsonl
 carapace_wipe_stale_sessions() {
-  rm -f "$HOME/.openclaw/agents/main/sessions/"*.jsonl 2>/dev/null
   rm -f "$HOME/.openclaw/workspace/BOOTSTRAP.md" 2>/dev/null
 }
 
