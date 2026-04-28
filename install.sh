@@ -1575,7 +1575,20 @@ done
 # layers on top: workspace prompts, Tailscale serve, iOS QR
 # pairing, status server, helper commands. If OpenClaw isn't
 # installed + configured first, bail with clear instructions.
-export PATH="$HOME/.npm-global/bin:$PATH"
+#
+# PATH bootstrapping — pull in everything a brand-new shell would
+# see, PLUS the per-user/system-wide locations openclaw could have
+# been installed to. Without this, "openclaw install + carapace
+# install in the same shell" fails because `command -v openclaw`
+# inherits the original (pre-openclaw) PATH and doesn't find the
+# binary, even though it's on disk. openclaw's own installer warns
+# about this with "PATH missing npm global bin dir" — we re-source
+# the rc files and add the canonical install dirs explicitly so
+# the warning never has the chance to bite.
+[[ -s /etc/profile.d/openclaw.sh ]] && source /etc/profile.d/openclaw.sh 2>/dev/null || true
+[[ -s "$HOME/.bashrc" ]] && source "$HOME/.bashrc" 2>/dev/null || true
+[[ -s "$HOME/.profile" ]] && source "$HOME/.profile" 2>/dev/null || true
+export PATH="$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:$PATH"
 if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
   source "$HOME/.nvm/nvm.sh" 2>/dev/null
 fi
@@ -1584,10 +1597,23 @@ for nvmbin in "$HOME"/.nvm/versions/node/*/bin; do
 done
 
 OC_EXISTING=""
+# command -v honors current PATH (which we just bootstrapped above)
 if command -v openclaw >/dev/null 2>&1; then
   OC_EXISTING="$(command -v openclaw)"
-elif [[ -x "$HOME/.npm-global/bin/openclaw" ]]; then
-  OC_EXISTING="$HOME/.npm-global/bin/openclaw"
+else
+  # PATH may still be incomplete (containers, weird shells, etc).
+  # Walk the canonical install layouts directly as a last resort.
+  for c in \
+    "$HOME/.npm-global/bin/openclaw" \
+    "/usr/local/bin/openclaw" \
+    "/usr/bin/openclaw"; do
+    [[ -x "$c" ]] && { OC_EXISTING="$c"; break; }
+  done
+  if [[ -z "$OC_EXISTING" ]]; then
+    for c in "$HOME"/.nvm/versions/node/*/bin/openclaw; do
+      [[ -x "$c" ]] && { OC_EXISTING="$c"; break; }
+    done
+  fi
 fi
 
 if [[ -z "$OC_EXISTING" ]]; then
@@ -1601,8 +1627,8 @@ if [[ -z "$OC_EXISTING" ]]; then
   echo ""
   echo -e "  ${BOLD}Install OpenClaw first, then re-run Carapace:${RESET}"
   echo ""
-  echo -e "      ${TEAL}npm install -g openclaw${RESET}"
-  echo -e "      ${TEAL}openclaw onboard${RESET}    ${DIM}(provider + key + model)${RESET}"
+  echo -e "      ${TEAL}curl -fsSL https://openclaw.ai/install.sh | bash${RESET}"
+  echo -e "      ${DIM}(installs node + openclaw, then runs onboard)${RESET}"
   echo ""
   echo -e "  Then re-run this installer."
   echo ""
