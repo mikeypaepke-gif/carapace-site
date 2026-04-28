@@ -2762,147 +2762,108 @@ carapace_wipe_stale_sessions
 carapace_restart_gateway_and_wait_ready 120 || true
 
 # ══════════════════════════════════════════════════════════
-# Step 10: Connect
+# Step 10: Connect (verify everything → display QR)
 # ══════════════════════════════════════════════════════════
+# Goal: don't show the QR until we've actually verified the user
+# can pair. Each check prints check/warn but never aborts — even
+# if one piece is broken, we still want to show the QR so the
+# user can try (and we surface what to fix).
 step "Connect"
+echo -e "  ${DIM}Verifying install before showing QR...${RESET}"
 
-# Wait for gateway + model to be fully ready before showing anything
-echo -e "  ${DIM}Waiting for gateway to be fully ready...${RESET}"
-for _tw in $(seq 1 20); do
-  curl -s --max-time 2 http://127.0.0.1:18789/health >/dev/null 2>&1 && break
-  sleep 1
-done
+VERIFY_GW=false
+VERIFY_SERVE=false
+VERIFY_WORKSPACE=false
+VERIFY_TOKEN=false
 
-# Verify model can actually respond (not just health OK)
+# 1. Gateway: still responsive after the restart in Step 9?
+if timeout 3 openclaw cron list >/dev/null 2>&1; then
+  VERIFY_GW=true
+  ok "Gateway responsive"
+else
+  warn "Gateway not responsive (check: systemctl --user status openclaw-gateway)"
+fi
+
+# 2. Tailscale serve routes registered (this is what gives the iPhone
+#    a usable HTTPS hostname instead of a raw VPS IP)
+TS_HOSTNAME=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null || echo "")
+if [[ -n "$TS_HOSTNAME" ]] && tailscale serve status 2>/dev/null | grep -q "/chat"; then
+  VERIFY_SERVE=true
+  ok "Tailscale serve active (https://$TS_HOSTNAME)"
+else
+  warn "Tailscale serve routes incomplete — iOS pairing may fail (run: tailscale up + re-run installer)"
+fi
+
+# 3. Workspace prompts injected (AGENTS.md, etc.)
+WS_COUNT=$(ls "$HOME/.openclaw/workspace/"*.md 2>/dev/null | wc -l)
+if (( WS_COUNT >= 5 )); then
+  VERIFY_WORKSPACE=true
+  ok "Workspace prompts present ($WS_COUNT files)"
+else
+  warn "Workspace prompts missing (only $WS_COUNT .md files in ~/.openclaw/workspace)"
+fi
+
+# 4. Gateway token (without this the pair URL is useless)
 TOKEN=$(python3 -c 'import json; print(json.load(open("'"$HOME"'/.openclaw/openclaw.json"))["gateway"]["auth"]["token"])' 2>/dev/null || echo "")
-# Final token-recovery attempt. If we still have no token here, the pair
-# URL will end up with an empty &token= field and iOS can't connect. Try
-# one more gateway install now that everything else is up and retry the
-# read. This is idempotent — if a token already exists in another path
-# we haven't noticed, the install is a no-op.
 if [ -z "$TOKEN" ]; then
+  # Last-ditch: ask openclaw to (re)install the gateway, which writes a token
   timeout 30 openclaw gateway install >> "$LOGFILE" 2>&1 || true
   TOKEN=$(python3 -c 'import json; print(json.load(open("'"$HOME"'/.openclaw/openclaw.json"))["gateway"]["auth"]["token"])' 2>/dev/null || echo "")
 fi
-# Deterministic AI probe was removed — it was a 20-attempt liveness
-# loop that asked the model to reply with the literal word "confirmed",
-# then cleaned up the session artifacts it created. Removed because
-# (a) it can take 90s+ when xAI is slow without telling us anything we
-# couldn't get from `openclaw gateway logs` and (b) if the user's
-# auth/model config is broken, that's a user problem to fix — the
-# install shouldn't fail loudly trying to validate it. The earlier
-# stream-based smoke test in this file is sufficient to confirm the
-# gateway is reachable.
+if [[ -n "$TOKEN" ]]; then
+  VERIFY_TOKEN=true
+  ok "Gateway token present"
+else
+  warn "Gateway token MISSING — pair URL will not work. Run: openclaw gateway install && carapace-qr"
+fi
 
-# ── Vision mode configuration ───────────────────────────
-# Vision mode used to need a separate Gemini API key for Gemini Live
-# (real-time camera streaming). It doesn't anymore — the iPhone now
-# runs Apple's on-device perception layer (Vision framework + LiDAR
-# + ScenePerception) and routes every vision turn through OpenClaw to
-# whatever chat provider the user picked. Zero extra config required;
-# whatever model the gateway is wired to will see the camera frames
-# + the iOS-side context hint and respond. The "CARAPACE VISION RULES"
-# block we install into MEMORY.md below tells the gateway agent how
-# to interpret the payload.
-
-# (sweep_carapace_for_all_agents + inject_carapace_bootstrap +
-#  inject_carapace_first_light moved to AFTER the openclaw onboard
-#  step, BEFORE the liveness test — used to live here, post-Step 10
-#  Connect, which meant the user already saw the QR and possibly
-#  paired before our config knobs and AGENTS.md sentinel got applied.)
-
-# ── Final cleanup: silence the nvm-vs-npm-prefix warning forever ──
-# Even if our env-var-only prefix worked for THIS install, an old
-# install may have left `prefix=` in ~/.npmrc. nvm spams this warning
-# 3× on every shell login + every `npm` invocation, which makes the
-# carapace SSH session look noisy and broken. Strip the offending
-# lines unconditionally — npm-global packages installed at our env-
-# var-prefix are still discoverable via PATH.
+# Final cleanup: silence nvm-vs-npm-prefix warning forever (an old install
+# may have left `prefix=` in ~/.npmrc; nvm spams this warning on every shell)
 if [[ -f "$HOME/.npmrc" ]]; then
   sed -i '/^prefix=/d;/^globalconfig=/d' "$HOME/.npmrc" 2>/dev/null || true
-  # If the file is now empty, remove it entirely (nvm only complains
-  # when the file exists with one of those keys).
   [[ -s "$HOME/.npmrc" ]] || rm -f "$HOME/.npmrc"
 fi
 
-echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
-echo -e "  ${GREEN}${BOLD}  ✓ CARAPACE is ready!${RESET}"
-echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
+# ── Final result ─────────────────────────────────────────
+echo ""
+if $VERIFY_GW && $VERIFY_SERVE && $VERIFY_WORKSPACE && $VERIFY_TOKEN; then
+  echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════╗${RESET}"
+  echo -e "${GREEN}${BOLD}║      CARAPACE READY — pair your phone below     ║${RESET}"
+  echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════╝${RESET}"
+else
+  echo -e "${YELLOW}${BOLD}╔══════════════════════════════════════════════════╗${RESET}"
+  echo -e "${YELLOW}${BOLD}║   CARAPACE installed with warnings — see above  ║${RESET}"
+  echo -e "${YELLOW}${BOLD}║   QR shown below; rerun installer to retry      ║${RESET}"
+  echo -e "${YELLOW}${BOLD}╚══════════════════════════════════════════════════╝${RESET}"
+fi
 echo ""
 
-# ── Cold-start patience banner ──────────────────────────────────────
-# OpenClaw lazy-loads the agent runtime + per-session memory hydration
-# on the first chat after a gateway start/restart. Even with our
-# pre-warm above, the FIRST message after a service restart (gateway
-# crash, host reboot, OS upgrade restart) hits this 30-90s lazy-load
-# again. Set the user's expectation up front so they don't think the
-# app is broken when the first message takes a minute.
-echo -e "  ${YELLOW}${BOLD}⏳ FIRST MESSAGE NOTICE${RESET}"
-echo -e "  ${DIM}OpenClaw warms up the agent runtime on the first chat${RESET}"
-echo -e "  ${DIM}after every gateway restart. The FIRST message you send${RESET}"
-echo -e "  ${DIM}may take 30-90 seconds to respond. Subsequent messages${RESET}"
-echo -e "  ${DIM}are sub-second. If the gateway restarts (host reboot,${RESET}"
-echo -e "  ${DIM}config change, nightly cron at 3am UTC), expect that${RESET}"
-echo -e "  ${DIM}first-message lag again. Be patient — it's not broken.${RESET}"
-echo ""
-
-# Always show QR code first — this is the primary way to connect
-echo -e "  ${TEAL}${BOLD}Scan this QR code with the CARAPACE iOS app to connect:${RESET}"
-echo ""
+# ── The QR (the actual reason the user ran this) ─────────
 carapace-qr 2>/dev/null || {
-  # Fallback: build QR inline if carapace-qr not available
-  TS=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null)
-  [[ -n "$TS" ]] && GW="https://$TS" || GW="http://127.0.0.1:18789"
+  warn "carapace-qr failed — fallback inline QR:"
+  [[ -n "$TS_HOSTNAME" ]] && GW="https://$TS_HOSTNAME" || GW="http://127.0.0.1:18789"
   ENC_GW=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$GW")
   ENC_TOKEN=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$TOKEN")
-  # Pair URL is gateway + token only — Vision mode runs entirely on
-  # the iPhone using Apple's on-device perception layer.
   LINK="carapace://config?gatewayBaseURL=${ENC_GW}&token=${ENC_TOKEN}"
   echo "  Gateway: $GW"
   echo "  Token:   ${TOKEN:0:16}..."
-  echo ""
-  if have_cmd qrencode; then
-    qrencode -t ANSIUTF8 -m 2 "$LINK"
-  else
-    echo "  Pair URL: $LINK"
-  fi
+  if have_cmd qrencode; then qrencode -t ANSIUTF8 -m 2 "$LINK"; fi
+  echo "  Pair URL: $LINK"
 }
-
-echo ""
-echo -e "  ${DIM}Download CARAPACE for iPhone: https://apps.apple.com/us/app/carapace/id6760282881${RESET}"
-echo ""
-echo -e "  ${TEAL}${BOLD}One-time phone setup:${RESET}"
-echo -e "  ${DIM}  1. Install Tailscale on your iPhone (App Store) and sign in with the${RESET}"
-echo -e "  ${DIM}     same account you used here. Carapace is tailnet-only by design —${RESET}"
-echo -e "  ${DIM}     your phone needs to be on the tailnet to reach the gateway.${RESET}"
-echo -e "  ${DIM}  2. In the Tailscale iOS app, enable BOTH:${RESET}"
-echo -e "  ${DIM}       • Settings → Always On VPN${RESET}"
-echo -e "  ${DIM}       • Settings → Use Tailscale DNS Settings (allow MagicDNS)${RESET}"
-echo -e "  ${DIM}     Wifi often resolves .ts.net hostnames without these, but cellular${RESET}"
-echo -e "  ${DIM}     networks need them on or pairing silently fails as 'unreachable'.${RESET}"
-echo -e "  ${DIM}  3. Open Carapace on iPhone → scan the QR above to pair.${RESET}"
 echo ""
 
-echo -e "  ${BOLD}Other options:${RESET}"
-echo -e "    ${BOLD}openclaw tui${RESET}    — Terminal chat interface"
-echo -e "    ${BOLD}carapace-qr${RESET}     — Show this QR code again"
-echo -e "    ${BOLD}carapace-onboard${RESET} — Re-run AI setup"
+# ── Pairing instructions (one paragraph, not a wall of text) ─────
+echo -e "  ${BOLD}On your iPhone:${RESET}"
+echo -e "  ${DIM}  1. Install Carapace (https://apps.apple.com/us/app/carapace/id6760282881)${RESET}"
+echo -e "  ${DIM}  2. Install Tailscale (App Store) → sign in same account → enable Always-On VPN${RESET}"
+echo -e "  ${DIM}     + Use Tailscale DNS (cellular pairing fails silently without these)${RESET}"
+echo -e "  ${DIM}  3. Open Carapace → tap Connect Server → scan QR above${RESET}"
 echo ""
-echo -e "  ${DIM}Full install log: ${LOGFILE}${RESET}"
+echo -e "  ${BOLD}First message:${RESET} ${DIM}30-90s cold-start (openclaw warms the agent runtime).${RESET}"
+echo -e "  ${DIM}                Subsequent messages are sub-second.${RESET}"
 echo ""
-
-# ── FINAL QR re-display ──────────────────────────────────────────────
-# Shown again at the very END of install so the user doesn't miss it.
-# The first display (above) gets buried under the "phone setup" + "other
-# options" + log-path sections, and on smaller terminals the QR has
-# scrolled off-screen by the time the install prompt reappears. This
-# gives users a guaranteed-visible final pair widget right where their
-# eyes land when the terminal stops printing.
-echo -e "  ${TEAL}${BOLD}══════════════════════════════════════════${RESET}"
-echo -e "  ${TEAL}${BOLD}  📱 Pair your iPhone — scan this QR:${RESET}"
-echo -e "  ${TEAL}${BOLD}══════════════════════════════════════════${RESET}"
-echo ""
-carapace-qr 2>/dev/null || true
+echo -e "  ${BOLD}Helpers:${RESET} ${BOLD}carapace-qr${RESET} (re-show QR) · ${BOLD}openclaw tui${RESET} (terminal chat) · ${BOLD}carapace-onboard${RESET} (re-run AI setup)"
+echo -e "  ${DIM}Install log: ${LOGFILE}${RESET}"
 echo ""
 
 # ── Codex OAuth fallback ──
