@@ -2659,13 +2659,16 @@ fi
 # in sync with upstream model availability automatically. We just
 # hand off.
 step "Configure Your AI"
-# Use `[ -t 0 ]` (stdin is a TTY) instead of `[ -e /dev/tty ]` (file
-# entry exists). Non-interactive SSH (`ssh ... 'cmd'` or `curl | bash`
-# wrapped in a script) has /dev/tty as a file entry but opening it
-# fails with "No such device or address". `-t 0` tests for a real
-# interactive terminal — the only context where openclaw onboard
-# (TUI-based) can actually run.
-if [ -t 0 ] && [ -e /dev/tty ]; then
+# Test whether /dev/tty is actually openable. `curl | bash` gives
+# bash a non-TTY stdin (the curl pipe), so `[ -t 0 ]` fails — but
+# /dev/tty IS openable because there's still a controlling terminal.
+# The previous `-t 0 && -e /dev/tty` check skipped onboard entirely
+# in the curl|bash case, which is the documented happy path.
+# `( : < /dev/tty ) 2>/dev/null` opens /dev/tty in a subshell with
+# the no-op `:` builtin and discards the error if it fails — exit
+# status reflects whether the open succeeded, which is the only
+# precondition openclaw onboard's TUI actually needs.
+if ( : < /dev/tty ) 2>/dev/null; then
   echo -e "  ${DIM}Launching openclaw onboard — pick your provider, paste your${RESET}"
   echo -e "  ${DIM}key, choose your model. Press Ctrl+C to skip and run later${RESET}"
   echo -e "  ${DIM}with: ${BOLD}openclaw onboard${RESET}${DIM} (or carapace-onboard)${RESET}"
@@ -2958,12 +2961,12 @@ if [ "${CODEX_OAUTH_NEEDED:-false}" = "true" ]; then
   echo ""
 fi
 
-# Offer TUI launch as optional. Skip entirely if neither stdin nor
-# /dev/tty is openable (curl|bash from a script), since the prompt
-# would error and the read would block.
-if [ -t 0 ] && [ -r /dev/tty ]; then
+# Offer TUI launch as optional. Use the same /dev/tty openability test
+# as Step 9 — works for `curl | bash` (non-TTY stdin but real terminal
+# attached) where `[ -t 0 ]` would falsely fail.
+if ( : < /dev/tty ) 2>/dev/null; then
   echo -e "  ${TEAL}Want to also launch the terminal chat? [y/N]${RESET}"
-  read -rp "  " LAUNCH_TUI
+  read -rp "  " LAUNCH_TUI < /dev/tty
   case "$LAUNCH_TUI" in
     [yY]*)
       echo ""
