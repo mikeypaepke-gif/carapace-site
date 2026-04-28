@@ -568,6 +568,14 @@ except Exception: print('False')" 2>/dev/null || echo False)
   fi
   if [[ $need_restart -eq 1 ]]; then
     openclaw gateway restart >/dev/null 2>&1 || true
+    # Wait for gateway to come back up before returning. Without this,
+    # downstream calls (e.g. sweep_carapace_for_all_agents, the post-
+    # install /chat smoke, carapace-qr) can hit a mid-restart gateway
+    # and either error or silently get stale data.
+    for _w in $(seq 1 15); do
+      curl -sf --max-time 1 http://127.0.0.1:18789/health >/dev/null 2>&1 && break
+      sleep 1
+    done
     ok "Bumped AGENTS.md injection caps (50K/200K), agent timeout (180s), trustedProxies (Tailscale CGNAT); restarted gateway"
   fi
 }
@@ -2112,7 +2120,16 @@ else
   OC_HEAP=2048
 fi
 export NODE_OPTIONS="--max-old-space-size=${OC_HEAP}"
-exec openclaw gateway run --allow-unconfigured
+# CRITICAL: invoke /usr/bin/node directly with the openclaw entry. Older
+# revisions did `exec openclaw gateway run --allow-unconfigured` and
+# relied on PATH for `openclaw` resolution — but on a box where nvm
+# was previously set up, $PATH could still bring nvm's openclaw shim
+# (and its nvm node) into the wrapper, defeating the whole "system
+# node only" rationale of issue #46256. Match the per-user drop-in's
+# ExecStart format: bare `gateway --port 18789` is what `openclaw
+# gateway install` itself writes for non-root, and it accepts an
+# unconfigured agent (creates one on first run).
+exec /usr/bin/node /root/.npm-global/lib/node_modules/openclaw/dist/index.js gateway --port 18789
 GWWRAPPER
   chmod +x /usr/local/bin/openclaw-gateway-run
 
@@ -2154,11 +2171,31 @@ EOF
   systemctl daemon-reload
   systemctl enable openclaw-gateway >/dev/null 2>&1 || true
   systemctl restart openclaw-gateway >/dev/null 2>&1 || true
-  # Clean up any conflicting user-mode service created by openclaw gateway install
-  systemctl --user stop openclaw-gateway 2>/dev/null || true
-  systemctl --user disable openclaw-gateway 2>/dev/null || true
-  rm -f "$HOME/.config/systemd/user/openclaw-gateway.service" 2>/dev/null || true
-  systemctl --user daemon-reload 2>/dev/null || true
+  # Clean up any conflicting user-mode service created by a prior unprivileged
+  # install. When this script is invoked as `sudo bash`, $HOME is /root and
+  # `systemctl --user` targets root's user manager — useless if the previous
+  # install was as a normal user. Honor SUDO_USER / SUDO_HOME so we kill the
+  # right user-mode unit (the one that would actually conflict with our
+  # system-level unit on port 18789).
+  REAL_USER="${SUDO_USER:-$(whoami)}"
+  REAL_HOME=$(getent passwd "$REAL_USER" 2>/dev/null | cut -d: -f6)
+  REAL_HOME="${REAL_HOME:-$HOME}"
+  if [[ "$REAL_USER" != "root" ]]; then
+    sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$REAL_USER")" \
+      systemctl --user stop openclaw-gateway 2>/dev/null || true
+    sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$REAL_USER")" \
+      systemctl --user disable openclaw-gateway 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/systemd/user/openclaw-gateway.service" 2>/dev/null || true
+    sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$REAL_USER")" \
+      systemctl --user daemon-reload 2>/dev/null || true
+  else
+    # No invoking user — clean root's user-mode anyway in case someone ran
+    # the unprivileged install as actual root.
+    systemctl --user stop openclaw-gateway 2>/dev/null || true
+    systemctl --user disable openclaw-gateway 2>/dev/null || true
+    rm -f "$HOME/.config/systemd/user/openclaw-gateway.service" 2>/dev/null || true
+    systemctl --user daemon-reload 2>/dev/null || true
+  fi
   ok "Gateway system service installed"
 else
   # Only call `openclaw gateway install` if we don't already have a token.
@@ -2277,13 +2314,14 @@ if ! $IS_ROOT && have_cmd loginctl; then
   fi
 fi
 
-# Don't clear model/provider if already configured (idempotency)
+# Idempotency check: if a previous install picked a model, preserve it.
+# Otherwise leave the keys ABSENT — `openclaw onboard` checks for
+# missing-key vs empty-string and treats them differently. Earlier
+# revisions wrote `agents.defaults.model ""` here, which made onboard's
+# detection logic consider the model "already configured" (just empty)
+# and silently SKIP the model-picker prompt. Don't write empty strings.
 EXISTING_MODEL=$(timeout 10 openclaw config get agents.defaults.model 2>/dev/null | head -1 | tr -d '"{ ' || echo "")
-if [[ -z "$EXISTING_MODEL" || "$EXISTING_MODEL" == "null" ]]; then
-  # No model set yet — will be configured during onboard
-  timeout 10 openclaw config set agents.defaults.model "" >/dev/null 2>&1 || true
-  timeout 10 openclaw config set agents.defaults.provider "" >/dev/null 2>&1 || true
-else
+if [[ -n "$EXISTING_MODEL" && "$EXISTING_MODEL" != "null" ]]; then
   ok "Existing model preserved: $EXISTING_MODEL"
 fi
 
@@ -2561,51 +2599,12 @@ else
   warn "Status server not started (no systemd). Start manually: node ~/.carapace/status-server.js &"
 fi
 
-# ── Status Server (port 18794) ──────────────────────────
-# iOS dashboard (chat history, sessions, projects, cron, agents) hits
-# endpoints on 18794. Without this, Tailscale Serve routes for
-# /carapace/* forward to nothing → iPhone sees empty tabs. We install a
-# tiny standalone Node.js server (~.carapace/status-server.js) and a
-# systemd unit so it starts at boot.
-echo -e "  ${DIM}Installing status server on port 18794...${RESET}"
-mkdir -p "$HOME/.carapace"
-# Preserve any user customizations to an existing status-server.js before
-# we overwrite with the Carapace-managed version. `.user-backup.<ts>` so
-# the user can diff + reapply custom edits on top of bug fixes.
-if [[ -f "$HOME/.carapace/status-server.js" ]]; then
-  # Check if it matches the current upstream version — if not, back up
-  BACKUP="$HOME/.carapace/status-server.js.user-backup.$(date +%s)"
-  cp "$HOME/.carapace/status-server.js" "$BACKUP"
-fi
-# Download the canonical status-server.js from the site. Ships alongside
-# install.sh so it's always in sync with the installer. The earlier
-# block (1130+) wrote an embedded heredoc copy that goes stale every
-# time the canonical file gains a route (most recently /pair, added in
-# commit ab38b5d). Always overwrite + restart the service so the running
-# process picks up new routes — without the restart, the service stays
-# on whatever version was loaded into memory at last boot, and the iOS
-# / Mac apps hit 404 on routes that exist on disk but not in memory.
-if curl -fsSL --max-time 20 -o "$HOME/.carapace/status-server.js.new" \
-      "https://carapace.info/status-server.js" 2>/dev/null; then
-  mv "$HOME/.carapace/status-server.js.new" "$HOME/.carapace/status-server.js"
-  # Status server binds 127.0.0.1 by default; Tailscale Serve proxies to
-  # it from the public HTTPS interface so that's the right default.
-  ok "status-server.js installed"
-  # Restart the service NOW so it loads the freshly-downloaded file. The
-  # earlier block already started it with the (stale) embedded heredoc
-  # version; without this restart the running PID keeps the old code in
-  # memory even though the file on disk is current.
-  if have_cmd systemctl && systemctl list-unit-files carapace-status.service >/dev/null 2>&1; then
-    sysctl_safe restart carapace-status >/dev/null 2>&1
-    # Give it a moment to rebind 18794
-    for _r in $(seq 1 5); do
-      curl -sf --max-time 1 http://127.0.0.1:18794/health >/dev/null 2>&1 && break
-      sleep 1
-    done
-  fi
-else
-  echo -e "  ${YELLOW}⚠ Could not download status-server.js — iOS dashboard will be empty${RESET}"
-fi
+# (Status server file + systemd unit are installed earlier in this Step
+# — the duplicate download block that previously lived here pulled from
+# carapace.info/status-server.js (Cloudflare-fronted, stale-cache prone)
+# and was overwriting the raw.githubusercontent.com copy fetched ~200
+# lines above. Removed in the post-system-node audit; the earlier
+# download + systemd setup is sufficient.)
 
 # Empty project tracker skeleton so /projects returns valid JSON.
 [[ -f "$HOME/.carapace/carapace-project-tracker.json" ]] || \
@@ -2967,11 +2966,21 @@ fi
 # iOS app the runtime is warm and the first message is instant.
 # Spawning `openclaw tui` headless (</dev/null) is the cheapest way
 # to issue chat.history without making a model call.
-echo -e "  ${DIM}Pre-warming agent runtime (~80s one-time cold start)...${RESET}"
-WARMUP_START=$(date +%s)
-timeout 110 openclaw tui </dev/null >/dev/null 2>&1 || true
-WARMUP_DURATION=$(( $(date +%s) - WARMUP_START ))
-ok "Agent runtime warm (${WARMUP_DURATION}s)"
+# Skip warm-up if no model was configured. If the user Ctrl+C'd
+# `openclaw onboard` (or no TTY available + chose to defer) the agent
+# can't actually serve a chat.history request, so the warm-up would
+# just burn the 110s timeout and tell us nothing. Re-warm happens
+# naturally on the user's first successful interaction post-config.
+WARMUP_MODEL=$(openclaw config get agents.defaults.model 2>/dev/null | tr -d '"{ ' | head -1)
+if [[ -n "$WARMUP_MODEL" && "$WARMUP_MODEL" != "null" ]]; then
+  echo -e "  ${DIM}Pre-warming agent runtime (~80s one-time cold start)...${RESET}"
+  WARMUP_START=$(date +%s)
+  timeout 110 openclaw tui </dev/null >/dev/null 2>&1 || true
+  WARMUP_DURATION=$(( $(date +%s) - WARMUP_START ))
+  ok "Agent runtime warm (${WARMUP_DURATION}s)"
+else
+  echo -e "  ${DIM}Skipping pre-warm — no model configured yet (run \`openclaw onboard\`).${RESET}"
+fi
 
 # ══════════════════════════════════════════════════════════
 # Step 10: Connect
