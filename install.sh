@@ -549,9 +549,26 @@ except Exception: print(0)" 2>/dev/null || echo 0)
   if [[ "${cur_timeout:-0}" -lt 180 ]]; then
     openclaw config set agents.defaults.timeoutSeconds 180 >/dev/null 2>&1 && need_restart=1
   fi
+  # gateway.trustedProxies — Tailscale forwards iOS chat via its CGNAT
+  # range (100.64.0.0/10) and IPv6 ULA (fd7a:115c:a1e0::/48). Without
+  # marking those as trusted, the gateway sees X-Forwarded-For from a
+  # non-loopback peer, refuses to treat the connection as local, and
+  # rejects with `code=1008 reason=connect failed`. iOS then shows
+  # "gateway connect failed" with no obvious cause. Adding loopback +
+  # Tailscale ranges fixes it; localhost stays trusted unconditionally.
+  cur_trusted=$(/usr/bin/env python3 -c "
+import json
+try:
+    with open('$config') as f: c = json.load(f)
+    tp = c.get('gateway', {}).get('trustedProxies', [])
+    print('100.64.0.0/10' in tp)
+except Exception: print('False')" 2>/dev/null || echo False)
+  if [[ "$cur_trusted" != "True" ]]; then
+    openclaw config set gateway.trustedProxies '["127.0.0.1","::1","100.64.0.0/10","fd7a:115c:a1e0::/48"]' >/dev/null 2>&1 && need_restart=1
+  fi
   if [[ $need_restart -eq 1 ]]; then
     openclaw gateway restart >/dev/null 2>&1 || true
-    ok "Bumped AGENTS.md injection caps (50K/200K) + agent timeout (180s); restarted gateway"
+    ok "Bumped AGENTS.md injection caps (50K/200K), agent timeout (180s), trustedProxies (Tailscale CGNAT); restarted gateway"
   fi
 }
 
@@ -1810,15 +1827,25 @@ else
   # Install without postinstall first to avoid OOM on low-RAM VPS
   # The postinstall-bundled-plugins.mjs script uses too much memory on first pass
   export NODE_OPTIONS="--max-old-space-size=768"
-  # Track upstream `latest` by default. We briefly pinned to v2026.4.24
-  # because v4.25's first-turn cold start exceeded the default agent
-  # timeout (~30s) and /chat aborted before xAI replied. That's now
-  # handled by ensure_carapace_bootstrap_caps() bumping
-  # `agents.defaults.timeoutSeconds` to 180s, so v4.25+ works fine.
+  # PINNED to v2026.4.24. We tried v4.25 (current `latest` on npm) for
+  # several hours and hit three independent regressions:
+  #   1. WebSocket UPGRADE handshake intermittently times out — gateway
+  #      logs `[ws] handshake timeout` even on local 127.0.0.1 connects.
+  #      Affects both `openclaw tui` and the iOS chat path.
+  #   2. First-call chat.history takes ~75s (agent runtime lazy-loads
+  #      on first request), which exceeds the TUI's 60s RPC budget.
+  #   3. Untrusted-proxy header rejection of Tailscale-forwarded
+  #      connections unless gateway.trustedProxies is configured.
   #
-  # Override to a specific version with:
-  #   OPENCLAW_VERSION=2026.4.24 curl ... | bash
-  : "${OPENCLAW_VERSION:=latest}"
+  # #3 is mitigatable via config (we set trustedProxies to the Tailscale
+  # CGNAT range), but #1 is unfixable from our end — the gateway just
+  # can't accept the WS upgrade in time. v4.24 has none of these.
+  # Unpin once OpenClaw ships a release that resolves the WS regression
+  # (track upstream).
+  #
+  # Override to a different version at install-time with:
+  #   OPENCLAW_VERSION=latest curl ... | bash
+  : "${OPENCLAW_VERSION:=2026.4.24}"
   retry 3 timeout 240 npm install -g "openclaw@${OPENCLAW_VERSION}" --no-fund --loglevel=error --ignore-scripts
   # Run postinstall separately with explicit memory cap and swap already active
   if [ -f "$HOME/.npm-global/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs" ]; then
