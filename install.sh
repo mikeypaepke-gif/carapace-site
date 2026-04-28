@@ -2940,7 +2940,13 @@ fi
 # in sync with upstream model availability automatically. We just
 # hand off.
 step "Configure Your AI"
-if [ -e /dev/tty ]; then
+# Use `[ -t 0 ]` (stdin is a TTY) instead of `[ -e /dev/tty ]` (file
+# entry exists). Non-interactive SSH (`ssh ... 'cmd'` or `curl | bash`
+# wrapped in a script) has /dev/tty as a file entry but opening it
+# fails with "No such device or address". `-t 0` tests for a real
+# interactive terminal — the only context where openclaw onboard
+# (TUI-based) can actually run.
+if [ -t 0 ] && [ -e /dev/tty ]; then
   echo -e "  ${DIM}Launching openclaw onboard — pick your provider, paste your${RESET}"
   echo -e "  ${DIM}key, choose your model. Press Ctrl+C to skip and run later${RESET}"
   echo -e "  ${DIM}with: ${BOLD}openclaw onboard${RESET}${DIM} (or carapace-onboard)${RESET}"
@@ -2993,7 +2999,11 @@ ok "CARAPACE injections complete"
 # can't actually serve a chat.history request, so the warm-up would
 # just burn the 110s timeout and tell us nothing. Re-warm happens
 # naturally on the user's first successful interaction post-config.
-WARMUP_MODEL=$(openclaw config get agents.defaults.model 2>/dev/null | tr -d '"{ ' | head -1)
+# `openclaw config get` exits non-zero when the key is missing (e.g.,
+# user skipped onboard). The trailing `|| true` swallows it so set -e
+# doesn't abort the whole install — empty WARMUP_MODEL is the desired
+# signal for the "skip pre-warm" branch below.
+WARMUP_MODEL=$( (openclaw config get agents.defaults.model 2>/dev/null || true) | tr -d '"{ ' | head -1 )
 if [[ -n "$WARMUP_MODEL" && "$WARMUP_MODEL" != "null" ]]; then
   # FIRST: wait for the gateway to be REALLY ready, not just /health-OK.
   # /health passes the moment the HTTP server binds (~6s after start),
