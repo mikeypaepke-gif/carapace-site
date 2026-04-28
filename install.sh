@@ -130,7 +130,42 @@ run() {
 # safe because OpenClaw treats an empty memory file as "no facts."
 #
 # REFACTORED: writes now target per-agent AGENTS.md, not MEMORY.md.
-# Shim delegates to the new sweep that hits main + each agent.
+
+# ── Generic block-upsert helper ──────────────────────────
+# Shared by every CARAPACE-rules injector (vision, project, etc.):
+# given a target file, BEGIN/END marker pair, and a temp file holding
+# the new block body, replace any existing block in-place (preserving
+# everything outside the markers) or append the block fresh if absent.
+# Uses python for atomic rename + a sanity check that catches partial
+# sentinel pairs (which would silently corrupt the file).
+_carapace_upsert_block() {
+  local target_file="$1"; local begin_marker="$2"; local end_marker="$3"; local block_file="$4"
+  mkdir -p "$(dirname "$target_file")"
+  local tmp_file="${target_file}.carapace.tmp.$$"
+  if [[ ! -f "$target_file" ]]; then
+    cat "$block_file" > "$tmp_file"; mv "$tmp_file" "$target_file"; return 0
+  fi
+  /usr/bin/env python3 - "$target_file" "$tmp_file" "$begin_marker" "$end_marker" "$block_file" <<'PY'
+import sys, re
+src_path, dst_path, begin_marker, end_marker, block_path = sys.argv[1:6]
+with open(src_path, "r", encoding="utf-8") as f: original = f.read()
+with open(block_path, "r", encoding="utf-8") as f: new_block = f.read().rstrip("\n") + "\n"
+begin_re = re.compile(r"^" + re.escape(begin_marker) + r".*$", re.MULTILINE)
+end_re   = re.compile(r"^" + re.escape(end_marker)   + r".*$", re.MULTILINE)
+b = begin_re.search(original); e = end_re.search(original)
+if b and e and b.start() < e.start():
+    before = original[:b.start()].rstrip("\n"); after = original[e.end():].lstrip("\n")
+    rebuilt = (before + "\n\n" + new_block + ("\n" + after if after else "")) if before else (new_block + ("\n" + after if after else ""))
+elif b or e:
+    print("Partial sentinel block — aborting.", file=sys.stderr); sys.exit(2)
+else:
+    rebuilt = original.rstrip("\n") + "\n\n" + new_block
+with open(dst_path, "w", encoding="utf-8") as f: f.write(rebuilt)
+PY
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then rm -f "$tmp_file"; return 1; fi
+  mv "$tmp_file" "$target_file"
+}
 
 _carapace_list_agent_workspaces() {
   # Main agent's workspace (the global one)
