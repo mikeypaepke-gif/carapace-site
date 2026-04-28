@@ -2417,25 +2417,13 @@ PKG
   fi
 }
 
-# Add Tailscale serve routes for /chat + /cognitive so iOS can reach
-# the new endpoints over the Tailscale URL. No-op when Tailscale isn't
-# installed or `tailscale serve` isn't already configured.
-setup_tailscale_cognitive_routes() {
-  command -v tailscale >/dev/null 2>&1 || return 0
-  tailscale serve status >/dev/null 2>&1 || return 0
-  sudo tailscale serve --bg --set-path=/chat "http://localhost:18794/chat" >/dev/null 2>&1 || true
-  sudo tailscale serve --bg --set-path=/cognitive "http://localhost:18794/cognitive" >/dev/null 2>&1 || true
-  echo "✓ Tailscale serve routes added: /chat and /cognitive → :18794"
-}
-
 install_carapace_cognitive
-# Tailscale routes for /chat + /cognitive get added in the main
-# Tailscale Serve block ~200 lines below (which runs AFTER `tailscale
-# serve --bg http://127.0.0.1:18789` initializes the serve config).
-# Calling setup_tailscale_cognitive_routes() here is a no-op on fresh
-# installs because `tailscale serve status` returns 1 with no config.
-# The function is kept defined for terminal-based re-runs, but not
-# invoked from the curl|bash path.
+# Tailscale routes for /chat + /cognitive (and every other endpoint)
+# get added in the main Tailscale Serve block ~200 lines below, which
+# runs AFTER `tailscale serve --bg http://127.0.0.1:18789` initializes
+# the serve config. CARAPACE_SERVE_ROUTES below is the single source
+# of truth — both the imperative install and the persistent systemd
+# unit derive from it, so adding a new endpoint is a one-line change.
 
 python3 - << 'PYEOF'
 import os, textwrap
@@ -2653,6 +2641,13 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   #   /chat to land at /chat on the status server. The /carapace
   #   catch-all uses bare http://...:18794 (no path) so /carapace/foo
   #   forwards as /foo on the backend (matching the actual routes).
+  # Single source of truth for ALL Tailscale serve routes — used both
+  # for the imperative install loop below AND for generating the
+  # persistent systemd unit's ExecStartPost lines further down. Keep
+  # the two prefix shapes (`/<endpoint>` and `/carapace/<endpoint>`)
+  # in lock-step: the iOS app fetches some endpoints bare (`/chat`)
+  # and others via the `/carapace/` prefix (`/carapace/projects`).
+  # Missing one shape = silent 404 in production.
   CARAPACE_SERVE_ROUTES=(
     # path                               backend_url
     "/health                              http://127.0.0.1:18794/health"
@@ -2676,6 +2671,8 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
     "/carapace/agents                     http://127.0.0.1:18794/agents"
     "/carapace/status                     http://127.0.0.1:18794/status"
     "/carapace/pair                       http://127.0.0.1:18794/pair"
+    "/carapace/chat                       http://127.0.0.1:18794/chat"
+    "/carapace/cognitive                  http://127.0.0.1:18794/cognitive"
   )
   # Wrap each call in `timeout 10` — without it, a hung tailscale
   # daemon (DNS lookup stuck, control plane unreachable, etc.) makes
@@ -2738,7 +2735,23 @@ if $SERVE_OK && have_cmd systemctl; then
   # funnel by default, so an upgrade-in-place could leave a public
   # config behind. Idempotent: no-op if funnel was never on.
   $SUDO tailscale funnel --https=443 off >/dev/null 2>&1 || true
-  $SUDO tee /etc/systemd/system/carapace-tailscale-serve.service > /dev/null << 'TSEOF'
+
+  # Generate the ExecStartPost block from CARAPACE_SERVE_ROUTES (the
+  # same array we used for the imperative install loop above). Single
+  # source of truth — adding /foo or /carapace/foo above automatically
+  # makes both shapes survive a reboot, with no hand-editing of the
+  # systemd unit. Earlier versions of this script kept a hardcoded
+  # ExecStartPost list here that drifted out of sync with the install
+  # loop (e.g. /carapace/health was added to the install but not the
+  # unit), so on every Tailscale restart the unit would replay an
+  # incomplete config and 404 some endpoints. The drift bug.
+  TS_EXEC_POSTS=""
+  for entry in "${CARAPACE_SERVE_ROUTES[@]}"; do
+    set -- $entry
+    TS_EXEC_POSTS="${TS_EXEC_POSTS}ExecStartPost=/usr/bin/tailscale serve --bg --set-path $1 $2"$'\n'
+  done
+
+  $SUDO tee /etc/systemd/system/carapace-tailscale-serve.service > /dev/null << TSEOF
 [Unit]
 Description=CARAPACE Tailscale Serve (tailnet-only)
 After=network-online.target tailscaled.service
@@ -2748,41 +2761,15 @@ Wants=network-online.target tailscaled.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStartPre=/bin/sleep 5
+# Gateway WS endpoint — root catch-all to the OpenClaw gateway. iOS
+# hits this for the actual chat completion stream (over Tailscale TLS).
 ExecStart=/usr/bin/tailscale serve --bg http://127.0.0.1:18789
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /health http://127.0.0.1:18794/health
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /history http://127.0.0.1:18794/history
-# /carapace catch-all — destination is bare (no /carapace suffix) so
-# /carapace/pair → strip → /pair → upstream /pair (200, returns
-# pair JSON the Mac/iOS app expects). The earlier persistence unit
-# shipped /carapace/carapace as the destination, which made the catch-all
-# 404 every sub-path that didn't have an explicit override below, and
-# the Mac app reported "incompatible host" trying to fetch /carapace/pair.
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace http://127.0.0.1:18794
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/projects http://127.0.0.1:18794/projects
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/cron http://127.0.0.1:18794/cron
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/agents http://127.0.0.1:18794/agents
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/status http://127.0.0.1:18794/status
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/history http://127.0.0.1:18794/history
-# /carapace/pair + /pair — explicit so auto-pair survives even if the
-# /carapace catch-all ever drifts back to the broken /carapace destination.
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/pair http://127.0.0.1:18794/pair
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /pair http://127.0.0.1:18794/pair
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /sessions http://127.0.0.1:18794/sessions
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /carapace/sessions http://127.0.0.1:18794/sessions
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /projects http://127.0.0.1:18794/projects
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /cron http://127.0.0.1:18794/cron
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /agents http://127.0.0.1:18794/agents
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /status http://127.0.0.1:18794/status
-# Cognitive memory endpoints — /chat (mode-aware OpenClaw forwarder
-# with visual+auditory memory injection) and /cognitive/* (direct
-# ingest + introspection). MUST live in this systemd unit too,
-# otherwise every Tailscale restart replays the unit and clobbers
-# the imperative `tailscale serve --bg` calls we made during install,
-# leaving iOS with a 404 on /chat. THE root cause of the long-running
-# "/chat keeps vanishing" bug.
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /chat http://127.0.0.1:18794/chat
-ExecStartPost=/usr/bin/tailscale serve --bg --set-path /cognitive http://127.0.0.1:18794/cognitive
-
+# Status-server routes — generated from CARAPACE_SERVE_ROUTES at
+# install time. /carapace catch-all destination is bare (no /carapace
+# suffix) so /carapace/pair → strip → /pair → upstream /pair. Earlier
+# persistence units shipped /carapace/carapace as destination, which
+# made the catch-all 404 every sub-path without an explicit override.
+${TS_EXEC_POSTS}
 [Install]
 WantedBy=multi-user.target
 TSEOF
@@ -2958,19 +2945,10 @@ fi
 # app will hit.
 GW_TOKEN=$(python3 -c "import json; print(json.load(open('$HOME/.openclaw/openclaw.json'))['gateway']['auth']['token'])" 2>/dev/null)
 if [ -n "$GW_TOKEN" ] && [ "$MODEL" != "" ] && [ "$MODEL" != "null" ]; then
-  # ── Re-assert Tailscale serve routes for /chat + /cognitive ──
-  # These two routes were added later than the rest of the serve config;
-  # any VPS that ran a pre-cognitive install.sh has Tailscale config
-  # without them, and `tailscale serve --bg --set-path /chat` is a no-op
-  # on duplicates. Always re-running here means re-installing on an old
-  # box upgrades the routes — without this, iOS hits /chat through
-  # Tailscale and falls through to the catch-all proxy at :18789, which
-  # returns 404 because OpenClaw has no /chat route. (This was the
-  # 404 storm that bit production after we shipped cognitive memory.)
-  if command -v tailscale >/dev/null 2>&1 && tailscale serve status >/dev/null 2>&1; then
-    sudo tailscale serve --bg --set-path=/chat http://127.0.0.1:18794/chat >/dev/null 2>&1 || true
-    sudo tailscale serve --bg --set-path=/cognitive http://127.0.0.1:18794/cognitive >/dev/null 2>&1 || true
-  fi
+  # (Tailscale serve routes are already registered by the
+  # CARAPACE_SERVE_ROUTES loop earlier in this script — both /chat and
+  # /cognitive included — and persisted by the carapace-tailscale-serve
+  # systemd unit. Re-asserting them here is redundant and was removed.)
 
   # Smoke test uses stream=true. iOS chat ALWAYS streams (SSE), and on
   # several OpenClaw v2026.4.x builds the non-stream path hangs while
