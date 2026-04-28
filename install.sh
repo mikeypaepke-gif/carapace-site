@@ -2074,6 +2074,38 @@ else
   # would otherwise overwrite any direct edits to the unit file.
   USER_DROPIN_DIR="$HOME/.config/systemd/user/openclaw-gateway.service.d"
   mkdir -p "$USER_DROPIN_DIR"
+
+  # Resolve openclaw's dist/index.js path. The user could have installed
+  # openclaw via:
+  #   * `npm install -g openclaw`        → $HOME/.npm-global/lib/node_modules/openclaw
+  #   * `sudo npm install -g openclaw`   → /usr/lib/node_modules/openclaw
+  #   * nvm `npm install -g openclaw`    → $NVM_DIR/versions/node/*/lib/node_modules/openclaw
+  # Hardcoding ANY of these in the systemd ExecStart bites users on every
+  # other layout. Use node's own `require.resolve` to find dist/index.js
+  # for whatever install layout we actually have. Fall back to scanning
+  # known locations if `require.resolve` somehow fails.
+  OC_DIST_INDEX=""
+  if command -v node >/dev/null 2>&1; then
+    OC_DIST_INDEX=$(node -e "try{console.log(require.resolve('openclaw/dist/index.js'))}catch(e){}" 2>/dev/null)
+  fi
+  if [[ -z "$OC_DIST_INDEX" || ! -f "$OC_DIST_INDEX" ]]; then
+    for c in \
+      "/usr/lib/node_modules/openclaw/dist/index.js" \
+      "/usr/local/lib/node_modules/openclaw/dist/index.js" \
+      "$HOME/.npm-global/lib/node_modules/openclaw/dist/index.js"; do
+      [[ -f "$c" ]] && { OC_DIST_INDEX="$c"; break; }
+    done
+    # Last resort: scan nvm
+    if [[ -z "$OC_DIST_INDEX" || ! -f "$OC_DIST_INDEX" ]]; then
+      for c in "$HOME"/.nvm/versions/node/*/lib/node_modules/openclaw/dist/index.js; do
+        [[ -f "$c" ]] && { OC_DIST_INDEX="$c"; break; }
+      done
+    fi
+  fi
+  if [[ -z "$OC_DIST_INDEX" || ! -f "$OC_DIST_INDEX" ]]; then
+    fail "Could not resolve openclaw/dist/index.js from any known install layout. PATH=$PATH"
+  fi
+
   cat > "$USER_DROPIN_DIR/carapace-overrides.conf" << DROPIN_EOF
 # Set by the CARAPACE installer.
 #
@@ -2094,7 +2126,7 @@ else
 Environment=OPENCLAW_DISABLE_BONJOUR=1
 Environment=OPENCLAW_HANDSHAKE_TIMEOUT_MS=30000
 ExecStart=
-ExecStart=/usr/bin/node $HOME/.npm-global/lib/node_modules/openclaw/dist/index.js gateway --port 18789
+ExecStart=/usr/bin/node ${OC_DIST_INDEX} gateway --port 18789
 DROPIN_EOF
   systemctl --user daemon-reload 2>/dev/null || true
 
