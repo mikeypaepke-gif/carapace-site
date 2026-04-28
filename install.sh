@@ -2930,6 +2930,28 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════
+# Pre-warm the agent runtime
+# ══════════════════════════════════════════════════════════
+# OpenClaw lazy-loads the agent runtime on first `chat.history` call —
+# we measured ~75-80s on a fresh v2026.4.25 install (BOOTSTRAP.md +
+# IDENTITY.md + AGENTS.md parse + session-state hydration). The TUI's
+# RPC retry budget is 60s, so without this pre-warm the first
+# `openclaw tui` open shows "history failed: gateway request timeout
+# for chat.history" until the user retries — and the iOS chat path
+# hits the same lazy-load on its first /chat call.
+#
+# Trigger the lazy-load NOW, while the user is already watching the
+# install progress bar, so by the time they scan the QR + open the
+# iOS app the runtime is warm and the first message is instant.
+# Spawning `openclaw tui` headless (</dev/null) is the cheapest way
+# to issue chat.history without making a model call.
+echo -e "  ${DIM}Pre-warming agent runtime (~80s one-time cold start)...${RESET}"
+WARMUP_START=$(date +%s)
+timeout 110 openclaw tui </dev/null >/dev/null 2>&1 || true
+WARMUP_DURATION=$(( $(date +%s) - WARMUP_START ))
+ok "Agent runtime warm (${WARMUP_DURATION}s)"
+
+# ══════════════════════════════════════════════════════════
 # Step 10: Connect
 # ══════════════════════════════════════════════════════════
 step "Connect"
