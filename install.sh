@@ -131,37 +131,6 @@ run() {
 #
 # REFACTORED: writes now target per-agent AGENTS.md, not MEMORY.md.
 # Shim delegates to the new sweep that hits main + each agent.
-inject_carapace_vision_rules() { sweep_carapace_for_all_agents; }
-
-# ── Generic block-upsert helper ──────────────────────────
-_carapace_upsert_block() {
-  local target_file="$1"; local begin_marker="$2"; local end_marker="$3"; local block_file="$4"
-  mkdir -p "$(dirname "$target_file")"
-  local tmp_file="${target_file}.carapace.tmp.$$"
-  if [[ ! -f "$target_file" ]]; then
-    cat "$block_file" > "$tmp_file"; mv "$tmp_file" "$target_file"; return 0
-  fi
-  /usr/bin/env python3 - "$target_file" "$tmp_file" "$begin_marker" "$end_marker" "$block_file" <<'PY'
-import sys, re
-src_path, dst_path, begin_marker, end_marker, block_path = sys.argv[1:6]
-with open(src_path, "r", encoding="utf-8") as f: original = f.read()
-with open(block_path, "r", encoding="utf-8") as f: new_block = f.read().rstrip("\n") + "\n"
-begin_re = re.compile(r"^" + re.escape(begin_marker) + r".*$", re.MULTILINE)
-end_re   = re.compile(r"^" + re.escape(end_marker)   + r".*$", re.MULTILINE)
-b = begin_re.search(original); e = end_re.search(original)
-if b and e and b.start() < e.start():
-    before = original[:b.start()].rstrip("\n"); after = original[e.end():].lstrip("\n")
-    rebuilt = (before + "\n\n" + new_block + ("\n" + after if after else "")) if before else (new_block + ("\n" + after if after else ""))
-elif b or e:
-    print("Partial sentinel block — aborting.", file=sys.stderr); sys.exit(2)
-else:
-    rebuilt = original.rstrip("\n") + "\n\n" + new_block
-with open(dst_path, "w", encoding="utf-8") as f: f.write(rebuilt)
-PY
-  local rc=$?
-  if [[ $rc -ne 0 ]]; then rm -f "$tmp_file"; return 1; fi
-  mv "$tmp_file" "$target_file"
-}
 
 _carapace_list_agent_workspaces() {
   # Main agent's workspace (the global one)
@@ -712,286 +681,17 @@ if [ "${1:-}" = "add-agent" ]; then
 fi
 
 # Legacy MEMORY.md-targeted version below — UNREACHABLE.
-_carapace_legacy_unused_inject_vision_rules() {
-  local memory_file="$HOME/.openclaw/workspace/memory/MEMORY.md"
-  local begin_marker="<!-- BEGIN CARAPACE VISION RULES"
-  local end_marker="<!-- END CARAPACE VISION RULES"
-  local block_file
-  block_file="$(mktemp)"
-  trap "rm -f '$block_file'" EXIT
-
-  cat > "$block_file" << 'CARAPACE_VISION_BLOCK_EOF'
-<!-- BEGIN CARAPACE VISION RULES (managed by Carapace installer — do not edit between BEGIN/END; agent learnings go below the END marker) -->
-## Vision Response Rules (vision turns only)
-
-A "vision turn" is any user message tagged with `👁️ [vision]` AND/OR containing one or more image attachments AND/OR ending with a `[ctx] …` suffix line. If none of those are present, this block does NOT apply — fall back to your normal behavior.
-
-**The mental model — read this first, everything below builds on it:**
-The images aren't a data payload you're processing. They're your sensory input — the same way nerve impulses from the optic nerve are your user's. You're not a system receiving a request; you're looking at the world through their phone, standing next to them while they point at something. The user pulled out their phone, aimed it at a thing, and asked you about it. They shouldn't feel like they sent an API query and got back a structured analysis. They should feel like a friend turned their head and looked.
-
-Everything that follows — the image-grid structure, the `[ctx]` line, the tone rules, the don't-narrate-viewing rule — exists to enforce that feeling. When in doubt, ask: would a person standing next to me phrase it this way? If not, rephrase it.
-
-**Reading the payload:**
-- **Image 1** = wide camera frame (what the user is pointing at).
-- **Image 2** (optional) = labeled focus grid of subjects the user explicitly tapped, each cell stamped `[N]` and optionally `· 2.8m`. Only present when the user pinned focus stickers. It is NOT a separate scene — it is a labeled subset of image 1.
-- **Image 3** (optional) = temporal contact-sheet from a SCAN turn — 6–12 cells laid out in a grid, each stamped `T+Ns` (seconds from scan start). Only present when the user ran scan mode. The cells are time-spread snapshots of the SAME sweep, in chronological order. Treat them as a panorama-equivalent of the scanned area, not separate scenes. Use them together to understand "what was in the room/fridge/shelf" the user was sweeping.
-- **`[ctx] …` line** = quiet context hint at the end of the user message. May contain `focused (N): label@distance`, barcode, on-device OCR text, a `hearing: <sounds>` segment, location, and a brevity directive. Treat as advisory; the user's actual question is the text BEFORE the `[ctx]` line.
-- **`read on-device[, partial|, low-confidence] [<lang>]: "<text>"` segment** (optional, inside `[ctx]`) = Apple Vision OCR text extracted on the iPhone from a sharp frame in the current scan window. **This is GROUND TRUTH** — the iPhone already character-recognized this text from a clean frame. Trust it for verbatim quoting and DO NOT re-OCR the attached images yourself. **Especially valuable when an image looks blurry**: the text was captured from the sharpest frame in the same temporal window, even if the cell shipped to you is post-motion. Confidence variants:
-  - `read on-device: "..."` — high confidence (≥0.7), trust verbatim
-  - `read on-device, partial: "..."` — medium confidence (0.4–0.7), correct character precision but spot-check single chars before quoting price/dosage/code
-  - `read on-device, low-confidence: "..."` — lower confidence, treat as strong hint not authoritative
-  - `OCR fragments (low-confidence, verify visually): a · b · c` — only loose fragments survived; useful for gist but verify against image before quoting
-  - `[<lang>]` tag (e.g. `[en]`, `[es]`) when language was detected — flag if user asks for translation or if reply should be in their language
-- **`hearing: <label> (<conf>), …` segment** (optional, inside `[ctx]`) = real-time on-device sound classifications from the iPhone's microphone, top 1–3 categories above 50% confidence in the last 5 seconds. The categories come from Apple's pretrained classifier (~300 sounds: dog barking, music, water running, keyboard typing, kettle, vehicle, applause, glass breaking, baby crying, etc.). YOU CAN HEAR — these are your ears the same way the images are your eyes. Audio is analyzed entirely on-device; only the labels reach you, never the audio itself. Same anti-narration rule as visual: don't say "I detect dog barking in the audio." Say something like "...and someone's dog is making themselves known" or just naturally weave it in. Don't always mention sounds — only when they're relevant to the user's question or genuinely noteworthy.
-- **All attached images are facets of the SAME question.** Describe them together — image 2 is a closeup of items in image 1, image 3 is a time-spread sweep of image 1's area. Do not narrate each image in isolation.
-
-**Hard rules:**
-- Match the user's tone. Casual greeting → casual reply. Specific question → focused answer.
-- Reply in 1–2 short sentences unless the user explicitly asks for detail or a list.
-- Do NOT use bulleted lists, numbered lists, or section headers in chit-chat, casual, or empathetic conversations. Plain prose only. Lists are allowed only when the user explicitly asks for one.
-- Inline `**bold**` IS welcome on the answer's key noun, number, or verb — the CARAPACE rail renders it in teal so the user's eye lands on the meaningful word. Use it sparingly: 1-2 bold runs per reply, on what actually matters. Never bold filler words. The TTS speaker strips the asterisks before speaking, so audio stays clean. Italic `*word*` and `` `code` `` are also fine — italic for asides, backticks for technical terms / commands.
-- **Don't narrate viewing.** Skip "I see", "I can see", "in this image", "the photo shows", "looking at this". Just answer about the subject as if it were in front of you. Say "It's a brass house key" — not "I see a brass house key in the image." Implicit framings like "seems like a..." or "that's a..." are fine; explicit "I'm viewing a photo" framings are not.
-- **Focus stickers are SUBJECTS, not cropped photos.** When the user pins a focus sticker (image 2 cells), that cell IS the thing they pointed at — describe the thing. NEVER mention the sticker boundary, that it looks "cut out of" something, that it's a fragment, a crop, a snippet, or a closeup of a larger scene. The cell is the subject. Period.
-- The on-device label (e.g., `material`, `textile`, `machine`) is a NOISY guess from a small classifier. Trust your own visual perception. Do NOT correct the label out loud unless the user asks; just answer based on what you see.
-- Photo-capture artifacts (motion blur, low light noise, partial focus) are not attributes of the real-world subject. Do NOT comment on blur, focus, exposure, lighting, framing, or photo quality unless the user explicitly asks. Describe what you SEE, not how clearly you can see it.
-- When focus subjects are pinned, those are what the user is asking about. Use image 2 to identify each `[N]` and answer about them. Don't pivot to describing the rest of the scene.
-
-**When you don't have enough to answer well:**
-- Ask one short clarifying question, OR suggest the user run scan mode for a quick sweep of the area.
-- Do NOT pad a thin answer with hedges, qualifications, or descriptions of what little you can see — request more information instead.
-
-**Fallbacks:**
-- If image attachments are absent but the message is clearly about something visible, answer from text + memory; don't hallucinate visual details.
-- If the user's question is ambiguous about WHICH subject in image 1, ask one short clarifying question instead of guessing.
-
-<!-- END CARAPACE VISION RULES -->
-CARAPACE_VISION_BLOCK_EOF
-
-  mkdir -p "$(dirname "$memory_file")"
-  local tmp_file="${memory_file}.carapace.tmp.$$"
-
-  if [[ ! -f "$memory_file" ]]; then
-    cat "$block_file" > "$tmp_file"
-    mv "$tmp_file" "$memory_file"
-    ok "Created MEMORY.md with CARAPACE vision rules (was absent)."
-    return 0
-  fi
-
-  local has_block
-  has_block="$(python3 - "$memory_file" "$begin_marker" "$end_marker" <<'PY'
-import sys
-path, begin, end = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(path, "r", encoding="utf-8") as f:
-    content = f.read()
-print("yes" if begin in content and end in content else "no")
-PY
-)"
-
-  if [[ "$has_block" == "no" ]]; then
-    local stamp; stamp="$(date +%Y%m%d-%H%M%S)"
-    cp "$memory_file" "${memory_file}.carapace.bak.${stamp}"
-    ok "Backed up MEMORY.md → ${memory_file}.carapace.bak.${stamp} (first install)"
-  fi
-
-  python3 - "$memory_file" "$tmp_file" "$begin_marker" "$end_marker" "$block_file" <<'PY'
-import sys, re
-src_path, dst_path, begin_marker, end_marker, block_path = sys.argv[1:6]
-with open(src_path, "r", encoding="utf-8") as f:
-    original = f.read()
-with open(block_path, "r", encoding="utf-8") as f:
-    new_block = f.read().rstrip("\n") + "\n"
-begin_re = re.compile(r"^" + re.escape(begin_marker) + r".*$", re.MULTILINE)
-end_re   = re.compile(r"^" + re.escape(end_marker)   + r".*$", re.MULTILINE)
-b = begin_re.search(original); e = end_re.search(original)
-if b and e and b.start() < e.start():
-    before = original[:b.start()].rstrip("\n")
-    after  = original[e.end():].lstrip("\n")
-    rebuilt = (before + "\n\n" + new_block + ("\n" + after if after else "")) if before else (new_block + ("\n" + after if after else ""))
-    non_managed_original = (before + "\n" + after).strip()
-elif b or e:
-    print("Partial sentinel block in MEMORY.md — aborting.", file=sys.stderr); sys.exit(2)
-else:
-    base = original.rstrip("\n")
-    rebuilt = base + "\n\n" + new_block
-    non_managed_original = base.strip()
-with open(dst_path, "w", encoding="utf-8") as f:
-    f.write(rebuilt)
-with open(dst_path, "r", encoding="utf-8") as f:
-    written = f.read()
-b2 = begin_re.search(written); e2 = end_re.search(written)
-if not b2 or not e2:
-    print("Sentinels missing in rebuilt file — aborting.", file=sys.stderr); sys.exit(3)
-non_managed_written = (written[:b2.start()].rstrip("\n") + "\n" + written[e2.end():].lstrip("\n").rstrip("\n")).strip()
-if non_managed_original != non_managed_written:
-    print("Verification failed — non-managed content drift. Aborting.", file=sys.stderr); sys.exit(4)
-PY
-  local rc=$?
-  if [[ $rc -ne 0 ]]; then
-    rm -f "$tmp_file" "$block_file"
-    warn "MEMORY.md upsert aborted (exit $rc) — file untouched."
-    return 1
-  fi
-
-  mv "$tmp_file" "$memory_file"
-  rm -f "$block_file"
-  trap - EXIT
-  ok "CARAPACE vision rules installed into MEMORY.md."
-}
 
 # ── Project tracking rules block injector ──────────────────────────
 # Mirror of the carapace-mac patch — teaches the agent how to
 # maintain the sentinel-bounded projects block that the iOS Projects
 # view reads + writes.
-inject_carapace_project_rules() {
-  local memory_file="$HOME/.openclaw/workspace/memory/MEMORY.md"
-  local begin_marker="<!-- BEGIN CARAPACE PROJECT RULES"
-  local end_marker="<!-- END CARAPACE PROJECT RULES"
-  local block_file
-  block_file="$(mktemp)"
-  trap "rm -f '$block_file'" EXIT
-
-  cat > "$block_file" << 'CARAPACE_PROJECT_RULES_EOF'
-<!-- BEGIN CARAPACE PROJECT RULES (managed by Carapace installer — do not edit between BEGIN/END; agent learnings go below the END marker) -->
-## Project Tracking Rules
-
-The user's iOS app surfaces a **Projects** tab that reads + writes a sentinel-bounded block in this same MEMORY.md file. You are the agent responsible for keeping that block accurate. Treat it as your shared todo board with the user — they SEE what you write there.
-
-**Where projects live:** A managed block between `<!-- BEGIN CARAPACE PROJECTS -->` and `<!-- END CARAPACE PROJECTS -->` somewhere in this MEMORY.md. The block exists already (or gets created on first use). DO NOT recreate the markers; just read + edit between them.
-
-**Format (strict — iOS parses this):**
-```
-### <slug-id> · <Name> · <emoji> <progress>%
-<one-paragraph description>
-
-**Focus:** <prompt the user can launch a chat with>
-
-**Workstreams:**
-- `<slug-id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus prompt>
-```
-
-**Status emojis:** 🟢 green (going well) · 🟡 yellow (some friction) · 🔴 red (blocked / failing) · ⚪ idle (not actively working)
-
-**Slug rules:** lowercase-with-hyphens, no spaces, no punctuation. Like `mobile-app-launch` or `wedding-rsvps`. Stable across sessions — never rename a slug once set; the iOS app keys local state on it.
-
-**When to ADD a project:** The user names a multi-step initiative ("I'm working on X", "we need to ship Y", "project: Z") OR you start orchestrating something that spans multiple sessions. Don't create projects for one-off questions or single-step tasks.
-
-**When to ADD a workstream:** A meaningful sub-effort within an existing project that the user can think about independently. Keep it under ~5 workstreams per project — if you're hitting that, the would-be workstream is probably its own project.
-
-**When to UPDATE progress / status:**
-- Bump progress only when concrete work lands (not when "we just talked about it")
-- 0% = fresh, no real work yet · 25% = early progress · 50% = halfway, plan is solid · 75% = late stages, finishing up · 100% = shipped / done (keep at 🟢 100% for completed)
-- Flip 🟡 yellow when something is friction-y but moving · 🔴 red only when actually blocked
-
-**Focus prompts:** The `**Focus:**` line is a prompt TEMPLATE the user taps in the iOS app to start a chat about that project / workstream. Write it as the OPENING you want the chat to have, NOT as a description. Example: `**Focus:** Walk me through the next 3 things to ship for the mobile launch` — not `**Focus:** Mobile launch project`.
-
-**Workstream owner:** Default `main`. Only set `@<other-agent>` when a different registered agent owns that workstream day-to-day.
-
-**Don't:**
-- Don't add fake/placeholder projects to fill the board
-- Don't delete the block or its markers
-- Don't add projects for things outside the user's actual life — only what they're actively working on with you
-- Don't rewrite descriptions every turn — keep them stable; bump only when meaningful new context lands
-
-<!-- END CARAPACE PROJECT RULES -->
-CARAPACE_PROJECT_RULES_EOF
-
-  mkdir -p "$(dirname "$memory_file")"
-  local tmp_file="${memory_file}.carapace.tmp.$$"
-
-  if [[ ! -f "$memory_file" ]]; then
-    cat "$block_file" > "$tmp_file"
-    mv "$tmp_file" "$memory_file"
-    ok "Created MEMORY.md with CARAPACE project rules (was absent)."
-    return 0
-  fi
-
-  /usr/bin/env python3 - "$memory_file" "$tmp_file" "$begin_marker" "$end_marker" "$block_file" <<'PY'
-import sys, re
-src_path, dst_path, begin_marker, end_marker, block_path = sys.argv[1:6]
-with open(src_path, "r", encoding="utf-8") as f:
-    original = f.read()
-with open(block_path, "r", encoding="utf-8") as f:
-    new_block = f.read().rstrip("\n") + "\n"
-begin_re = re.compile(r"^" + re.escape(begin_marker) + r".*$", re.MULTILINE)
-end_re   = re.compile(r"^" + re.escape(end_marker)   + r".*$", re.MULTILINE)
-b = begin_re.search(original); e = end_re.search(original)
-if b and e and b.start() < e.start():
-    before = original[:b.start()].rstrip("\n")
-    after  = original[e.end():].lstrip("\n")
-    rebuilt = (before + "\n\n" + new_block + ("\n" + after if after else "")) if before else (new_block + ("\n" + after if after else ""))
-elif b or e:
-    print("Partial sentinel block in MEMORY.md — aborting.", file=sys.stderr); sys.exit(2)
-else:
-    base = original.rstrip("\n")
-    rebuilt = base + "\n\n" + new_block
-with open(dst_path, "w", encoding="utf-8") as f:
-    f.write(rebuilt)
-PY
-  local rc=$?
-  if [[ $rc -ne 0 ]]; then
-    rm -f "$tmp_file" "$block_file"
-    warn "MEMORY.md project-rules upsert aborted (exit $rc) — file untouched."
-    return 1
-  fi
-  mv "$tmp_file" "$memory_file"
-  rm -f "$block_file"
-  trap - EXIT
-  ok "CARAPACE project rules installed into MEMORY.md."
-}
 
 # ── Initial Projects block seed ────────────────────────────────────
 # Drop the FIRST project — "Install CARAPACE on your device" — into
 # the sentinel-bounded PROJECTS block so users see something on
 # first launch instead of a blank Projects tab. Idempotent: if the
 # block already exists, this is a no-op so we never clobber real data.
-seed_carapace_projects_block() {
-  local memory_file="$HOME/.openclaw/workspace/memory/MEMORY.md"
-  local begin_marker="<!-- BEGIN CARAPACE PROJECTS"
-
-  if [[ ! -f "$memory_file" ]]; then
-    return 0
-  fi
-  # Anchor at line-start so the rules-block's documentation mention
-  # of the marker text doesn't false-positive.
-  if grep -q "^$begin_marker" "$memory_file" 2>/dev/null; then
-    return 0
-  fi
-
-  local seed_file
-  seed_file="$(mktemp)"
-  trap "rm -f '$seed_file'" EXIT
-  cat > "$seed_file" << 'CARAPACE_PROJECTS_SEED_EOF'
-<!-- BEGIN CARAPACE PROJECTS (agent-maintained · iOS Projects view reads + writes here · do not edit between markers from outside) -->
-<!-- Format:
-### <id> · <Name> · <emoji> <progress>%
-<description paragraph>
-
-**Focus:** <project focus prompt>
-
-**Workstreams:**
-- `<id>` · <name> · <emoji> <progress>% [· @<owner>] — <focus>
-
-Emojis: 🟢 green · 🟡 yellow · 🔴 red · ⚪ idle
--->
-## Projects
-
-### install-carapace · Install CARAPACE on your device · 🟢 100%
-You set up CARAPACE on your phone, paired it with this gateway, and ran your first conversation. ✅ Done.
-
-**Focus:** What's next now that CARAPACE is set up? Three concrete things I should try first.
-
-**Workstreams:**
-- _none yet_
-
-<!-- END CARAPACE PROJECTS -->
-CARAPACE_PROJECTS_SEED_EOF
-
-  printf "\n" >> "$memory_file"
-  cat "$seed_file" >> "$memory_file"
-  rm -f "$seed_file"
-  trap - EXIT
-  ok "Seeded CARAPACE projects block (Install CARAPACE 🟢 100%)."
-}
 
 # ── BOOTSTRAP.md injector ────────────────────────────────
 # OpenClaw 2026.4.22 shipped a default workspace BOOTSTRAP.md that
@@ -1151,9 +851,9 @@ CARAPACE_BOOTSTRAP_EOF
 # check becomes a permanent no-op (file doesn't exist → fall
 # through to normal reply) so this is harmless after first run.
 #
-# Same safety chain as inject_carapace_vision_rules: sentinel
-# markers, atomic tmp+rename, python-verified non-managed bytes
-# preserved, idempotent re-run.
+# Same safety chain as the other carapace injectors: sentinel markers,
+# atomic tmp+rename, python-verified non-managed bytes preserved,
+# idempotent re-run.
 inject_carapace_first_light() {
   local agents_file="$HOME/.openclaw/workspace/AGENTS.md"
   local begin_marker="<!-- BEGIN CARAPACE FIRST-LIGHT"
@@ -2482,9 +2182,9 @@ install_carapace_cognitive
 python3 - << 'PYEOF'
 import os, textwrap
 
-status_server = r"""
-const http = require("http"), fs = require("fs"), path = require("path"), os = require("os"); const DIR = path.join(os.homedir(), ".carapace"); const OC_DIR = path.join(os.homedir(), ".openclaw"); const TRACKER_PORT = 18795; function writePromptLocally(pathname, body, res) { try { const m = pathname.match(/^\/projects\/([^/]+)\/(?:workstreams\/([^/]+)\/)?prompt\/?$/); if (!m) { res.writeHead(400); res.end(JSON.stringify({ error: "bad path" })); return; } const pid = decodeURIComponent(m[1]); const wid = m[2] ? decodeURIComponent(m[2]) : null; const payload = JSON.parse(body || "{}"); const fp = path.join(DIR, "carapace-project-tracker.json"); const data = JSON.parse(fs.readFileSync(fp, "utf8")); const proj = (data.projects || []).find(p => p.id === pid); if (!proj) { res.writeHead(404); res.end(JSON.stringify({ error: "project not found" })); return; } const now = new Date().toISOString(); if (wid) { const ws = (proj.workstreams || []).find(w => w.id === wid); if (!ws) { res.writeHead(404); res.end(JSON.stringify({ error: "workstream not found" })); return; } if ("focusPrompt" in payload) ws.focusPrompt = payload.focusPrompt; ws.promptVersion = (ws.promptVersion || 0) + 1; ws.promptUpdatedAt = now; } else { if ("divePrompt" in payload) proj.divePrompt = payload.divePrompt; proj.promptVersion = (proj.promptVersion || 0) + 1; proj.promptUpdatedAt = now; } data.updated = now; fs.writeFileSync(fp, JSON.stringify(data)); res.end(JSON.stringify({ ok: true, id: pid, wid, promptVersion: wid ? (proj.workstreams.find(w => w.id === wid).promptVersion) : proj.promptVersion, promptUpdatedAt: now })); } catch(e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); } } function proxyToTracker(method, pathname, body, res) { const opts = { hostname: "127.0.0.1", port: TRACKER_PORT, path: pathname, method, headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body || "") } }; const proxyReq = http.request(opts, (proxyRes) => { let chunks = ""; proxyRes.on("data", d => { chunks += d; }); proxyRes.on("end", () => { res.writeHead(proxyRes.statusCode || 502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }); res.end(chunks || "{}"); }); }); proxyReq.on("error", (err) => { /* Tracker unreachable (Linux headless): write directly to status-server file */ writePromptLocally(pathname, body, res); }); if (body) proxyReq.write(body); proxyReq.end(); } function loadHistory(limit, token, agent) { try { if (token) { try { const cfg = JSON.parse(fs.readFileSync(path.join(OC_DIR, "openclaw.json"), "utf8")); const gwToken = cfg && cfg.gateway && cfg.gateway.auth && cfg.gateway.auth.token; if (gwToken && token !== gwToken) { return { error: "Unauthorized", messages: [], count: 0 }; } } catch(e) {} } const agentName = (agent && /^[a-zA-Z0-9_-]+$/.test(agent)) ? agent : "main"; const sessDir = path.join(OC_DIR, "agents", agentName, "sessions"); if (!fs.existsSync(sessDir)) return { messages: [], count: 0 }; let targetFile = null; try { const sessionsIndex = JSON.parse(fs.readFileSync(path.join(sessDir, "sessions.json"), "utf8")); const mainKey = `agent:${agentName}:main`; const entry = sessionsIndex[mainKey]; if (entry && entry.sessionId) { const candidate = entry.sessionId + ".jsonl"; if (fs.existsSync(path.join(sessDir, candidate))) { targetFile = candidate; } } } catch(e) {} if (!targetFile) { const files = fs.readdirSync(sessDir) .filter(f => f.endsWith(".jsonl") && f !== "sessions.json") .map(f => ({ f, mtime: fs.statSync(path.join(sessDir, f)).mtime })) .sort((a, b) => b.mtime - a.mtime); if (!files.length) return { messages: [], count: 0 }; targetFile = files[0].f; } const lines = fs.readFileSync(path.join(sessDir, targetFile), "utf8").split("\n").filter(Boolean); const messages = []; for (const line of lines) { try { const entry = JSON.parse(line); if (entry.type !== "message") continue; const msg = entry.message; if (!msg || !msg.role) continue; if (!["user", "assistant"].includes(msg.role)) continue; let text = ""; if (typeof msg.content === "string") { text = msg.content; } else if (Array.isArray(msg.content)) { text = msg.content.filter(c => c.type === "text").map(c => c.text).join(""); } text = text.replace(/<final>/g, "").replace(/<\/final>/g, "").trim(); if (!text) continue; if (text === "HEARTBEAT_OK" || text === "NO_REPLY") continue; if (text.includes("Read HEARTBEAT.md if it exists")) continue; if (text.startsWith("Exec completed")) continue; if (text.startsWith("System:")) continue; if (text.match(/^\[\d{4}-\d{2}-\d{2}.*\] Exec (completed|started|failed)/)) continue; if (text.includes("[system event]")) continue; if (text.includes("openclaw system event")) continue; if (text.startsWith("HEARTBEAT_OK")) continue; if (text.startsWith("[[reply_to")) continue; if (text.startsWith("[[ reply_to")) continue; if (text.includes("BEGIN_OPENCLAW_INTERNAL_CONTEXT")) continue; if (text.includes("Inter-session message")) continue; if (text.includes("[Internal task completion event]")) continue; if (text.includes("Continue where you left off. The previous model attempt failed or timed out")) continue; if (text.includes("previous model attempt failed or timed out")) continue; if (text.includes("HEARTBEAT_OK")) continue; if (text.includes("Handle the result internally")) continue; if (text.includes("System (untrusted)")) continue; if (text.includes("Exec completed")) continue; if (text.includes("openclaw doctor")) continue; if (text.includes("async command you ran earlier")) continue; if (text.includes("Current time:") && text.includes("UTC")) continue; if (text.includes("Tracker is running")) continue; if (text.includes("spawn a refresh")) continue; if (text.includes("I'll spawn")) continue; if (text.includes("queue is empty")) continue; if (text.includes("Do not relay it to the user")) continue; if (text.startsWith("An async command")) continue; if (msg.role === "user" && text.includes("System (untrusted)")) continue; if (msg.role === "user" && text.includes("Sender (untrusted metadata)")) { const match = text.match(/\[.*?\]\s+([\s\S]+)$/); if (match) text = match[1].trim(); else continue; } if (!text) continue; messages.push({ role: msg.role, content: text, timestamp: entry.timestamp ? String(entry.timestamp) : "" }); } catch(e) {} } const result = messages.slice(-limit); return { messages: result, count: result.length }; } catch(e) { return { messages: [], count: 0 }; } } function extractBearer(req) { const authLine = req.split("\r\n").find(l => l.toLowerCase().startsWith("authorization:")); if (!authLine) return null; const parts = authLine.split("Bearer "); return parts.length > 1 ? parts[1].trim() : null; } const fileMap = { "/projects": "carapace-project-tracker.json", "/tracker": "carapace-project-tracker.json", "/cron": "carapace-cron-tracker.json" }; function isTierPaid() { try { const tierFile = path.join(DIR, "tier.json"); if (!fs.existsSync(tierFile)) return true; const data = JSON.parse(fs.readFileSync(tierFile, "utf8")); return data.tier && data.tier !== "free"; } catch { return true; } } const EMPTY_PROJECTS = JSON.stringify({version:1,updated:"",projects:[]}); const EMPTY_CRON = JSON.stringify({version:1,updated:"",jobs:[]}); const EMPTY_AGENTS = JSON.stringify({agents:{},updated:""}); function getLiveAgentStatus() { try { const agentsRoot = path.join(OC_DIR, "agents"); if (!fs.existsSync(agentsRoot)) return buildFallbackStatus("idle", "No agents directory"); const agents = {}; const agentDirs = fs.readdirSync(agentsRoot).filter(a => { try { return fs.statSync(path.join(agentsRoot, a)).isDirectory(); } catch { return true; } }); for (const agent of agentDirs) { const sessDir = path.join(agentsRoot, agent, "sessions"); if (!fs.existsSync(sessDir)) continue; const indexPath = path.join(sessDir, "sessions.json"); if (!fs.existsSync(indexPath)) continue; const index = JSON.parse(fs.readFileSync(indexPath, "utf8")); for (const [sessionKey, entry] of Object.entries(index)) { const isSubagent = sessionKey.includes(":subagent:"); const agentId = isSubagent ? sessionKey.split(":subagent:")[1]?.slice(0, 8) || "sub" : agent; const updatedAt = entry.updatedAt || 0; const ageMs = Date.now() - updatedAt; const isRunning = entry.status === "running"; const twoHours = 2 * 60 * 60 * 1000; if (!isSubagent) { const canonicalKey = `agent:${agent}:main`; if (sessionKey !== canonicalKey) continue; if (ageMs > 30 * 60 * 1000) continue; const agentLabel = agent === "main" ? "Main" : agent.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()); const agentKey = agent === "main" ? "main" : agent; agents[agentKey] = { name: agentLabel, status: isRunning ? "active" : "idle", detail: isRunning ? "Processing" : "Ready", updated: new Date(updatedAt).toLocaleTimeString() }; } else if (isSubagent) { if (ageMs > twoHours) continue; if (!isRunning && ageMs > 20000) continue; agents[agentId] = { name: `Subagent ${agentId}`, status: "active", detail: entry.lastChannel || "isolated task", parent: "main", updated: new Date(updatedAt).toLocaleTimeString() }; } } } if (!agents["main"]) { agents["main"] = { name: "Main", status: "idle", detail: "Ready", updated: new Date().toLocaleTimeString() }; } return { agents, updated: new Date().toLocaleTimeString() }; } catch(e) { return buildFallbackStatus("idle", "Status unavailable"); } } function buildFallbackStatus(status, detail) { return { agents: { main: { name: "Main", status, detail, updated: new Date().toLocaleTimeString() } }, updated: new Date().toLocaleTimeString() }; } http.createServer((req, res) => { let body = ""; req.on("data", d => { body += d; }); req.on("end", () => { res.setHeader("Access-Control-Allow-Origin", "*"); res.setHeader("Content-Type", "application/json"); if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; } const rawPath = req.url || "/"; const p = rawPath.split("?")[0]; const qs = new URLSearchParams(rawPath.includes("?") ? rawPath.split("?")[1] : ""); const limit = parseInt(qs.get("limit") || "50"); const token = (req.headers["authorization"] || "").replace("Bearer ", "").trim() || null; if (p === "/health") { res.end(JSON.stringify({ ok: true })); return; } if (p === "/history") { const agent = qs.get("agent") || "main"; res.end(JSON.stringify(loadHistory(Math.min(limit, 200), token, agent))); return; } if (p === "/sessions") { const agentsRoot = path.join(OC_DIR, "agents"); let sessions = []; try { const agentDirs = fs.readdirSync(agentsRoot).filter(a => { try { return fs.statSync(path.join(agentsRoot, a)).isDirectory(); } catch { return true; } }).sort(); for (const agent of agentDirs) { const sessDir = path.join(agentsRoot, agent, "sessions"); let lastActive = 0; try { const files = fs.readdirSync(sessDir) .filter(f => f.endsWith(".jsonl") && !f.includes(".deleted.") && !f.includes(".reset.") && f !== "sessions.json"); for (const f of files) { try { const mtime = fs.statSync(path.join(sessDir, f)).mtime.getTime() / 1000; if (mtime > lastActive) lastActive = mtime; } catch {} } } catch {} const label = agent === "main" ? "Main" : agent.replace(/-/g, " ").replace(/_/g, " ") .replace(/\b\w/g, c => c.toUpperCase()); sessions.push({ key: `agent:${agent}:main`, agent, label, lastActive }); } sessions.sort((a, b) => { if (a.agent === "main") return -1; if (b.agent === "main") return 1; return b.lastActive - a.lastActive; }); } catch {} res.end(JSON.stringify({ sessions })); return; } if ((p === "/" || p === "") && qs.has("limit")) { const agent = qs.get("agent") || "main"; res.end(JSON.stringify(loadHistory(Math.min(limit, 200), token, agent))); return; } if (p === "/" || p === "") { const fp = path.join(DIR, "carapace-agent-tracker.json"); try { res.end(fs.readFileSync(fp, "utf8")); } catch { res.writeHead(404); res.end(JSON.stringify({ error: "not found" })); } return; } if (req.method === "DELETE" && p.startsWith("/cron/")) { const id = decodeURIComponent(p.slice("/cron/".length)); if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "missing id" })); return; } let deleted = false; try { const ocfp = path.join(OC_DIR, "cron", "jobs.json"); if (fs.existsSync(ocfp)) { const data = JSON.parse(fs.readFileSync(ocfp, "utf8")); const before = (data.jobs || []).length; data.jobs = (data.jobs || []).filter(j => j.id !== id); if (data.jobs.length < before) { fs.writeFileSync(ocfp, JSON.stringify(data)); deleted = true; } } } catch (e) {} try { const tfp = path.join(DIR, "carapace-cron-tracker.json"); if (fs.existsSync(tfp)) { const data = JSON.parse(fs.readFileSync(tfp, "utf8")); const before = (data.jobs || []).length; data.jobs = (data.jobs || []).filter(j => j.id !== id); if (data.jobs.length < before) { fs.writeFileSync(tfp, JSON.stringify(data)); deleted = true; } } } catch (e) {} try { const tombfp = path.join(DIR, "deleted-cron-ids.json"); const tomb = fs.existsSync(tombfp) ? JSON.parse(fs.readFileSync(tombfp, "utf8")) : { ids: [] }; if (!tomb.ids.includes(id)) tomb.ids.push(id); fs.writeFileSync(tombfp, JSON.stringify(tomb)); } catch(e) {} if (!deleted) { res.writeHead(404); res.end(JSON.stringify({ error: "job not found" })); return; } res.end(JSON.stringify({ ok: true, deleted: id })); return; } if (req.method === "PUT" && /^\/projects\/[^/]+\/(prompt|workstreams\/[^/]+\/prompt)\/?$/.test(p)) { proxyToTracker("PUT", p, body, res); return; } if (req.method === "DELETE" && p.startsWith("/projects/")) { const id = decodeURIComponent(p.slice("/projects/".length)); if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "missing id" })); return; } const fp = path.join(DIR, "carapace-project-tracker.json"); try { const data = JSON.parse(fs.readFileSync(fp, "utf8")); const before = data.projects.length; data.projects = data.projects.filter(proj => proj.id !== id); if (data.projects.length === before) { res.writeHead(404); res.end(JSON.stringify({ error: "project not found" })); return; } data.updated = new Date().toISOString(); fs.writeFileSync(fp, JSON.stringify(data)); res.end(JSON.stringify({ ok: true, deleted: id })); } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); } return; } if (p === "/status" || p === "/agents") { res.end(JSON.stringify(getLiveAgentStatus())); return; } const filePath = fileMap[p] ? path.join(DIR, fileMap[p]) : null; if (filePath) { if (!isTierPaid()) { if (p === "/projects" || p === "/tracker") { res.end(EMPTY_PROJECTS); return; } if (p === "/cron") { res.end(EMPTY_CRON); return; } } try { res.end(fs.readFileSync(filePath, "utf8")); } catch { res.writeHead(404); res.end(JSON.stringify({ error: "not found" })); } return; } res.writeHead(404); res.end(JSON.stringify({ error: "not found" })); }); }).listen(18794, "127.0.0.1", () => console.log("CARAPACE Status Server on :18794"));
-""".lstrip()
+# Dead-code embedded status-server block deleted. The canonical version
+# is downloaded fresh from raw.github at install time (see SS_URL block
+# above). This Python heredoc now only generates sync-trackers.sh.
 
 sync_script = textwrap.dedent("""
     #!/usr/bin/env bash
@@ -2540,11 +2240,9 @@ sync_script = textwrap.dedent("""
 """).lstrip()
 
 home = os.path.expanduser("~")
-# status-server.js is downloaded from carapace.info before this Python
-# block runs (single source of truth); only sync-trackers.sh is
-# generated from inline content. The status_server variable above is
-# kept around as a dead-code fallback in case the curl fetch ever
-# regresses — the bash check exits before reaching here on failure.
+# status-server.js is downloaded fresh from raw.github at install time
+# (see SS_URL block above this Python heredoc); only sync-trackers.sh
+# is generated inline.
 with open(home + "/.carapace/sync-trackers.sh", "w") as f:
     f.write(sync_script)
 os.chmod(home + "/.carapace/sync-trackers.sh", 0o755)
@@ -2658,11 +2356,10 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   #   forwards as /foo on the backend (matching the actual routes).
   # Single source of truth for ALL Tailscale serve routes — used both
   # for the imperative install loop below AND for generating the
-  # persistent systemd unit's ExecStartPost lines further down. Keep
-  # the two prefix shapes (`/<endpoint>` and `/carapace/<endpoint>`)
-  # in lock-step: the iOS app fetches some endpoints bare (`/chat`)
-  # and others via the `/carapace/` prefix (`/carapace/projects`).
-  # Missing one shape = silent 404 in production.
+  # persistent systemd unit's ExecStartPost lines further down. iOS
+  # hits these bare (`/chat`, `/projects` etc) — the legacy
+  # `/carapace/<endpoint>` prefix from the pre-1.x iOS app was
+  # removed (no production deployments to maintain compat with).
   CARAPACE_SERVE_ROUTES=(
     # path                               backend_url
     "/health                              http://127.0.0.1:18794/health"
@@ -2675,19 +2372,6 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
     "/pair                                http://127.0.0.1:18794/pair"
     "/chat                                http://127.0.0.1:18794/chat"
     "/cognitive                           http://127.0.0.1:18794/cognitive"
-    # /carapace catch-all + explicit children. Catch-all goes to bare
-    # :18794 root so /carapace/foo → /foo on the backend (correct).
-    "/carapace                            http://127.0.0.1:18794"
-    "/carapace/health                     http://127.0.0.1:18794/health"
-    "/carapace/history                    http://127.0.0.1:18794/history"
-    "/carapace/sessions                   http://127.0.0.1:18794/sessions"
-    "/carapace/projects                   http://127.0.0.1:18794/projects"
-    "/carapace/cron                       http://127.0.0.1:18794/cron"
-    "/carapace/agents                     http://127.0.0.1:18794/agents"
-    "/carapace/status                     http://127.0.0.1:18794/status"
-    "/carapace/pair                       http://127.0.0.1:18794/pair"
-    "/carapace/chat                       http://127.0.0.1:18794/chat"
-    "/carapace/cognitive                  http://127.0.0.1:18794/cognitive"
   )
   # Wrap each call in `timeout 10` — without it, a hung tailscale
   # daemon (DNS lookup stuck, control plane unreachable, etc.) makes

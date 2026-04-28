@@ -202,8 +202,6 @@ async function forwardToOpenClaw(messages, agent_id) {
   return ocReq;
 }
 
-const TRACKER_PORT = 18795; // python project-tracker-server (legacy fallback)
-
 // ============================================================================
 // CARAPACE PROJECTS — per-agent PROJECTS.md tracker
 // ============================================================================
@@ -657,83 +655,6 @@ function projectsMigrateOnStartup() {
 }
 projectsMigrateOnStartup();
 
-// Fallback: write prompt directly to the status-server's tracker file when the
-// Python tracker server isn't running (e.g. Linux headless installs).
-function writePromptLocally(pathname, body, res) {
-  try {
-    const m = pathname.match(/^\/projects\/([^/]+)\/(?:workstreams\/([^/]+)\/)?prompt\/?$/);
-    if (!m) {
-      res.writeHead(400, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify({ error: "bad path" }));
-      return;
-    }
-    const pid = decodeURIComponent(m[1]);
-    const wid = m[2] ? decodeURIComponent(m[2]) : null;
-    const payload = JSON.parse(body || "{}");
-    const fp = path.join(DIR, "carapace-project-tracker.json");
-    const data = JSON.parse(fs.readFileSync(fp, "utf8"));
-    const proj = (data.projects || []).find(p => p.id === pid);
-    if (!proj) {
-      res.writeHead(404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify({ error: "project not found" }));
-      return;
-    }
-    const now = new Date().toISOString();
-    if (wid) {
-      const ws = (proj.workstreams || []).find(w => w.id === wid);
-      if (!ws) {
-        res.writeHead(404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-        res.end(JSON.stringify({ error: "workstream not found" }));
-        return;
-      }
-      if ("focusPrompt" in payload) ws.focusPrompt = payload.focusPrompt;
-      ws.promptVersion = (ws.promptVersion || 0) + 1;
-      ws.promptUpdatedAt = now;
-      data.updated = now;
-      fs.writeFileSync(fp, JSON.stringify(data));
-      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify({ ok: true, id: pid, wid, promptVersion: ws.promptVersion, promptUpdatedAt: now }));
-    } else {
-      if ("divePrompt" in payload) proj.divePrompt = payload.divePrompt;
-      proj.promptVersion = (proj.promptVersion || 0) + 1;
-      proj.promptUpdatedAt = now;
-      data.updated = now;
-      fs.writeFileSync(fp, JSON.stringify(data));
-      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify({ ok: true, id: pid, promptVersion: proj.promptVersion, promptUpdatedAt: now }));
-    }
-  } catch(e) {
-    res.writeHead(500, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-    res.end(JSON.stringify({ error: e.message }));
-  }
-}
-
-// Proxy a request body to the local python tracker server and forward the response.
-// Falls back to a direct file write if the tracker isn't running (Linux headless).
-function proxyToTracker(method, pathname, body, res) {
-  const opts = {
-    hostname: "127.0.0.1",
-    port: TRACKER_PORT,
-    path: pathname,
-    method,
-    headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body || "") }
-  };
-  const proxyReq = http.request(opts, (proxyRes) => {
-    let chunks = "";
-    proxyRes.on("data", d => { chunks += d; });
-    proxyRes.on("end", () => {
-      res.writeHead(proxyRes.statusCode || 502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(chunks || "{}");
-    });
-  });
-  proxyReq.on("error", (err) => {
-    // Tracker unreachable — fall back to direct status-server write (Linux path).
-    writePromptLocally(pathname, body, res);
-  });
-  if (body) proxyReq.write(body);
-  proxyReq.end();
-}
-
 function loadHistory(limit, token, agent) {
   try {
     // Verify token if gateway has one configured
@@ -899,16 +820,8 @@ function loadHistory(limit, token, agent) {
   } catch(e) { return { messages: [], count: 0 }; }
 }
 
-function extractBearer(req) {
-  const authLine = req.split("\r\n").find(l => l.toLowerCase().startsWith("authorization:"));
-  if (!authLine) return null;
-  const parts = authLine.split("Bearer ");
-  return parts.length > 1 ? parts[1].trim() : null;
-}
-
 const fileMap = {
   "/projects": "carapace-project-tracker.json",
-  "/tracker": "carapace-project-tracker.json",
   "/cron": "carapace-cron-tracker.json"
 };
 
@@ -1980,10 +1893,9 @@ http.createServer((req, res) => {
       return;
     }
 
-    // GET /projects?agent=<id> + /tracker?agent=<id> — sourced from
-    // <agent-workspace>/PROJECTS.md. Per-agent: each agent has its
-    // own board. Default agent=main when omitted.
-    if (p === "/projects" || p === "/tracker") {
+    // GET /projects?agent=<id> — sourced from <agent-workspace>/PROJECTS.md.
+    // Per-agent: each agent has its own board. Default agent=main when omitted.
+    if (p === "/projects") {
       if (!isTierPaid()) { res.end(EMPTY_PROJECTS); return; }
       try { res.end(JSON.stringify(projectsBuildResponse(agentParam))); }
       catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
