@@ -584,6 +584,233 @@ except Exception: print('False')" 2>/dev/null || echo False)
   fi
 }
 
+# ══════════════════════════════════════════════════════════
+# Carapace minimal provider picker (replaces `openclaw onboard`)
+# ══════════════════════════════════════════════════════════
+# We used to defer to `openclaw onboard` for provider/key/model.
+# It worked but had three footguns we kept hitting:
+#   1. The "Browse all models" picker surfaces beta/preview variants
+#      (e.g. xai/grok-4.20-beta) that hit safety filters or stall.
+#   2. The TUI fires a hatch turn IN-band during onboard so install
+#      can't catch failures before showing the QR.
+#   3. Auth changes don't hot-reload — they need a full gateway
+#      restart, which onboard doesn't always trigger.
+#
+# Our minimal picker: 4 providers, 1 recommended-stable model each,
+# write auth-profiles.json directly, ALWAYS restart, ALWAYS fire a
+# warmup turn from install.sh side with progress, ALWAYS validate
+# before showing QR. No TUI in install path.
+
+carapace_recommended_model_for() {
+  case "$1" in
+    xai)       echo "xai/grok-4-1-fast-non-reasoning" ;;
+    openai)    echo "openai/gpt-5-mini" ;;
+    anthropic) echo "anthropic/claude-haiku-4-5" ;;
+    google)    echo "google/gemini-2.5-flash" ;;
+    *) return 1 ;;
+  esac
+}
+
+carapace_key_prefix_for() {
+  case "$1" in
+    xai)       echo "xai-" ;;
+    openai)    echo "sk-" ;;
+    anthropic) echo "sk-ant-" ;;
+    google)    echo "AIza" ;;
+    *) return 1 ;;
+  esac
+}
+
+carapace_provider_label_for() {
+  case "$1" in
+    xai)       echo "xAI (Grok)" ;;
+    openai)    echo "OpenAI (GPT)" ;;
+    anthropic) echo "Anthropic (Claude)" ;;
+    google)    echo "Google (Gemini)" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Returns 0 if any provider has a real key in auth-profiles.json
+carapace_provider_already_configured() {
+  local auth_file="$HOME/.openclaw/agents/main/agent/auth-profiles.json"
+  [[ -f "$auth_file" ]] || return 1
+  local has_key
+  has_key=$(/usr/bin/env python3 -c "
+import json
+try:
+  d = json.load(open('$auth_file'))
+  for prof in d.get('profiles', {}).values():
+    k = prof.get('key', '')
+    if k and len(k) > 10:
+      print('1'); raise SystemExit
+except Exception: pass
+print('0')" 2>/dev/null || echo "0")
+  [[ "$has_key" == "1" ]]
+}
+
+# Sets globals: CARAPACE_PROVIDER, CARAPACE_KEY, CARAPACE_MODEL
+# Returns 0 if user picked + pasted a key, 1 if they skipped or aborted.
+carapace_prompt_provider_and_key() {
+  CARAPACE_PROVIDER=""
+  CARAPACE_KEY=""
+  CARAPACE_MODEL=""
+  echo ""
+  echo -e "  ${BOLD}Pick your AI provider:${RESET}"
+  echo -e "    ${BOLD}1${RESET}) xAI (Grok)         ${DIM}→ $(carapace_recommended_model_for xai)${RESET}"
+  echo -e "    ${BOLD}2${RESET}) OpenAI (GPT)       ${DIM}→ $(carapace_recommended_model_for openai)${RESET}"
+  echo -e "    ${BOLD}3${RESET}) Anthropic (Claude) ${DIM}→ $(carapace_recommended_model_for anthropic)${RESET}"
+  echo -e "    ${BOLD}4${RESET}) Google (Gemini)    ${DIM}→ $(carapace_recommended_model_for google)${RESET}"
+  echo -e "    ${BOLD}s${RESET}) Skip — set up later via ${BOLD}carapace-onboard${RESET}"
+  echo ""
+  local choice provider
+  read -rp "  Choice [1-4/s]: " choice < /dev/tty
+  case "$choice" in
+    1) provider="xai" ;;
+    2) provider="openai" ;;
+    3) provider="anthropic" ;;
+    4) provider="google" ;;
+    s|S|"") echo -e "  ${YELLOW}Skipped — run \`carapace-onboard\` later to configure${RESET}"; return 1 ;;
+    *) echo -e "  ${RED}Invalid choice — skipping${RESET}"; return 1 ;;
+  esac
+  echo ""
+  local label prefix
+  label="$(carapace_provider_label_for "$provider")"
+  prefix="$(carapace_key_prefix_for "$provider")"
+  echo -e "  ${BOLD}Paste your $label API key${RESET} ${DIM}(should start with ${BOLD}${prefix}${RESET}${DIM})${RESET}"
+  local key
+  read -rsp "  Key: " key < /dev/tty
+  echo ""
+  if [[ -z "$key" ]]; then
+    echo -e "  ${RED}Empty key — skipping${RESET}"
+    return 1
+  fi
+  # Catch the "pasted wrong provider's key" footgun (we hit this once already)
+  if [[ "${key:0:${#prefix}}" != "$prefix" ]]; then
+    echo -e "  ${YELLOW}⚠ Key doesn't start with ${BOLD}${prefix}${RESET}${YELLOW} — likely pasted wrong provider's key${RESET}"
+    local confirm
+    read -rp "  Continue anyway? [y/N]: " confirm < /dev/tty
+    [[ "$confirm" =~ ^[Yy]$ ]] || { echo "  Skipped — re-run install.sh to retry"; return 1; }
+  fi
+  CARAPACE_PROVIDER="$provider"
+  CARAPACE_KEY="$key"
+  CARAPACE_MODEL="$(carapace_recommended_model_for "$provider")"
+  return 0
+}
+
+# Args: provider, key, model
+# Writes auth-profiles.json + sets agents.defaults.model.
+# Idempotent — preserves other providers if they already exist.
+carapace_write_auth() {
+  local provider="$1" key="$2" model="$3"
+  local auth_dir="$HOME/.openclaw/agents/main/agent"
+  local auth_file="$auth_dir/auth-profiles.json"
+  mkdir -p "$auth_dir"
+  AUTH_PATH="$auth_file" PROVIDER="$provider" KEY="$key" /usr/bin/env python3 - <<'PYEOF'
+import json, os
+path = os.environ["AUTH_PATH"]
+provider = os.environ["PROVIDER"]
+key = os.environ["KEY"]
+data = {"version": 1, "profiles": {}}
+if os.path.exists(path):
+    try: data = json.load(open(path))
+    except Exception: pass
+data.setdefault("profiles", {})
+data["profiles"][f"{provider}:default"] = {
+    "type": "api_key",
+    "provider": provider,
+    "key": key,
+}
+json.dump(data, open(path, "w"), indent=2)
+PYEOF
+  chmod 600 "$auth_file" 2>/dev/null || true
+  # Register the profile in openclaw.json so the gateway resolves it
+  openclaw config set "auth.profiles.${provider}:default" "{\"provider\":\"${provider}\",\"mode\":\"api_key\"}" >/dev/null 2>&1 || true
+  # Set default model (our recommended-stable for this provider)
+  openclaw config set agents.defaults.model "$model" >/dev/null 2>&1
+}
+
+# Wipe stale session jsonl (corrupt fragments from prior failed key attempts
+# bloat chat.history loads to 30s+ and can break the TUI on next open).
+carapace_wipe_stale_sessions() {
+  rm -f "$HOME/.openclaw/agents/main/sessions/"*.jsonl 2>/dev/null
+  rm -f "$HOME/.openclaw/workspace/BOOTSTRAP.md" 2>/dev/null
+}
+
+# Restart gateway and wait for the agent runtime to be REALLY ready.
+# /health passes when HTTP binds (~6s) but the agent can't process
+# turns until the embedded acpx runtime registers (~70s). cron.list
+# only succeeds after the runtime is up, so it's our true-ready probe.
+carapace_restart_gateway_and_wait_ready() {
+  local max_wait="${1:-120}"
+  systemctl --user restart openclaw-gateway 2>/dev/null || \
+    openclaw gateway restart >/dev/null 2>&1 || true
+  local start now
+  start=$(date +%s)
+  while :; do
+    if timeout 3 openclaw cron list >/dev/null 2>&1; then
+      now=$(date +%s)
+      ok "Agent runtime ready ($((now - start))s)"
+      return 0
+    fi
+    now=$(date +%s)
+    [[ $((now - start)) -ge "$max_wait" ]] && break
+    sleep 2
+  done
+  warn "Agent runtime didn't respond within ${max_wait}s — install will continue but first turn may be slow"
+  return 1
+}
+
+# Fire a warmup turn from install.sh side with a live progress indicator.
+# Validates the agent can complete a real round-trip before we dump the QR.
+# Returns 0 on success, 1 on failure. Always continues install.
+carapace_warmup_turn() {
+  local model token start http reply
+  model=$( (openclaw config get agents.defaults.model 2>/dev/null || true) | tr -d '"{ ' | head -1 )
+  if [[ -z "$model" || "$model" == "null" ]]; then
+    echo -e "  ${DIM}Skipping warmup — no model configured${RESET}"
+    return 1
+  fi
+  token=$(/usr/bin/env python3 -c "import json; print(json.load(open('$HOME/.openclaw/openclaw.json'))['gateway']['auth']['token'])" 2>/dev/null)
+  if [[ -z "$token" ]]; then
+    warn "No gateway token found — skipping warmup"
+    return 1
+  fi
+  echo -e "  ${DIM}Warming up your agent (cold-start = 60-180s, warm = 5-20s)...${RESET}"
+  local out_file="/tmp/carapace-warmup-$$.out"
+  local code_file="/tmp/carapace-warmup-$$.code"
+  rm -f "$out_file" "$code_file"
+  start=$(date +%s)
+  # Background curl so we can show progress
+  curl -sS --max-time 240 -o "$out_file" -w "%{http_code}" \
+    -X POST http://127.0.0.1:18789/v1/chat/completions \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"openclaw","messages":[{"role":"user","content":"reply just ok"}]}' \
+    > "$code_file" 2>/dev/null &
+  local pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    printf "\r  ${DIM}  warming... %ds${RESET}" "$(( $(date +%s) - start ))"
+    sleep 2
+  done
+  wait "$pid" 2>/dev/null || true
+  printf "\r"
+  http=$(cat "$code_file" 2>/dev/null || echo "000")
+  reply=$(/usr/bin/env python3 -c "
+import json
+try: print(json.load(open('$out_file')).get('choices',[{}])[0].get('message',{}).get('content','')[:80].strip())
+except Exception: pass" 2>/dev/null)
+  local elapsed=$(( $(date +%s) - start ))
+  rm -f "$out_file" "$code_file"
+  if [[ "$http" == "200" && -n "$reply" ]]; then
+    ok "AI alive (${elapsed}s) — first reply: \"$reply\""
+    return 0
+  fi
+  warn "Warmup turn failed (HTTP=$http after ${elapsed}s) — install continues, but first iOS message may fail"
+  warn "  Diagnostic: \`openclaw gateway logs\` or \`carapace-onboard\` to reconfigure"
+  return 1
+}
+
 retire_legacy_per_agent_projects_files() {
   local found=0
   for d in "$HOME/.openclaw/workspace/agents/"*/ "$HOME/.openclaw/"workspace-*/; do
@@ -2667,202 +2894,79 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════
-# Step 9: Configure Your AI (hand-off to OpenClaw)
+# Step 9: Configure Your AI (Carapace minimal flow)
 # ══════════════════════════════════════════════════════════
-# We used to maintain a parallel provider/model picker here that
-# duplicated `openclaw onboard`. Removed — OpenClaw's own picker
-# is polished, supports every provider it can route to, and stays
-# in sync with upstream model availability automatically. We just
-# hand off.
+# Used to defer to `openclaw onboard` here. Replaced with our own
+# minimal picker because onboard's TUI introduced three classes of
+# bugs we kept hitting: model-picker showed unstable beta variants
+# (xai/grok-4.20-beta hits SAFETY_CHECK_TYPE_BIO and stalls), the
+# in-band hatch turn meant install couldn't catch failures before
+# showing the QR, and auth changes weren't picked up without a full
+# gateway restart that onboard didn't always trigger.
+#
+# Our flow:
+#   1. Bump bootstrap caps + inject workspace files
+#   2. Provider/key picker (skip if already configured + non-TTY)
+#   3. Wipe stale session jsonl + BOOTSTRAP.md (clean slate)
+#   4. Restart gateway → wait for true-ready (cron.list succeeds)
+#   5. Warmup turn with progress bar — validates auth+model before QR
+#   6. Hand off to Step 10 Connect (QR)
 step "Configure Your AI"
-# Pre-bump bootstrap caps + agent timeout BEFORE openclaw onboard
-# launches the TUI. The TUI fires the first-ever turn ("Wake up,
-# my friend!") inside onboard's flow, and the agent uses tools to
-# read+delete BOOTSTRAP.md as part of the bootstrap ritual. Default
-# agent timeout is 30s — too short for a cold-start xAI call to
-# complete a tool round-trip, so the tool aborts mid-call and
-# BOOTSTRAP.md never gets deleted. The wrapper then re-injects on
-# every subsequent turn and the agent loops on the same greeting.
-# Setting timeoutSeconds=180 here closes that race.
-ensure_carapace_bootstrap_caps || true
-# Test whether /dev/tty is actually openable. `curl | bash` gives
-# bash a non-TTY stdin (the curl pipe), so `[ -t 0 ]` fails — but
-# /dev/tty IS openable because there's still a controlling terminal.
-# The previous `-t 0 && -e /dev/tty` check skipped onboard entirely
-# in the curl|bash case, which is the documented happy path.
-# `( : < /dev/tty ) 2>/dev/null` opens /dev/tty in a subshell with
-# the no-op `:` builtin and discards the error if it fails — exit
-# status reflects whether the open succeeded, which is the only
-# precondition openclaw onboard's TUI actually needs.
-if ( : < /dev/tty ) 2>/dev/null; then
-  echo -e "  ${DIM}Launching openclaw onboard — pick your provider, paste your${RESET}"
-  echo -e "  ${DIM}key, choose your model. Press Ctrl+C to skip and run later${RESET}"
-  echo -e "  ${DIM}with: ${BOLD}openclaw onboard${RESET}${DIM} (or carapace-onboard)${RESET}"
-  echo ""
-  echo -e "  ${BOLD}Recommended models${RESET} ${DIM}(fastest stable per provider — pick anything,${RESET}"
-  echo -e "  ${DIM}these are just the safest defaults if you're unsure):${RESET}"
-  echo -e "    ${BOLD}xAI${RESET}        ${DIM}→${RESET} xai/grok-4-1-fast-non-reasoning"
-  echo -e "    ${BOLD}OpenAI${RESET}     ${DIM}→${RESET} openai/gpt-5-mini"
-  echo -e "    ${BOLD}Anthropic${RESET}  ${DIM}→${RESET} anthropic/claude-haiku-4-5"
-  echo -e "    ${BOLD}Google${RESET}     ${DIM}→${RESET} google/gemini-2.5-flash"
-  echo -e "  ${DIM}Avoid models with ${BOLD}beta${RESET}${DIM}, ${BOLD}preview${RESET}${DIM}, or ${BOLD}4.20${RESET}${DIM} in the name —${RESET}"
-  echo -e "  ${DIM}they hit safety filters or stall on first turn.${RESET}"
-  echo ""
-  openclaw onboard < /dev/tty > /dev/tty 2>&1 ||     warn "openclaw onboard exited non-zero — re-run with: openclaw onboard"
-else
-  echo -e "  ${YELLOW}No TTY available (curl|bash from a non-interactive shell).${RESET}"
-  echo -e "  Run this on the machine to set up your AI provider:"
-  echo ""
-  echo -e "      ${BOLD}openclaw onboard${RESET}"
-  echo ""
-fi
 
-# ══════════════════════════════════════════════════════════
-# Carapace post-onboard injection
-# ══════════════════════════════════════════════════════════
-# Run THIS BEFORE the pre-warm/liveness test, NOT at the end of the
-# script (where it used to live, after Step 10 Connect — the user had
-# already seen the QR + paired by then). Order matters:
-#   1. openclaw onboard   ← writes/overwrites stock AGENTS.md
-#   2. carapace inject    ← THIS BLOCK: layers our sentinel + BOOTSTRAP +
-#                           ensure_carapace_bootstrap_caps (trustedProxies,
-#                           timeoutSeconds, bootstrapMaxChars)
-#   3. liveness test      ← agent picks up our injections on first turn
-#   4. Step Connect       ← user sees QR with everything in place
+# 1. Caps + workspace injection
+ensure_carapace_bootstrap_caps || true
 echo -e "  ${DIM}Injecting CARAPACE workspace files + config...${RESET}"
-inject_carapace_first_light  # sentinel into AGENTS.md
-inject_carapace_bootstrap    # BOOTSTRAP.md birth ritual
-sweep_carapace_for_all_agents # also sets bootstrap caps + trustedProxies + timeoutSeconds via ensure_carapace_bootstrap_caps
+inject_carapace_first_light
+inject_carapace_bootstrap
+sweep_carapace_for_all_agents
 ok "CARAPACE injections complete"
 
-# ══════════════════════════════════════════════════════════
-# Pre-warm the agent runtime
-# ══════════════════════════════════════════════════════════
-# OpenClaw lazy-loads the agent runtime on first `chat.history` call —
-# we measured ~75-80s on a fresh v2026.4.25 install (BOOTSTRAP.md +
-# IDENTITY.md + AGENTS.md parse + session-state hydration). The TUI's
-# RPC retry budget is 60s, so without this pre-warm the first
-# `openclaw tui` open shows "history failed: gateway request timeout
-# for chat.history" until the user retries — and the iOS chat path
-# hits the same lazy-load on its first /chat call.
-#
-# Trigger the lazy-load NOW, while the user is already watching the
-# install progress bar, so by the time they scan the QR + open the
-# iOS app the runtime is warm and the first message is instant.
-# Spawning `openclaw tui` headless (</dev/null) is the cheapest way
-# to issue chat.history without making a model call.
-# Skip warm-up if no model was configured. If the user Ctrl+C'd
-# `openclaw onboard` (or no TTY available + chose to defer) the agent
-# can't actually serve a chat.history request, so the warm-up would
-# just burn the 110s timeout and tell us nothing. Re-warm happens
-# naturally on the user's first successful interaction post-config.
-# `openclaw config get` exits non-zero when the key is missing (e.g.,
-# user skipped onboard). The trailing `|| true` swallows it so set -e
-# doesn't abort the whole install — empty WARMUP_MODEL is the desired
-# signal for the "skip pre-warm" branch below.
-WARMUP_MODEL=$( (openclaw config get agents.defaults.model 2>/dev/null || true) | tr -d '"{ ' | head -1 )
-if [[ -n "$WARMUP_MODEL" && "$WARMUP_MODEL" != "null" ]]; then
-  # FIRST: wait for the gateway to be REALLY ready, not just /health-OK.
-  # /health passes the moment the HTTP server binds (~6s after start),
-  # but the agent runtime ("acpx runtime backend registered" in the log)
-  # needs ~70s more to come up. Polling /health and moving on at +6s
-  # means the next pre-warm RPC fires at the WORST possible moment —
-  # mid-init — and gets queued for the full agent-startup budget.
-  # Use `openclaw cron list` as the readiness probe: it's cheap, hits
-  # the gateway over WS just like the TUI does, and only succeeds
-  # after the agent runtime is up.
-  echo -e "  ${DIM}Waiting for agent runtime to fully initialize (up to 120s)...${RESET}"
-  READY_START=$(date +%s)
-  READY=false
-  for _r in $(seq 1 60); do
-    if timeout 3 openclaw cron list >/dev/null 2>&1; then
-      READY=true
-      break
-    fi
-    sleep 2
-  done
-  READY_DURATION=$(( $(date +%s) - READY_START ))
-  if $READY; then
-    ok "Agent runtime ready (${READY_DURATION}s)"
-  else
-    warn "Agent runtime didn't respond within 120s — install will continue but first interaction will be slow"
-  fi
-
-  # NOW pre-warm chat.history so the TUI/iOS first call doesn't hit
-  # the agent's per-session lazy-load (separate from runtime startup —
-  # this is the per-session JSONL parse + memory hydration on first
-  # `chat.history` call). Cheap if runtime is already warm.
-  echo -e "  ${DIM}Pre-warming first chat.history call...${RESET}"
-  WARMUP_START=$(date +%s)
-  timeout 60 openclaw tui </dev/null >/dev/null 2>&1 || true
-  WARMUP_DURATION=$(( $(date +%s) - WARMUP_START ))
-  ok "Chat history warm (${WARMUP_DURATION}s) — TUI + iOS first message will be instant"
-
-  # ── AI liveness test ───────────────────────────────────────────────
-  # Single real chat round-trip, end-to-end, against the configured
-  # model. Catches the dead-on-arrival case where everything reports
-  # "ready" but the provider auth/key/network is wrong and the user
-  # only finds out 30 seconds into their first iOS message. We send
-  # one tiny prompt with a 120s budget (cold start + reasoning model
-  # latency) and just check there's a non-empty response in the
-  # body — no string match, no retries, no session-cleanup. If it
-  # fails we WARN but don't abort, so a slow VPS doesn't block install.
-  echo -e "  ${DIM}AI liveness test (single round-trip, 120s budget)...${RESET}"
-  LIVENESS_START=$(date +%s)
-  GW_TOK=$(python3 -c "import json; print(json.load(open('$HOME/.openclaw/openclaw.json'))['gateway']['auth']['token'])" 2>/dev/null)
-  if [ -n "$GW_TOK" ]; then
-    LIVE_RESP=$(curl -sS --max-time 120 -X POST http://127.0.0.1:18789/v1/chat/completions \
-      -H "Authorization: Bearer $GW_TOK" \
-      -H "Content-Type: application/json" \
-      -d '{"model":"openclaw","messages":[{"role":"user","content":"hi"}]}' 2>/dev/null)
-    LIVENESS_DURATION=$(( $(date +%s) - LIVENESS_START ))
-    LIVE_CONTENT=$(echo "$LIVE_RESP" | python3 -c '
-import json, sys
-try:
-  d = json.load(sys.stdin)
-  c = d["choices"][0]["message"]["content"]
-  print(c[:60] if c else "")
-except Exception:
-  print("")
-' 2>/dev/null)
-    if [ -n "$LIVE_CONTENT" ]; then
-      ok "AI alive (${LIVENESS_DURATION}s) — first response: \"${LIVE_CONTENT}...\""
+# 2. Provider/key picker — only if TTY available + not already configured
+NEED_RESTART=false
+if ( : < /dev/tty ) 2>/dev/null; then
+  if carapace_provider_already_configured; then
+    echo -e "  ${DIM}A provider is already configured.${RESET}"
+    if read -rp "  Reconfigure? [y/N]: " RECONFIG < /dev/tty && [[ "$RECONFIG" =~ ^[Yy]$ ]]; then
+      if carapace_prompt_provider_and_key; then
+        carapace_write_auth "$CARAPACE_PROVIDER" "$CARAPACE_KEY" "$CARAPACE_MODEL"
+        ok "Configured ${CARAPACE_PROVIDER} → ${CARAPACE_MODEL}"
+        NEED_RESTART=true
+      fi
     else
-      warn "AI did not respond within 120s. Install will continue."
-      warn "  Check: openclaw gateway logs   |   re-onboard: openclaw onboard"
-      warn "  First-time iOS chat may also fail until provider auth + model are right."
+      ok "Keeping existing provider config"
+    fi
+  else
+    if carapace_prompt_provider_and_key; then
+      carapace_write_auth "$CARAPACE_PROVIDER" "$CARAPACE_KEY" "$CARAPACE_MODEL"
+      ok "Configured ${CARAPACE_PROVIDER} → ${CARAPACE_MODEL}"
+      NEED_RESTART=true
     fi
   fi
 else
-  echo -e "  ${DIM}Skipping pre-warm — no model configured yet (run \`openclaw onboard\`).${RESET}"
+  if carapace_provider_already_configured; then
+    ok "Provider already configured — skipping picker (no TTY)"
+  else
+    echo -e "  ${YELLOW}No TTY available + no provider configured.${RESET}"
+    echo -e "  Run this on the machine to set up your AI provider:"
+    echo -e "      ${BOLD}carapace-onboard${RESET}"
+  fi
 fi
 
-# ══════════════════════════════════════════════════════════
-# Bootstrap cleanup (safety net)
-# ══════════════════════════════════════════════════════════
-# OpenClaw injects a "[Bootstrap pending]" wrapper into EVERY agent
-# turn while BOOTSTRAP.md exists in the workspace. The wrapper tells
-# the agent to read BOOTSTRAP.md and follow it before replying. The
-# canonical exit signal is the agent deleting BOOTSTRAP.md when its
-# first-light ritual is done — but the agent often only has read
-# (not exec or write) wired in to the configured tool profile, OR
-# treats "delete this file" as advisory and never calls a tool to
-# actually remove it. Result: the wrapper re-fires on every single
-# turn, the agent re-greets with "Hey. I just came online…" forever,
-# and every turn re-pays the cold-start prompt cost. Looks broken.
-#
-# By the time we reach this line, the AI liveness test above has
-# already given the agent one supervised pass at BOOTSTRAP.md (the
-# "hi" round-trip triggered the wrapper, agent read+followed). Wipe
-# the file now so the user's first real TUI/iOS turn is clean. The
-# agent's identity, voice, and first-conversation framing all live
-# in AGENTS.md / SOUL.md / IDENTITY.md — BOOTSTRAP.md was only the
-# wrapper trigger, never the source of persona.
-BOOTSTRAP_FILE="$HOME/.openclaw/workspace/BOOTSTRAP.md"
-if [[ -f "$BOOTSTRAP_FILE" ]]; then
-  rm -f "$BOOTSTRAP_FILE"
-  ok "Bootstrap wrapper retired — agent had its first-light pass during liveness test"
+# 3. Wipe stale session jsonl (corrupt fragments from prior failed
+#    key attempts bloat chat.history loads to 30s+ and break the TUI).
+#    Always — cheap, idempotent.
+carapace_wipe_stale_sessions
+
+# 4. Restart gateway to pick up auth + model + caps changes,
+#    then wait for the agent runtime to truly be ready.
+if $NEED_RESTART; then
+  echo -e "  ${DIM}Restarting gateway to apply config...${RESET}"
 fi
+carapace_restart_gateway_and_wait_ready 120 || true
+
+# 5. Warmup turn — validates auth+model end-to-end before QR.
+#    Live progress bar so the user sees something is happening.
+carapace_warmup_turn || true
 
 # ══════════════════════════════════════════════════════════
 # Step 10: Connect
