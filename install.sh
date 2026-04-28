@@ -836,9 +836,25 @@ Update these workspace files with the choices:
 If the user skipped, leave the template fields blank but add a single line in USER.md context section:
 > *User opted to skip introduction — learn naturally over time.*
 
-## Step 4 — Delete this file
+## Step 4 — Delete this file (CRITICAL)
 
-Per `AGENTS.md` convention: bootstrap is a one-time event. Delete `BOOTSTRAP.md` from the workspace root after step 3 completes. Future startup contexts won't include it; you won't be asked again.
+Bootstrap is a one-time event. **You must delete `BOOTSTRAP.md` after step 3 completes**, or the runtime will keep prepending a "[Bootstrap pending]" wrapper to every single turn — yours and theirs — until it's gone. That wrapper costs 30+ seconds per turn and makes the whole agent feel broken.
+
+Use your `exec` tool to delete it. Run this exact command:
+
+```
+exec: rm BOOTSTRAP.md
+```
+
+(Working directory is the workspace root — `~/.openclaw/workspace/` — so the bare filename is correct.)
+
+Verify it's gone before replying. If `exec` is blocked or fails, fall back to `write` with empty contents to neutralize it:
+
+```
+write: BOOTSTRAP.md (contents: "")
+```
+
+Don't skip this step. Don't defer it. Do it BEFORE replying to the user's first follow-up. The runtime cannot tell that you've finished bootstrap any other way.
 
 ---
 
@@ -2819,6 +2835,33 @@ except Exception:
   fi
 else
   echo -e "  ${DIM}Skipping pre-warm — no model configured yet (run \`openclaw onboard\`).${RESET}"
+fi
+
+# ══════════════════════════════════════════════════════════
+# Bootstrap cleanup (safety net)
+# ══════════════════════════════════════════════════════════
+# OpenClaw injects a "[Bootstrap pending]" wrapper into EVERY agent
+# turn while BOOTSTRAP.md exists in the workspace. The wrapper tells
+# the agent to read BOOTSTRAP.md and follow it before replying. The
+# canonical exit signal is the agent deleting BOOTSTRAP.md when its
+# first-light ritual is done — but the agent often only has read
+# (not exec or write) wired in to the configured tool profile, OR
+# treats "delete this file" as advisory and never calls a tool to
+# actually remove it. Result: the wrapper re-fires on every single
+# turn, the agent re-greets with "Hey. I just came online…" forever,
+# and every turn re-pays the cold-start prompt cost. Looks broken.
+#
+# By the time we reach this line, the AI liveness test above has
+# already given the agent one supervised pass at BOOTSTRAP.md (the
+# "hi" round-trip triggered the wrapper, agent read+followed). Wipe
+# the file now so the user's first real TUI/iOS turn is clean. The
+# agent's identity, voice, and first-conversation framing all live
+# in AGENTS.md / SOUL.md / IDENTITY.md — BOOTSTRAP.md was only the
+# wrapper trigger, never the source of persona.
+BOOTSTRAP_FILE="$HOME/.openclaw/workspace/BOOTSTRAP.md"
+if [[ -f "$BOOTSTRAP_FILE" ]]; then
+  rm -f "$BOOTSTRAP_FILE"
+  ok "Bootstrap wrapper retired — agent had its first-light pass during liveness test"
 fi
 
 # ══════════════════════════════════════════════════════════
