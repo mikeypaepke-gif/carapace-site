@@ -2862,7 +2862,7 @@ QRCMD
 $SUDO chmod +x /usr/local/bin/carapace-qr
 ok "carapace-qr command installed"
 
-# carapace-onboard wrapper — thin handoff to `openclaw configure`,
+# carapace-onboard wrapper — thin handoff to `openclaw onboard`,
 # which is OpenClaw's own polished interactive picker for credentials,
 # channels, gateway, and agent defaults (model, provider, etc.).
 # We used to maintain a parallel picker here that prompted for provider,
@@ -2878,10 +2878,10 @@ export NVM_DIR="$HOME/.nvm"
 for _d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$_d" ] && export PATH="$_d:$PATH"; done
 # Also add npm-global bin where openclaw is installed
 export PATH="$HOME/.npm-global/bin:$PATH"
-exec openclaw configure "$@"
+exec openclaw onboard "$@"
 ONBOARDCMD
 $SUDO chmod +x /usr/local/bin/carapace-onboard
-ok "carapace-onboard installed (wraps openclaw configure)"
+ok "carapace-onboard installed (wraps openclaw onboard)"
 
 # ── Nightly maintenance cron ────────────────────────────
 # Resolve the real openclaw binary (npm-global takes precedence — nvm's node/bin
@@ -2932,22 +2932,22 @@ fi
 # Step 9: Configure Your AI (hand-off to OpenClaw)
 # ══════════════════════════════════════════════════════════
 # We used to maintain a parallel provider/model picker here that
-# duplicated `openclaw configure`. Removed — OpenClaw's own picker
+# duplicated `openclaw onboard`. Removed — OpenClaw's own picker
 # is polished, supports every provider it can route to, and stays
 # in sync with upstream model availability automatically. We just
 # hand off.
 step "Configure Your AI"
 if [ -e /dev/tty ]; then
-  echo -e "  ${DIM}Launching openclaw configure — pick your provider, paste your${RESET}"
+  echo -e "  ${DIM}Launching openclaw onboard — pick your provider, paste your${RESET}"
   echo -e "  ${DIM}key, choose your model. Press Ctrl+C to skip and run later${RESET}"
-  echo -e "  ${DIM}with: ${BOLD}openclaw configure${RESET}${DIM} (or carapace-onboard)${RESET}"
+  echo -e "  ${DIM}with: ${BOLD}openclaw onboard${RESET}${DIM} (or carapace-onboard)${RESET}"
   echo ""
-  openclaw configure < /dev/tty > /dev/tty 2>&1 ||     warn "openclaw configure exited non-zero — re-run with: openclaw configure"
+  openclaw onboard < /dev/tty > /dev/tty 2>&1 ||     warn "openclaw onboard exited non-zero — re-run with: openclaw onboard"
 else
   echo -e "  ${YELLOW}No TTY available (curl|bash from a non-interactive shell).${RESET}"
   echo -e "  Run this on the machine to set up your AI provider:"
   echo ""
-  echo -e "      ${BOLD}openclaw configure${RESET}"
+  echo -e "      ${BOLD}openclaw onboard${RESET}"
   echo ""
 fi
 
