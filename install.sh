@@ -8,11 +8,39 @@ set -euo pipefail
 # Installs OpenClaw gateway on a Linux server and generates a QR code
 # for pairing with the CARAPACE iOS app.
 
+# ── Survive SSH disconnects ──────────────────────────────
+# Most users run this over SSH. If the connection drops mid-install
+# (network blip, laptop sleep, "Read from remote host: Can't assign
+# requested address"), bash receives SIGHUP and dies — leaving the
+# install half-done (gateway running, half the Tailscale serve routes
+# registered, no QR shown). The next `curl|bash` re-run is idempotent
+# and picks up where we left off, but the dropped session is jarring.
+#
+# Ignoring SIGHUP keeps the install running to completion even after
+# the parent SSH dies. Output goes nowhere visible after the drop, but
+# the work finishes. The user can SSH back in, re-run carapace-qr, and
+# everything's wired up. Better than half-installed state.
+trap '' HUP
+
 # ── Verbose mode ─────────────────────────────────────────
 VERBOSE=false
 if [[ "${1:-}" == "--verbose" ]]; then VERBOSE=true; fi
 LOGFILE="/tmp/carapace-install.log"
 : > "$LOGFILE"
+
+# ── tmux/screen recommendation for long sessions ──────────
+# Even with HUP-trap above, a real network drop means the user can't
+# WATCH the install finish. Suggest tmux/screen up front so they can
+# detach safely. Skip the suggestion if already inside one, or if not
+# running in a TTY (e.g. ansible).
+if [[ -n "${SSH_CONNECTION:-}" ]] && [[ -t 1 ]] \
+   && [[ -z "${TMUX:-}" ]] && [[ -z "${STY:-}" ]] \
+   && command -v tmux >/dev/null 2>&1; then
+  echo ""
+  echo -e "  \033[33m\033[1mTip:\033[0m running over SSH? Wrap in tmux so a network drop"
+  echo -e "  \033[2mdoesn't kill the install:  tmux new -s carapace 'curl … | bash'\033[0m"
+  echo ""
+fi
 
 # ── Pre-clean: remove stale .npmrc prefix that conflicts with nvm ─────────
 # This persists across reboots from partial installs and silently kills nvm
