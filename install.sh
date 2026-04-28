@@ -1810,21 +1810,15 @@ else
   # Install without postinstall first to avoid OOM on low-RAM VPS
   # The postinstall-bundled-plugins.mjs script uses too much memory on first pass
   export NODE_OPTIONS="--max-old-space-size=768"
-  # PIN to v2026.4.24. v2026.4.25's first-turn cold start exceeds the
-  # default agent timeout (~30s), so /chat aborts before xAI replies.
-  # Fixable by setting `agents.defaults.timeoutSeconds: 180` in
-  # ~/.openclaw/openclaw.json (see seed_openclaw_config below) AND
-  # confirmed working end-to-end on v4.25 with that knob. Until we've
-  # had a few days running v4.25 in production, stay on v4.24 — it's
-  # been stable and matches yesterday's working build.
+  # Track upstream `latest` by default. We briefly pinned to v2026.4.24
+  # because v4.25's first-turn cold start exceeded the default agent
+  # timeout (~30s) and /chat aborted before xAI replied. That's now
+  # handled by ensure_carapace_bootstrap_caps() bumping
+  # `agents.defaults.timeoutSeconds` to 180s, so v4.25+ works fine.
   #
-  # We briefly tried Path C (delegating long-term memory to v4.25's
-  # built-in memory-core plugin and ripping out ~/.carapace/cognitive/)
-  # — that turned out to be a misdiagnosis of an unrelated timeout bug.
-  # Reverted in commit f0llowing 0cde50f. Cognitive layer is back.
-  #
-  # Override at install-time with:  OPENCLAW_VERSION=latest curl ... | bash
-  : "${OPENCLAW_VERSION:=2026.4.24}"
+  # Override to a specific version with:
+  #   OPENCLAW_VERSION=2026.4.24 curl ... | bash
+  : "${OPENCLAW_VERSION:=latest}"
   retry 3 timeout 240 npm install -g "openclaw@${OPENCLAW_VERSION}" --no-fund --loglevel=error --ignore-scripts
   # Run postinstall separately with explicit memory cap and swap already active
   if [ -f "$HOME/.npm-global/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs" ]; then
@@ -3503,105 +3497,15 @@ if [ -z "$TOKEN" ]; then
   timeout 30 openclaw gateway install >> "$LOGFILE" 2>&1 || true
   TOKEN=$(python3 -c 'import json; print(json.load(open("'"$HOME"'/.openclaw/openclaw.json"))["gateway"]["auth"]["token"])' 2>/dev/null || echo "")
 fi
-if [ -n "$TOKEN" ]; then
-  # Snapshot the sessions.json BEFORE the probe so we can identify + delete
-  # any ghost session the probe creates. Without this cleanup, the
-  # "confirmed" checkpoint survives as a second session record that iOS
-  # can pick up during reconnect as a competing history feed.
-  SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
-  PROBE_SNAPSHOT_KEYS="/tmp/carapace-probe-keys-pre.txt"
-  if [[ -f "$SESSIONS_DIR/sessions.json" ]]; then
-    jq -r "keys[]" "$SESSIONS_DIR/sessions.json" 2>/dev/null | sort > "$PROBE_SNAPSHOT_KEYS"
-  else
-    : > "$PROBE_SNAPSHOT_KEYS"
-  fi
-  PROBE_SNAPSHOT_FILES=$(ls "$SESSIONS_DIR"/*.jsonl 2>/dev/null | sort || true)
-
-  # Skip the deterministic probe if user picked Codex — there's no auth yet
-  # (OAuth is completed by the user after install), so the probe would fail.
-  if [ "${CODEX_OAUTH_NEEDED:-false}" = "true" ]; then
-    echo -e "  ${DIM}Skipping AI probe (Codex OAuth not yet completed — see end of install).${RESET}"
-    ALIVE=true
-  else
-
-  echo -e "  ${DIM}Verifying AI is actually alive (deterministic probe)...${RESET}"
-  # Deterministic liveness check — the model must reply with the literal
-  # word "confirmed" (case-insensitive) and nothing else. A hung or
-  # misrouted agent can still return JSON with empty content, which is
-  # why the old "any response counts" check wasn't trustworthy. This
-  # forces the model to prove it's actually reading + following the
-  # prompt end-to-end.
-  ALIVE=false
-  for _mv in $(seq 1 20); do
-    # Tolerate curl failure (container without systemd, gateway not yet
-    # started, transient network) — without `|| true`, a connection
-    # refused here aborts the whole install under `set -e`.
-    RESPONSE=$(curl -s -X POST http://127.0.0.1:18789/v1/chat/completions \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"model":"openclaw","messages":[{"role":"user","content":"Respond with exactly the word confirmed and nothing else. No punctuation, no explanation, no formatting."}],"stream":false,"max_tokens":8}' \
-      --max-time 90 2>/dev/null || true)
-    # Extract the assistant content and normalize (lowercase, strip whitespace + punctuation)
-    CONTENT=$(echo "$RESPONSE" | python3 -c '
-import json, sys, re
-try:
-  d = json.load(sys.stdin)
-  c = d["choices"][0]["message"]["content"]
-  # Strip whitespace + punctuation, lowercase
-  print(re.sub(r"[^a-z]", "", c.lower()))
-except Exception:
-  print("")
-' 2>/dev/null)
-    if [ "$CONTENT" = "confirmed" ]; then
-      ok "AI verified — model replied 'confirmed' on demand"
-      ALIVE=true
-      break
-    fi
-    sleep 2
-  done
-  if ! $ALIVE; then
-    warn "AI probe did not return 'confirmed' — gateway is up but model may be misrouted."
-    echo -e "  ${DIM}  Debug: check ~/.openclaw/agents/main/auth-profiles.json + check 'openclaw gateway logs'${RESET}"
-  fi
-  fi  # end CODEX_OAUTH_NEEDED gate
-
-  # ── Clean up probe artifacts ──
-  # The probe created a session (to prove the gateway can actually route
-  # a chat turn end-to-end), but we don't want that artifact polluting
-  # the user's feed. Delete any session keys + jsonl files that appeared
-  # AFTER the pre-probe snapshot. We never touch agent:main:main — that
-  # stays intact even if the probe happened to write into it.
-  if [[ -f "$SESSIONS_DIR/sessions.json" ]]; then
-    CURRENT_KEYS=$(jq -r "keys[]" "$SESSIONS_DIR/sessions.json" 2>/dev/null | sort)
-    NEW_KEYS=$(comm -13 "$PROBE_SNAPSHOT_KEYS" <(echo "$CURRENT_KEYS") | grep -v "^agent:main:main$" || true)
-    if [[ -n "$NEW_KEYS" ]]; then
-      # Remove new keys from sessions.json (never touches agent:main:main)
-      python3 - <<PYEOF
-import json, os
-fp = os.path.expanduser('$SESSIONS_DIR/sessions.json')
-try:
-  d = json.load(open(fp))
-  to_drop = '''$NEW_KEYS'''.strip().splitlines()
-  for k in to_drop:
-    d.pop(k, None)
-  json.dump(d, open(fp, 'w'))
-except Exception as e:
-  pass
-PYEOF
-    fi
-    # Delete jsonl files that didn't exist before the probe AND aren't the
-    # file that sessions.json[agent:main:main] points at.
-    MAIN_FILE=$(jq -r '."agent:main:main".sessionFile // ("agent:main:main" | split(":")[0] + "/sessions/" + ."agent:main:main".sessionId + ".jsonl")' "$SESSIONS_DIR/sessions.json" 2>/dev/null | xargs -I{} basename "{}" 2>/dev/null || true)
-    CURRENT_FILES=$(ls "$SESSIONS_DIR"/*.jsonl 2>/dev/null | sort || true)
-    for f in $(comm -13 <(echo "$PROBE_SNAPSHOT_FILES") <(echo "$CURRENT_FILES") 2>/dev/null); do
-      name=$(basename "$f")
-      if [[ "$name" != "$MAIN_FILE" ]]; then
-        rm -f "$f"
-      fi
-    done
-  fi
-  rm -f "$PROBE_SNAPSHOT_KEYS"
-fi
+# Deterministic AI probe was removed — it was a 20-attempt liveness
+# loop that asked the model to reply with the literal word "confirmed",
+# then cleaned up the session artifacts it created. Removed because
+# (a) it can take 90s+ when xAI is slow without telling us anything we
+# couldn't get from `openclaw gateway logs` and (b) if the user's
+# auth/model config is broken, that's a user problem to fix — the
+# install shouldn't fail loudly trying to validate it. The earlier
+# stream-based smoke test in this file is sufficient to confirm the
+# gateway is reachable.
 
 # ── Vision mode configuration ───────────────────────────
 # Vision mode used to need a separate Gemini API key for Gemini Live
