@@ -2074,9 +2074,20 @@ fi
 
 echo -e "  ${DIM}Waiting for gateway to start...${RESET}"
 sleep 3  # Brief pause to let systemd fully initialize
+# Use a port-bind check, NOT /health curl. The gateway HTTP server
+# binds the port immediately on startup (~6s), but /health doesn't
+# respond until the embedded acpx runtime registers (~70s later).
+# We only need the port bound here — tailscale serve in Step 6 just
+# needs a backend to proxy to, the backend doesn't need to be fully
+# responsive yet. Earlier we used `curl /health` here, which made
+# GATEWAY_UP=false on cold-start systems and silently skipped the
+# entire Tailscale serve registration in Step 6 + the QR in Step 10.
+gw_port_listening() {
+  /usr/bin/env python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(0 if s.connect_ex(('127.0.0.1',18789))==0 else 1)" 2>/dev/null
+}
 GATEWAY_UP=false
 for i in $(seq 1 20); do
-  if curl -sf http://127.0.0.1:18789/health >/dev/null 2>&1; then
+  if gw_port_listening; then
     GATEWAY_UP=true
     break
   fi
@@ -2084,21 +2095,21 @@ for i in $(seq 1 20); do
 done
 
 if $GATEWAY_UP; then
-  ok "Gateway running on port 18789"
+  ok "Gateway listening on port 18789"
 else
-  # Retry
+  # Retry — try restarting once
   timeout 15 openclaw gateway start >/dev/null 2>&1 || true
   for i in $(seq 1 10); do
-    if curl -sf http://127.0.0.1:18789/health >/dev/null 2>&1; then
+    if gw_port_listening; then
       GATEWAY_UP=true
       break
     fi
     sleep 1
   done
   if $GATEWAY_UP; then
-    ok "Gateway running on port 18789"
+    ok "Gateway listening on port 18789"
   else
-    warn "Gateway not responding — check: systemctl status openclaw-gateway"
+    warn "Gateway port 18789 not listening — check: systemctl --user status openclaw-gateway"
   fi
 fi
 
