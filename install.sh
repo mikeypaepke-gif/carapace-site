@@ -3116,30 +3116,23 @@ if [ "${CODEX_OAUTH_NEEDED:-false}" = "true" ]; then
   echo ""
 fi
 
-# Offer TUI launch as optional. Use the same /dev/tty openability test
-# as Step 9 — works for `curl | bash` (non-TTY stdin but real terminal
-# attached) where `[ -t 0 ]` would falsely fail.
-if ( : < /dev/tty ) 2>/dev/null; then
-  echo -e "  ${TEAL}Want to also launch the terminal chat? [y/N]${RESET}"
-  read -rp "  " LAUNCH_TUI < /dev/tty
-  case "$LAUNCH_TUI" in
-    [yY]*)
-      echo ""
-      # Re-source nvm + pin the PATH order so openclaw resolves to the
-      # Node version we just installed. Observed on Rocky 9: the base
-      # repos ship Node 16 (v16.20.2), which openclaw rejects (requires
-      # v22.12+). Without this, `exec openclaw tui` can land on the
-      # system node. The carapace-qr / carapace-onboard wrappers do the
-      # same thing — match them here.
-      export NVM_DIR="$HOME/.nvm"
-      [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-      for _d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$_d" ] && export PATH="$_d:$PATH"; done
-      export PATH="$HOME/.npm-global/bin:$PATH"
-      if [ -t 0 ]; then
-        exec openclaw tui
-      else
-        exec openclaw tui < /dev/tty
-      fi
-      ;;
-  esac
-fi
+# ── Post-install reminder ───────────────────────────────
+# Used to offer "Want to launch terminal chat? [y/N]" here. Removed —
+# launching the TUI immediately after the warmup turn races the
+# busy gateway: the warmup just finished a chat completion, the
+# embedded acpx runtime is still draining side effects (writing
+# session jsonl, hooks, lane cleanup), and TUI's first chat.history
+# RPC hits the busy gateway → 30s WS timeout → "gateway client
+# stopped" / "agents list failed" — looks broken, isn't.
+#
+# Plus PATH issue: openclaw.ai/install.sh adds an export to ~/.bashrc
+# but the user's CURRENT shell predates it, so `openclaw tui` from
+# this shell may not even find the binary. Reboot or `source
+# ~/.bashrc` fixes both at once.
+echo -e "  ${TEAL}${BOLD}Last step — make ${BOLD}openclaw${RESET}${TEAL}${BOLD} available in this shell:${RESET}"
+echo -e "      ${BOLD}source ~/.bashrc${RESET}      ${DIM}# pick up new PATH from openclaw install${RESET}"
+echo -e "      ${BOLD}openclaw tui${RESET}          ${DIM}# optional — chat from terminal${RESET}"
+echo ""
+echo -e "  ${DIM}Or just open a new SSH session — same effect.${RESET}"
+echo -e "  ${DIM}For mobile use, scan the QR above with the iOS Carapace app.${RESET}"
+echo ""
