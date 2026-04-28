@@ -616,27 +616,47 @@ print('0')" 2>/dev/null || echo "0")
   [[ "$has_key" == "1" ]]
 }
 
-# Clear bootstrap artifacts ONLY — never the user's session jsonl.
-# We used to also `rm sessions/*.jsonl` here to clean up corrupt
-# fragments from failed-key turns (those bloat chat.history loads
-# to 30s+ and break the TUI). But that's a destructive op for the
-# happy path: any real conversation the user had with openclaw
-# before installing carapace gets wiped, including iOS history tab
-# + TUI scrollback. Carapace is a SHELL — it should never destroy
-# user state on a layer-on install.
+# Clear ONLY bootstrap artifacts that we recognize as safe to remove.
+# Never wipes session jsonl, never wipes user-customized BOOTSTRAP.md.
+# Carapace is a SHELL — it must not destroy user state on a layer-on
+# install.
 #
-# BOOTSTRAP.md cleanup stays — its [Bootstrap pending] wrapper
-# fires on EVERY agent turn while it exists, and openclaw's stock
-# version doesn't reliably self-delete with the default tool
-# profile. Wiping the file post-install kills the wrapper loop
-# without touching anything else. The agent's persona, identity,
-# memory, and conversation history all stay intact.
+# Why we touch BOOTSTRAP.md at all: while the file exists, openclaw
+# injects a "[Bootstrap pending]" wrapper into EVERY agent turn,
+# instructing the agent to read+delete the file before replying. The
+# canonical exit signal is the agent deleting BOOTSTRAP.md after
+# first-light. In practice with default tool profiles, the agent
+# can't actually delete files (only `read` is in its inventory), so
+# the wrapper re-fires forever and every turn pays the cold-start
+# prompt cost. The fix is to delete the file ourselves post-install.
 #
-# If a user has corrupt session jsonl from a failed-key incident
-# and chat.history is timing out, they can manually clear with:
+# But ONLY if it's a file we KNOW is safe to remove:
+#   1. Our own injection (carries BEGIN CARAPACE BOOTSTRAP sentinel)
+#   2. OpenClaw's stock template (recognizable header)
+# If it's something else — a user-customized BOOTSTRAP.md they
+# deliberately wrote — leave it alone and warn that the wrapper
+# will keep firing until they handle it.
+#
+# Sessions/*.jsonl are NEVER touched here. If a user has corrupt
+# session jsonl from a failed-key incident and chat.history is
+# timing out, they can manually clear with:
 #   rm ~/.openclaw/agents/main/sessions/*.jsonl
 carapace_wipe_stale_sessions() {
-  rm -f "$HOME/.openclaw/workspace/BOOTSTRAP.md" 2>/dev/null
+  local bs="$HOME/.openclaw/workspace/BOOTSTRAP.md"
+  [[ -f "$bs" ]] || return 0
+  if grep -q "BEGIN CARAPACE BOOTSTRAP" "$bs" 2>/dev/null; then
+    rm -f "$bs"
+    return 0
+  fi
+  # OpenClaw's stock BOOTSTRAP.md headers we've observed across versions
+  if grep -qE "^# BOOTSTRAP\.md|^# Hello, World|^_You just woke up\." "$bs" 2>/dev/null; then
+    rm -f "$bs"
+    return 0
+  fi
+  # Unknown/customized BOOTSTRAP.md — leave alone, but flag it
+  warn "BOOTSTRAP.md exists but isn't ours or openclaw-stock — leaving alone."
+  warn "  Agent will see the [Bootstrap pending] wrapper on every turn until you delete it:"
+  warn "    rm ~/.openclaw/workspace/BOOTSTRAP.md"
 }
 
 # Restart gateway and wait for the agent runtime to truly be ready.
