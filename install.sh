@@ -2973,11 +2973,77 @@ fi
 # naturally on the user's first successful interaction post-config.
 WARMUP_MODEL=$(openclaw config get agents.defaults.model 2>/dev/null | tr -d '"{ ' | head -1)
 if [[ -n "$WARMUP_MODEL" && "$WARMUP_MODEL" != "null" ]]; then
-  echo -e "  ${DIM}Pre-warming agent runtime (~80s one-time cold start)...${RESET}"
+  # FIRST: wait for the gateway to be REALLY ready, not just /health-OK.
+  # /health passes the moment the HTTP server binds (~6s after start),
+  # but the agent runtime ("acpx runtime backend registered" in the log)
+  # needs ~70s more to come up. Polling /health and moving on at +6s
+  # means the next pre-warm RPC fires at the WORST possible moment —
+  # mid-init — and gets queued for the full agent-startup budget.
+  # Use `openclaw cron list` as the readiness probe: it's cheap, hits
+  # the gateway over WS just like the TUI does, and only succeeds
+  # after the agent runtime is up.
+  echo -e "  ${DIM}Waiting for agent runtime to fully initialize (up to 120s)...${RESET}"
+  READY_START=$(date +%s)
+  READY=false
+  for _r in $(seq 1 60); do
+    if timeout 3 openclaw cron list >/dev/null 2>&1; then
+      READY=true
+      break
+    fi
+    sleep 2
+  done
+  READY_DURATION=$(( $(date +%s) - READY_START ))
+  if $READY; then
+    ok "Agent runtime ready (${READY_DURATION}s)"
+  else
+    warn "Agent runtime didn't respond within 120s — install will continue but first interaction will be slow"
+  fi
+
+  # NOW pre-warm chat.history so the TUI/iOS first call doesn't hit
+  # the agent's per-session lazy-load (separate from runtime startup —
+  # this is the per-session JSONL parse + memory hydration on first
+  # `chat.history` call). Cheap if runtime is already warm.
+  echo -e "  ${DIM}Pre-warming first chat.history call...${RESET}"
   WARMUP_START=$(date +%s)
-  timeout 110 openclaw tui </dev/null >/dev/null 2>&1 || true
+  timeout 60 openclaw tui </dev/null >/dev/null 2>&1 || true
   WARMUP_DURATION=$(( $(date +%s) - WARMUP_START ))
-  ok "Agent runtime warm (${WARMUP_DURATION}s)"
+  ok "Chat history warm (${WARMUP_DURATION}s) — TUI + iOS first message will be instant"
+
+  # ── AI liveness test ───────────────────────────────────────────────
+  # Single real chat round-trip, end-to-end, against the configured
+  # model. Catches the dead-on-arrival case where everything reports
+  # "ready" but the provider auth/key/network is wrong and the user
+  # only finds out 30 seconds into their first iOS message. We send
+  # one tiny prompt with a 120s budget (cold start + reasoning model
+  # latency) and just check there's a non-empty response in the
+  # body — no string match, no retries, no session-cleanup. If it
+  # fails we WARN but don't abort, so a slow VPS doesn't block install.
+  echo -e "  ${DIM}AI liveness test (single round-trip, 120s budget)...${RESET}"
+  LIVENESS_START=$(date +%s)
+  GW_TOK=$(python3 -c "import json; print(json.load(open('$HOME/.openclaw/openclaw.json'))['gateway']['auth']['token'])" 2>/dev/null)
+  if [ -n "$GW_TOK" ]; then
+    LIVE_RESP=$(curl -sS --max-time 120 -X POST http://127.0.0.1:18789/v1/chat/completions \
+      -H "Authorization: Bearer $GW_TOK" \
+      -H "Content-Type: application/json" \
+      -d '{"model":"openclaw","messages":[{"role":"user","content":"hi"}]}' 2>/dev/null)
+    LIVENESS_DURATION=$(( $(date +%s) - LIVENESS_START ))
+    LIVE_CONTENT=$(echo "$LIVE_RESP" | python3 -c '
+import json, sys
+try:
+  d = json.load(sys.stdin)
+  c = d["choices"][0]["message"]["content"]
+  print(c[:60] if c else "")
+except Exception:
+  print("")
+' 2>/dev/null)
+    if [ -n "$LIVE_CONTENT" ]; then
+      ok "AI alive (${LIVENESS_DURATION}s) — first response: \"${LIVE_CONTENT}...\""
+    else
+      warn "AI did not respond within 120s. Install will continue."
+      warn "  Check: openclaw gateway logs   |   re-onboard: openclaw onboard"
+      warn "  First-time iOS chat may also fail until provider auth + model are right."
+    fi
+  fi
 else
   echo -e "  ${DIM}Skipping pre-warm — no model configured yet (run \`openclaw onboard\`).${RESET}"
 fi
@@ -3047,6 +3113,22 @@ fi
 echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
 echo -e "  ${GREEN}${BOLD}  ✓ CARAPACE is ready!${RESET}"
 echo -e "  ${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
+echo ""
+
+# ── Cold-start patience banner ──────────────────────────────────────
+# OpenClaw lazy-loads the agent runtime + per-session memory hydration
+# on the first chat after a gateway start/restart. Even with our
+# pre-warm above, the FIRST message after a service restart (gateway
+# crash, host reboot, OS upgrade restart) hits this 30-90s lazy-load
+# again. Set the user's expectation up front so they don't think the
+# app is broken when the first message takes a minute.
+echo -e "  ${YELLOW}${BOLD}⏳ FIRST MESSAGE NOTICE${RESET}"
+echo -e "  ${DIM}OpenClaw warms up the agent runtime on the first chat${RESET}"
+echo -e "  ${DIM}after every gateway restart. The FIRST message you send${RESET}"
+echo -e "  ${DIM}may take 30-90 seconds to respond. Subsequent messages${RESET}"
+echo -e "  ${DIM}are sub-second. If the gateway restarts (host reboot,${RESET}"
+echo -e "  ${DIM}config change, nightly cron at 3am UTC), expect that${RESET}"
+echo -e "  ${DIM}first-message lag again. Be patient — it's not broken.${RESET}"
 echo ""
 
 # Always show QR code first — this is the primary way to connect
