@@ -965,9 +965,19 @@ inject_carapace_bootstrap() {
   # by deleting both IDENTITY.md and any sentinel-stripped BOOTSTRAP.md
   # before re-running install.sh.
   if [[ -f "$identity_file" ]]; then
-    local current_name
-    current_name=$(grep -m1 -E "^- \*\*Name:\*\* " "$identity_file" 2>/dev/null \
-                   | sed -E "s/^- \*\*Name:\*\* +//;s/[[:space:]]+$//")
+    # Detect if the agent is already named (skip overwriting BOOTSTRAP).
+    # IMPORTANT: do NOT use `current_name=$(grep ... | sed ...)` here —
+    # under `set -euo pipefail`, when grep finds no match (the COMMON
+    # case for fresh openclaw with stock unfilled IDENTITY.md), grep
+    # exits 1, pipefail propagates it, set -e fires the ERR trap, and
+    # the install dies silently right after Step 7's "first-light
+    # installed" line. Instead, use `if grep ... then ...` so the grep
+    # exit code is consumed by the if, not the pipeline.
+    local current_name=""
+    local raw_name_line=""
+    if raw_name_line=$(grep -m1 -E "^- \*\*Name:\*\* " "$identity_file" 2>/dev/null); then
+      current_name=$(printf '%s\n' "$raw_name_line" | sed -E "s/^- \*\*Name:\*\* +//;s/[[:space:]]+$//")
+    fi
     if [[ -n "$current_name" && "$current_name" != "Main" ]]; then
       ok "CARAPACE bootstrap skipped (agent named '$current_name', already hatched)."
       return 0
@@ -2069,7 +2079,7 @@ export PATH="/usr/bin:$HOME/.npm-global/bin:$PATH"
 #   * < 1.5 GB (Raspberry Pi 3, tiny VPS):  512 MB heap
 #   * < 3 GB  (Raspberry Pi 4 2 GB):        1024 MB heap
 #   * ≥ 3 GB  (most VPSes, RPi 4 4/8 GB):   2048 MB heap
-TOTAL_RAM_MB=$(free -m 2>/dev/null | awk '/^Mem:/ {print $2}')
+TOTAL_RAM_MB=$(free -m 2>/dev/null | awk '/^Mem:/ {print $2}' || echo "")
 if [[ -z "$TOTAL_RAM_MB" || "$TOTAL_RAM_MB" -lt 1500 ]]; then
   OC_HEAP=512
 elif [[ "$TOTAL_RAM_MB" -lt 3000 ]]; then
@@ -2136,7 +2146,7 @@ EOF
   # right user-mode unit (the one that would actually conflict with our
   # system-level unit on port 18789).
   REAL_USER="${SUDO_USER:-$(whoami)}"
-  REAL_HOME=$(getent passwd "$REAL_USER" 2>/dev/null | cut -d: -f6)
+  REAL_HOME=$(getent passwd "$REAL_USER" 2>/dev/null | cut -d: -f6 || echo "")
   REAL_HOME="${REAL_HOME:-$HOME}"
   if [[ "$REAL_USER" != "root" ]]; then
     sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$REAL_USER")" \
@@ -2839,7 +2849,7 @@ export NVM_DIR="$HOME/.nvm"
 for _d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$_d" ] && export PATH="$_d:$PATH"; done
 export PATH="$HOME/.npm-global/bin:$PATH"
 TOKEN=$(python3 -c "import json,os; c=json.load(open(os.path.expanduser('~/.openclaw/openclaw.json'))); print(c.get('gateway',{}).get('auth',{}).get('token',''))" 2>/dev/null)
-TS=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null)
+TS=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null || echo "")
 [[ -n "$TS" ]] && GW="https://$TS" || GW="http://$(hostname -I 2>/dev/null | awk '{print $1}' || ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v 127.0.0.1 | head -1 || echo '127.0.0.1'):18789"
 ENC_GW=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$GW")
 ENC_TOKEN=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$TOKEN")
@@ -3009,7 +3019,7 @@ else
 fi
 
 # 3. Workspace prompts injected (AGENTS.md, etc.)
-WS_COUNT=$(ls "$HOME/.openclaw/workspace/"*.md 2>/dev/null | wc -l)
+WS_COUNT=$(ls "$HOME/.openclaw/workspace/"*.md 2>/dev/null | wc -l || echo 0)
 if (( WS_COUNT >= 5 )); then
   VERIFY_WORKSPACE=true
   ok "Workspace prompts present ($WS_COUNT files)"
