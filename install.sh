@@ -683,6 +683,66 @@ carapace_restart_gateway_and_wait_ready() {
   return 1
 }
 
+# Fire a real chat completion against the gateway to pre-heat xAI
+# (or whatever provider) BEFORE the user scans the QR. Without this
+# the user's first iOS message hits cold-start xAI (60-150s) +
+# openclaw's 30s gateway WS RPC timeout, and iOS shows "timeout"
+# even though the agent actually responds — by the time the agent
+# replies, the WS connection that delivered the request has been
+# torn down so iOS never sees the reply.
+#
+# Live progress indicator so the user sees something is happening
+# during the cold-start window. Always returns 0 — install must
+# never abort on warmup failure (slow VPSes, broken provider
+# upstream, expired key — none of those should block the QR).
+carapace_warmup_turn() {
+  local token start http reply elapsed
+  token=$(/usr/bin/env python3 -c "import json; print(json.load(open('$HOME/.openclaw/openclaw.json'))['gateway']['auth']['token'])" 2>/dev/null)
+  if [[ -z "$token" ]]; then
+    warn "Skipping warmup — no gateway token found"
+    return 0
+  fi
+  echo -e "  ${DIM}Warming up your agent (cold-start: 60-180s, then sub-30s)...${RESET}"
+  local out_file="/tmp/carapace-warmup-$$.out"
+  local code_file="/tmp/carapace-warmup-$$.code"
+  rm -f "$out_file" "$code_file"
+  start=$(date +%s)
+  # Background curl so we can show a progress indicator. 240s budget
+  # covers worst-case cold xAI; longer than that and there's something
+  # genuinely wrong that won't be fixed by waiting.
+  ( curl -sS --max-time 240 -o "$out_file" \
+      -w "%{http_code}" \
+      -X POST http://127.0.0.1:18789/v1/chat/completions \
+      -H "Authorization: Bearer $token" \
+      -H "Content-Type: application/json" \
+      -d '{"model":"openclaw","messages":[{"role":"user","content":"reply just ok"}]}' \
+      > "$code_file" 2>/dev/null ) &
+  local pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    elapsed=$(( $(date +%s) - start ))
+    printf "\r  ${DIM}  warming... %ds${RESET}" "$elapsed"
+    sleep 2
+  done
+  wait "$pid" 2>/dev/null || true
+  printf "\r"
+  http=$(cat "$code_file" 2>/dev/null || echo "000")
+  reply=$(/usr/bin/env python3 -c "
+import json
+try: print(json.load(open('$out_file')).get('choices',[{}])[0].get('message',{}).get('content','')[:80].strip())
+except Exception: pass" 2>/dev/null)
+  elapsed=$(( $(date +%s) - start ))
+  rm -f "$out_file" "$code_file"
+  if [[ "$http" == "200" && -n "$reply" ]]; then
+    ok "AI alive (${elapsed}s) — first reply: \"$reply\""
+    ok "iOS first message will respond in 5-30s instead of cold-start latency"
+    return 0
+  fi
+  warn "Warmup turn failed (HTTP=$http after ${elapsed}s) — first iOS message may show timeout"
+  warn "  If timeout shows but the agent replies anyway: refresh chat tab"
+  warn "  Diagnostic: openclaw gateway logs"
+  return 0
+}
+
 retire_legacy_per_agent_projects_files() {
   local found=0
   for d in "$HOME/.openclaw/workspace/agents/"*/ "$HOME/.openclaw/"workspace-*/; do
@@ -2922,6 +2982,17 @@ fi
 if [[ -f "$HOME/.npmrc" ]]; then
   sed -i '/^prefix=/d;/^globalconfig=/d' "$HOME/.npmrc" 2>/dev/null || true
   [[ -s "$HOME/.npmrc" ]] || rm -f "$HOME/.npmrc"
+fi
+
+# Pre-heat the agent runtime + provider with one real chat completion
+# so the user's first iOS message after pairing isn't stuck in the
+# 60-150s cold-start window. Live progress while it runs. Always
+# returns 0 — slow upstream / broken provider / expired key should
+# not block the QR display.
+if $VERIFY_GW && $VERIFY_TOKEN; then
+  carapace_warmup_turn || true
+else
+  echo -e "  ${DIM}Skipping warmup (gateway or token verification failed above)${RESET}"
 fi
 
 # ── Final result ─────────────────────────────────────────
