@@ -2708,14 +2708,20 @@ fi
 # Final Health Check
 # ══════════════════════════════════════════════════════════
 step "Health Check"
-echo -e "  ${DIM}Running final health checks...${RESET}"
+echo -e "  ${DIM}Running health checks...${RESET}"
 FINAL_GW=false
 FINAL_STATUS=false
-if curl -sf --max-time 5 http://127.0.0.1:18789/health >/dev/null 2>&1; then
+# Gateway: only check the port is bound, NOT /health, because the
+# embedded acpx runtime takes ~70s to lazy-load after process start.
+# /health is reachable but doesn't actually respond until acpx is up,
+# which produces a misleading warning here. Step 9's wait_ready does
+# the real readiness probe (cron.list, which only succeeds once acpx
+# has registered). Here we just confirm the port is listening.
+if /usr/bin/env python3 -c "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(0 if s.connect_ex(('127.0.0.1',18789))==0 else 1)" 2>/dev/null; then
   FINAL_GW=true
-  ok "Gateway health check passed"
+  ok "Gateway listening on :18789 (runtime warm-up validated in Step 9)"
 else
-  warn "Gateway health check failed — check: systemctl status openclaw-gateway"
+  warn "Gateway port :18789 not listening — check: systemctl --user status openclaw-gateway"
 fi
 if curl -sf --max-time 5 http://127.0.0.1:18794/health >/dev/null 2>&1; then
   FINAL_STATUS=true
