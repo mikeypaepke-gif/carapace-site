@@ -1729,70 +1729,52 @@ if ! $SKIP_OPENCLAW_SETUP; then
 # ══════════════════════════════════════════════════════════
 step "Node.js"
 
-if have_cmd node && have_cmd npm && [[ "$(node --version | cut -d. -f1 | tr -d 'v')" -ge 22 ]]; then
-  ok "Node.js $(node --version) (npm $(npm --version))"
-else
-  # Remove any conflicting npmrc prefix/globalconfig before nvm install
-  if [[ -f "$HOME/.npmrc" ]]; then
-    sed -i '/^prefix=/d' "$HOME/.npmrc"
-    sed -i '/^globalconfig=/d' "$HOME/.npmrc"
-  fi
-  # Also remove any existing npm-global prefix from env
-  unset npm_config_prefix 2>/dev/null || true
-
-  echo -e "  ${DIM}Installing Node.js via nvm...${RESET}"
-  # Use nvm on every distro. Previously we had per-distro branches that
-  # fell back to the system package manager on dnf/yum/pacman/apk, but
-  # Rocky 9 / Alma 9 AppStream ships Node 16 (openclaw requires 22.12+),
-  # so distro nodejs packages bricks the gateway service with a restart-
-  # loop. nvm is userspace, portable, and matches what openclaw expects.
-  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash >> "$LOGFILE" 2>&1
-  export NVM_DIR="$HOME/.nvm"
-  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
-    # Temporarily disable errexit so prefix warnings don't abort
-    set +e
-    source "$NVM_DIR/nvm.sh"
-    set -e
+# Install SYSTEM node (NOT nvm) and use it exclusively for openclaw.
+# Per github.com/openclaw/openclaw/issues/46256, having openclaw under
+# nvm while the gateway service runs on a different node runtime causes
+# the WebSocket handshake timeouts we chased for hours. The fix from
+# @arall in that thread: "remove the nvm install and reinstall OpenClaw
+# with a system Node." We do that here unconditionally — system node
+# at /usr/bin/node, openclaw installed via /usr/bin/npm into
+# ~/.npm-global, gateway service explicitly launched with /usr/bin/node.
+# nvm can stay installed for other dev tools, just not used for openclaw.
+SYS_NODE_OK=false
+if [[ -x /usr/bin/node ]] && [[ "$(/usr/bin/node --version 2>/dev/null | cut -d. -f1 | tr -d 'v')" -ge 22 ]]; then
+  SYS_NODE_OK=true
+  ok "System Node.js $(/usr/bin/node --version) at /usr/bin/node"
+fi
+if ! $SYS_NODE_OK; then
+  echo -e "  ${DIM}Installing system Node.js 22 via distro package manager...${RESET}"
+  if have_cmd apt-get; then
+    # NodeSource provides current Node 22 packaged for apt
+    curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO -E bash >> "$LOGFILE" 2>&1
+    $SUDO apt-get install -y nodejs >> "$LOGFILE" 2>&1
+  elif have_cmd dnf; then
+    # Rocky 9 / Alma 9 / Fedora — AppStream module ships node 22+
+    $SUDO dnf module reset -y nodejs >> "$LOGFILE" 2>&1 || true
+    $SUDO dnf module install -y nodejs:22/common >> "$LOGFILE" 2>&1 || \
+      $SUDO dnf install -y nodejs >> "$LOGFILE" 2>&1
+  elif have_cmd yum; then
+    curl -fsSL https://rpm.nodesource.com/setup_22.x | $SUDO bash >> "$LOGFILE" 2>&1
+    $SUDO yum install -y nodejs >> "$LOGFILE" 2>&1
   else
-    fail "nvm install failed — check $LOGFILE"
+    fail "Could not install system Node.js — install manually from https://nodejs.org and re-run"
   fi
-  # Clear any prefix conflict
-  nvm use --delete-prefix 22 --silent 2>/dev/null || true
-  nvm install 22 >> "$LOGFILE" 2>&1 || fail "nvm install 22 failed — check $LOGFILE"
-  nvm use --delete-prefix 22 --silent 2>/dev/null || true
-  nvm use 22 >> "$LOGFILE" 2>&1
-  nvm alias default 22 >> "$LOGFILE" 2>&1
-
-  # SELinux on RHEL-family distros (Rocky / Alma / RHEL / Fedora) defaults
-  # to enforcing, and nvm drops node binaries under $HOME/.nvm/... which
-  # inherit the `cache_home_t` label. systemd refuses to exec binaries
-  # with that label, producing status=203/EXEC on services like our
-  # status-server unit that invokes the nvm node path directly. Relabel
-  # to `bin_t` so systemd services can launch it. Best-effort — silent on
-  # distros where chcon doesn't exist (Debian/Ubuntu/Alpine).
-  if have_cmd chcon; then
-    for _nb in "$HOME"/.nvm/versions/node/*/bin/node; do
-      [ -x "$_nb" ] && chcon -t bin_t "$_nb" >> "$LOGFILE" 2>&1 || true
-    done
-  fi
-
-  # If the distro shipped a system node (Rocky 9 AppStream nodejs is v16),
-  # leave it where it is — don't uninstall, just make sure nvm's bin wins
-  # on PATH. The openclaw-gateway systemd wrapper searches nvm first, but
-  # any stray shell login that doesn't source nvm.sh will still see old
-  # node. That's fine; the gateway service is the one that matters.
-
-  # Re-source nvm
-  if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
-    source "$HOME/.nvm/nvm.sh" 2>/dev/null
-  fi
-
-  if have_cmd node && have_cmd npm; then
-    ok "Node.js $(node --version) installed (npm $(npm --version))"
+  if [[ -x /usr/bin/node ]] && [[ "$(/usr/bin/node --version | cut -d. -f1 | tr -d 'v')" -ge 22 ]]; then
+    ok "System Node.js $(/usr/bin/node --version) installed at /usr/bin/node"
   else
-    fail "Node.js installation failed. Install manually: https://nodejs.org"
+    fail "System Node.js install failed — check $LOGFILE"
   fi
 fi
+
+# Force /usr/bin first on PATH for the rest of this script so any 'node'
+# or 'npm' invocation hits the SYSTEM version, not nvm. Otherwise the
+# rest of install.sh will silently use nvm node when sourcing nvm.sh,
+# and openclaw will get installed under nvm's prefix again.
+export PATH="/usr/bin:$PATH"
+# Strip any inherited NPM_CONFIG_PREFIX or npm_config_prefix that points
+# at an nvm-managed prefix — we want npm-global ownership of openclaw.
+unset NPM_CONFIG_PREFIX npm_config_prefix 2>/dev/null || true
 
 # ══════════════════════════════════════════════════════════
 # Step 2: OpenClaw
@@ -1809,48 +1791,35 @@ if [[ -n "$OC_PATH" ]]; then
   ok "OpenClaw ${OC_VER} at $OC_PATH"
 else
   clean_dirty_install
-  echo -e "  ${DIM}Installing OpenClaw...${RESET}"
-  [[ -s "$HOME/.nvm/nvm.sh" ]] && source "$HOME/.nvm/nvm.sh" 2>/dev/null
-  # Set user-local prefix to avoid permission issues. Use env var
-  # (NPM_CONFIG_PREFIX) instead of `npm config set prefix` because the
-  # latter writes a `prefix=` line to ~/.npmrc that nvm complains
-  # about on EVERY shell login + every nvm-managed npm invocation:
-  #   "Your user's .npmrc file has a `globalconfig` and/or `prefix`
-  #    setting, which are incompatible with nvm.
-  #    Run `nvm use --delete-prefix v22.22.2 --silent` to unset it."
-  # Three copies of that message per shell login is brutal UX. The
-  # env-var form gives us the same effect for THIS install + future
-  # npm installs that source nvm, without dirtying global config.
+  echo -e "  ${DIM}Installing OpenClaw via SYSTEM npm (not nvm)...${RESET}"
+  # CRITICAL: use the SYSTEM npm explicitly. Sourcing nvm.sh here would
+  # put nvm node first on PATH, install openclaw under nvm's prefix, and
+  # the gateway service would end up on a different node runtime than
+  # the openclaw CLI that invokes it — which is github.com/openclaw/
+  # openclaw/issues/46256 verbatim (WS handshake timeouts caused by
+  # CLI/gateway runtime mismatch). System npm + npm-global prefix keeps
+  # everything on /usr/bin/node.
+  if [[ ! -x /usr/bin/npm ]]; then
+    fail "/usr/bin/npm missing — Step 1 should have installed system Node.js"
+  fi
   export NPM_CONFIG_PREFIX="$HOME/.npm-global"
-  export PATH="$HOME/.npm-global/bin:$PATH"
-  # Limit node memory during install to avoid OOM on low-RAM VPS
-  # Install without postinstall first to avoid OOM on low-RAM VPS
-  # The postinstall-bundled-plugins.mjs script uses too much memory on first pass
+  export PATH="/usr/bin:$HOME/.npm-global/bin:$PATH"
+  # Limit node memory during install to avoid OOM on low-RAM VPS.
+  # postinstall-bundled-plugins.mjs uses a lot of memory on first pass.
   export NODE_OPTIONS="--max-old-space-size=768"
-  # PINNED to v2026.4.24. We tried v4.25 (current `latest` on npm) for
-  # several hours and hit three independent regressions:
-  #   1. WebSocket UPGRADE handshake intermittently times out — gateway
-  #      logs `[ws] handshake timeout` even on local 127.0.0.1 connects.
-  #      Affects both `openclaw tui` and the iOS chat path.
-  #   2. First-call chat.history takes ~75s (agent runtime lazy-loads
-  #      on first request), which exceeds the TUI's 60s RPC budget.
-  #   3. Untrusted-proxy header rejection of Tailscale-forwarded
-  #      connections unless gateway.trustedProxies is configured.
+  # Track upstream `latest`. We chased intermittent WS handshake timeouts
+  # for hours assuming v4.25 had a regression — turned out to be a node
+  # runtime mismatch from nvm vs system. With system node enforced
+  # everywhere (Step 1 + this block + the systemd unit's ExecStart), the
+  # symptom goes away and `latest` works fine.
   #
-  # #3 is mitigatable via config (we set trustedProxies to the Tailscale
-  # CGNAT range), but #1 is unfixable from our end — the gateway just
-  # can't accept the WS upgrade in time. v4.24 has none of these.
-  # Unpin once OpenClaw ships a release that resolves the WS regression
-  # (track upstream).
-  #
-  # Override to a different version at install-time with:
-  #   OPENCLAW_VERSION=latest curl ... | bash
-  : "${OPENCLAW_VERSION:=2026.4.24}"
-  retry 3 timeout 240 npm install -g "openclaw@${OPENCLAW_VERSION}" --no-fund --loglevel=error --ignore-scripts
+  # Override at install-time with:  OPENCLAW_VERSION=2026.4.24 curl ... | bash
+  : "${OPENCLAW_VERSION:=latest}"
+  retry 3 timeout 240 /usr/bin/npm install -g "openclaw@${OPENCLAW_VERSION}" --no-fund --loglevel=error --ignore-scripts
   # Run postinstall separately with explicit memory cap and swap already active
   if [ -f "$HOME/.npm-global/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs" ]; then
     echo -e "  ${DIM}Running openclaw postinstall...${RESET}"
-    retry 3 timeout 180 node --max-old-space-size=768 \
+    retry 3 timeout 180 /usr/bin/node --max-old-space-size=768 \
       "$HOME/.npm-global/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs" >> "$LOGFILE" 2>&1 || true
   fi
   unset NODE_OPTIONS
@@ -2118,17 +2087,15 @@ if $IS_ROOT && have_cmd systemctl; then
     done
   fi
 
-  # Write a wrapper script so systemd doesn't mangle shell variables
+  # Write a wrapper script so systemd doesn't mangle shell variables.
+  # CRITICAL: use SYSTEM node (/usr/bin) FIRST on PATH. Earlier versions
+  # of this wrapper preferred nvm node, which made the gateway service
+  # run on a different runtime than the openclaw CLI — the bug from
+  # github.com/openclaw/openclaw/issues/46256 (WS handshake timeouts).
   cat > /usr/local/bin/openclaw-gateway-run << 'GWWRAPPER'
 #!/bin/bash
 export HOME=/root
-export NVM_DIR="$HOME/.nvm"
-NVM_BIN=$(ls -d /root/.nvm/versions/node/*/bin 2>/dev/null | tail -1)
-if [ -n "$NVM_BIN" ]; then
-  export PATH="$NVM_BIN:$HOME/.npm-global/bin:$PATH"
-else
-  export PATH="$HOME/.npm-global/bin:$PATH"
-fi
+export PATH="/usr/bin:$HOME/.npm-global/bin:$PATH"
 # Tune Node heap by system RAM so heavy-usage tails don't OOM during
 # startup (the gateway's own sessions.json + checkpoints can push past
 # Node's default on busy installs after months of use). Keep headroom
@@ -2170,6 +2137,13 @@ WorkingDirectory=/root
 # a 30-second restart loop. This env var prevents that even if the
 # config file ever gets reset by `openclaw onboard` or similar.
 Environment=OPENCLAW_DISABLE_BONJOUR=1
+# Per github.com/openclaw/openclaw/issues/46256 — bump the pre-auth
+# WS handshake timeout from the default 10s to 30s. Slow VPSes can
+# take >10s for the first plugin-loading pass, during which the
+# gateway can't service the WS upgrade, and clients get
+# "handshake timeout" / "gateway connect failed". 30s is comfortable
+# for low-RAM cloud VMs without hiding genuinely-stuck connections.
+Environment=OPENCLAW_HANDSHAKE_TIMEOUT_MS=30000
 ExecStart=/usr/local/bin/openclaw-gateway-run
 StandardOutput=journal
 StandardError=journal
@@ -2219,16 +2193,37 @@ else
   # would otherwise overwrite any direct edits to the unit file.
   USER_DROPIN_DIR="$HOME/.config/systemd/user/openclaw-gateway.service.d"
   mkdir -p "$USER_DROPIN_DIR"
-  cat > "$USER_DROPIN_DIR/carapace-bonjour-off.conf" << 'DROPIN_EOF'
-# Set by the CARAPACE installer. Disables the bonjour mDNS advertiser
-# which crashes the gateway on Linux. See:
-#   https://docs.openclaw.ai/gateway/bonjour
+  cat > "$USER_DROPIN_DIR/carapace-overrides.conf" << DROPIN_EOF
+# Set by the CARAPACE installer.
+#
+# 1) Disable the bonjour mDNS advertiser — the @homebridge/ciao lib
+#    crashes the gateway in a 30-second restart loop on Linux. See:
+#      https://docs.openclaw.ai/gateway/bonjour
+# 2) Force /usr/bin/node (system) for ExecStart — \`openclaw gateway
+#    install\` writes a unit file that uses whatever node was in PATH
+#    at install time, which on a box with both nvm and system node
+#    becomes nvm node. CLI invokes openclaw via system node (PATH=
+#    /usr/bin:...) but the gateway service was running on nvm node →
+#    runtime mismatch → WS handshake races → "gateway connect failed".
+#    Fixed per github.com/openclaw/openclaw/issues/46256.
+# 3) Bump the WS pre-auth handshake timeout to 30s — defaults to 10s
+#    in v2026.3.22+, and slow VPSes can take longer than that for the
+#    initial plugin-loading pass.
 [Service]
 Environment=OPENCLAW_DISABLE_BONJOUR=1
+Environment=OPENCLAW_HANDSHAKE_TIMEOUT_MS=30000
+ExecStart=
+ExecStart=/usr/bin/node $HOME/.npm-global/lib/node_modules/openclaw/dist/index.js gateway --port 18789
 DROPIN_EOF
   systemctl --user daemon-reload 2>/dev/null || true
 
-  timeout 15 openclaw gateway start >/dev/null 2>&1 || true
+  # Force RESTART (not start) — `openclaw gateway install` may have
+  # already started the gateway with the original (pre-drop-in) unit
+  # config that uses nvm node. We must restart to pick up the
+  # drop-in's ExecStart override + handshake timeout env, otherwise
+  # the WS handshake race continues.
+  systemctl --user restart openclaw-gateway >/dev/null 2>&1 || \
+    timeout 15 openclaw gateway start >/dev/null 2>&1 || true
 fi
 
 echo -e "  ${DIM}Waiting for gateway to start...${RESET}"
