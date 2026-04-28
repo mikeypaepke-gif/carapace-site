@@ -2467,10 +2467,21 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
   # for the imperative install loop below AND for generating the
   # persistent systemd unit's ExecStartPost lines further down. iOS
   # hits these bare (`/chat`, `/projects` etc) — the legacy
-  # `/carapace/<endpoint>` prefix from the pre-1.x iOS app was
-  # removed (no production deployments to maintain compat with).
+  # IMPORTANT: register BOTH bare paths (/cron) AND prefixed paths
+  # (/carapace/cron). The iOS app's SettingsManager appends "/carapace"
+  # to the gateway base URL when the host is HTTPS:
+  #   if normalized.hasPrefix("https://") {
+  #     return "\(normalized)/carapace"
+  #   }
+  # We previously dropped the /carapace/ prefix routes thinking
+  # "no production deployments to maintain compat with" — but iOS
+  # never updated, so production iOS clients hit /carapace/cron etc.
+  # and got a 404, decoding failed, tabs showed "not in the correct
+  # format" error. Bare paths stay for direct-IP access (debug,
+  # http://...:18794 from a script). Prefix paths are what iOS hits
+  # over Tailscale HTTPS.
   CARAPACE_SERVE_ROUTES=(
-    # path                               backend_url
+    # bare paths (debug, scripts, http://...:18794 direct)
     "/health                              http://127.0.0.1:18794/health"
     "/history                             http://127.0.0.1:18794/history"
     "/sessions                            http://127.0.0.1:18794/sessions"
@@ -2481,6 +2492,17 @@ if $TAILSCALE_CONNECTED && $GATEWAY_UP; then
     "/pair                                http://127.0.0.1:18794/pair"
     "/chat                                http://127.0.0.1:18794/chat"
     "/cognitive                           http://127.0.0.1:18794/cognitive"
+    # /carapace/* paths — what the iOS app hits over Tailscale HTTPS
+    "/carapace/health                     http://127.0.0.1:18794/health"
+    "/carapace/history                    http://127.0.0.1:18794/history"
+    "/carapace/sessions                   http://127.0.0.1:18794/sessions"
+    "/carapace/projects                   http://127.0.0.1:18794/projects"
+    "/carapace/cron                       http://127.0.0.1:18794/cron"
+    "/carapace/agents                     http://127.0.0.1:18794/agents"
+    "/carapace/status                     http://127.0.0.1:18794/status"
+    "/carapace/pair                       http://127.0.0.1:18794/pair"
+    "/carapace/chat                       http://127.0.0.1:18794/chat"
+    "/carapace/cognitive                  http://127.0.0.1:18794/cognitive"
   )
   # Wrap each call in `timeout 10` — without it, a hung tailscale
   # daemon (DNS lookup stuck, control plane unreachable, etc.) makes
