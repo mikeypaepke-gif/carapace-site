@@ -2948,10 +2948,15 @@ done
 SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
 [[ -d "$SESSIONS_DIR" ]] || { echo "No sessions dir at $SESSIONS_DIR"; exit 0; }
 
-# Build find expression
+# Build find expression. NUKE mode includes the registry too, because
+# leaving sessions.json behind after wiping the data files leaves
+# orphan refs that hang chat.history on next TUI/iOS launch — gateway
+# walks the registry, tries to load each .jsonl, hits ENOENT, stalls.
+# Discovered the hard way: --nuke felt clean but next chat.history
+# call timed out at 30s+ until sessions.json was also removed.
 FIND_ARGS=("$SESSIONS_DIR" -type f)
 if $NUKE; then
-  FIND_ARGS+=( \( -name "*.jsonl" -o -name "*.trajectory.jsonl" -o -name "*.trajectory-path.json" \) )
+  FIND_ARGS+=( \( -name "*.jsonl" -o -name "*.trajectory.jsonl" -o -name "*.trajectory-path.json" -o -name "sessions.json" -o -name "sessions.json.bak.*" \) )
 else
   FIND_ARGS+=( -name "*.trajectory.jsonl" )
 fi
