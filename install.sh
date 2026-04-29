@@ -3424,8 +3424,9 @@ if [ "${CODEX_OAUTH_NEEDED:-false}" = "true" ]; then
   echo ""
   echo -e "    ${BOLD}BROWSER=echo openclaw capability model auth login --provider openai-codex${RESET}"
   echo ""
-  echo -e "  ${DIM}Open the URL on any device with a browser, sign in with your${RESET}"
-  echo -e "  ${DIM}ChatGPT Plus/Pro account, and approve. Then scan the QR above.${RESET}"
+  echo -e "  ${DIM}Open the URL on any device with a browser, sign in with the${RESET}"
+  echo -e "  ${DIM}provider account you've configured on your OpenClaw, and approve.${RESET}"
+  echo -e "  ${DIM}Then scan the QR above.${RESET}"
   echo ""
 fi
 

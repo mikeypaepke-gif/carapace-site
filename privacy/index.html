@@ -114,8 +114,9 @@
         <h2>2. What does flow over the internet</h2>
         <p>Running CARAPACE involves some network activity by design. Here's what goes where:</p>
         <ul>
-          <li><strong>Your phone ↔ your gateway.</strong> Chat, voice, and camera traffic moves directly between your iPhone and the gateway you're paired with, typically over your local network or your Tailnet. We never sit in the middle of this path.</li>
-          <li><strong>Your gateway ↔ AI providers.</strong> When you use Google Gemini, Anthropic Claude, OpenAI, xAI, or other AI providers, your gateway sends your prompts to the provider you configured using the API key <em>you</em> supply. Those providers operate under their own privacy policies. We recommend reviewing them — we don't control what they do with prompts.</li>
+          <li><strong>Your phone ↔ your gateway.</strong> Chat, voice, camera, and context traffic moves directly between your iPhone and the gateway you're paired with, typically over your local network or your Tailnet. We never sit in the middle of this path. The specific fields the iPhone sends with each turn are enumerated in section 5.</li>
+          <li><strong>Your phone ↔ Apple Maps.</strong> When location permission is granted, the iOS app uses Apple's reverse-geocoder to resolve your coordinates into a street and locality, and Apple's <code>MKLocalSearch</code> to fetch nearby points of interest (businesses, landmarks). These queries go to Apple under Apple's privacy policy — they don't pass through our servers or your gateway.</li>
+          <li><strong>Your OpenClaw ↔ your AI provider.</strong> When you've configured your OpenClaw gateway with a third-party AI provider, your gateway sends your prompts to that provider using the API key <em>you</em> supply. Each provider operates under its own privacy policy. We recommend reviewing it — we don't control what they do with prompts and we don't pick which provider you use.</li>
           <li><strong>App updates and installer.</strong> Downloading the macOS DMG or running the Linux installer fetches files from carapace.info (hosted on Cloudflare). Those requests are standard web-server logs (IP address, user agent, timestamp) and are retained briefly by Cloudflare for abuse prevention. We don't correlate them to identities.</li>
           <li><strong>iOS app downloads and IAP.</strong> Installing the iOS app and any in-app purchase goes through Apple, under Apple's privacy policy — not ours. See section 3.</li>
         </ul>
@@ -141,9 +142,24 @@
         </ul>
         <p>The macOS app and Linux installer store config, tokens, and cached conversations on the machine where they run. Deleting the app (or the config directory) removes the data.</p>
 
-        <h2>5. Microphone and camera</h2>
-        <p>The iOS app requests microphone access for voice features and camera access for vision features. These only activate when you explicitly start a voice session or open a camera view. Audio and video frames are streamed <em>directly</em> from your phone to your gateway — we don't receive or proxy them.</p>
-        <p>An optional "wake word" setting keeps the microphone armed in low-power passive mode so the app can hear "Hey Claw." Local detection only — no audio is sent anywhere until the wake word fires and you start a session.</p>
+        <h2>5. What the iPhone app sends to your gateway</h2>
+        <p>When you talk, scan, or open vision mode, the iOS app bundles the following fields with your message and sends them <em>directly</em> to the gateway you've paired with. None of this passes through our servers.</p>
+        <ul>
+          <li><strong>Microphone audio.</strong> Streamed only while a voice session is active. The optional "Hey Claw" wake-word setting runs detection locally on your iPhone — no audio leaves the device until the wake word fires and a session opens.</li>
+          <li><strong>Camera frames.</strong> Streamed only while a vision session or scan is active.</li>
+          <li><strong>On-device scene perception.</strong> The Vision framework runs OCR (text), object classification, barcode decoding, and document detection on each frame on-device; the structured results (text, labels, bounding boxes) ride along with the frame so the gateway can answer faster.</li>
+          <li><strong>Location.</strong> When permission is granted: latitude, longitude, accuracy, altitude, speed, course/heading, and Apple's reverse-geocoded street + locality. Sent only while the app is in use; never in the background.</li>
+          <li><strong>Nearby places.</strong> Names, categories, and distances of nearby points of interest fetched via Apple's <code>MKLocalSearch</code> (cached per ~50m grid cell for ~6 hours).</li>
+          <li><strong>Motion activity.</strong> A coarse classification from Apple's CoreMotion: stationary, walking, running, cycling, or driving. No raw accelerometer data is uploaded.</li>
+          <li><strong>Device context.</strong> Time of day, ambient light bucket, and (on LiDAR devices) a coarse depth read of the scene.</li>
+        </ul>
+        <p>You can turn the contextual fields (location, motion, nearby places, scene perception bundling) off any time in <strong>Settings → Rumination</strong>. With Rumination off, only the message itself, microphone audio, and camera frames are sent.</p>
+
+        <h2>5b. Long-term memory ("Rumination" and Deep Scan)</h2>
+        <p>Your gateway can optionally remember what it has seen and heard across sessions, so future answers are grounded in past context (sub-areas you've visited, objects it has identified, recent utterances). This is on by default and is what we call <strong>Rumination</strong>.</p>
+        <p>The memory database lives entirely on the machine running your gateway. We don't operate any memory server, and we never receive or proxy this data.</p>
+        <p><strong>Deep Scan</strong> (off by default, surfaced in Settings as experimental) is a 60-second passive ingestion sweep that uploads ~25–40 deduplicated frame summaries (scene description, top object labels, recognized text — never raw images for the deep-scan path) to your gateway's <code>/cognitive/ingest-frame</code> endpoint, so future answers at this location are richer.</p>
+        <p>You can disable Rumination or Deep Scan at any time, and you can wipe the memory database directly on your gateway machine.</p>
 
         <h2>6. Cookies and local storage</h2>
         <p>The carapace.info website uses no tracking cookies. The only storage is first-party, same-origin <code>localStorage</code> used to remember UI preferences (e.g. which carousel card you scrolled to). No third-party scripts (other than Tailwind CSS and Google Fonts, both delivered via CDN) run on the site.</p>
@@ -157,7 +173,7 @@
           <li><strong>Apple</strong> — App Store distribution, StoreKit in-app purchases, iCloud Keychain (for your own device, at your option). Apple's privacy policy governs this layer.</li>
           <li><strong>Cloudflare</strong> — CDN and static hosting for carapace.info and the installer. Standard edge logging.</li>
           <li><strong>GitHub</strong> — source code hosting and the issue tracker. If you open an issue, everything you paste becomes public. We don't control GitHub.</li>
-          <li><strong>AI providers you configure</strong> — Google, Anthropic, OpenAI, xAI, or others. Your gateway talks to them directly with API keys you provide. Their policies govern how they handle your prompts.</li>
+          <li><strong>The AI provider you configure on your OpenClaw</strong> — your choice of third-party service. Your gateway talks to it directly using the API key you provide. That provider's policy governs how they handle your prompts; we have no relationship with them and do not select, recommend, or endorse any specific provider.</li>
         </ul>
 
         <h2>9. Your rights</h2>

@@ -56,11 +56,12 @@ those jurisdictions the above applies only to the extent permitted.
 
 ## 4. Third-party services
 
-The Software works with third-party services (Tailscale, Google,
-OpenAI, Anthropic, xAI, Cloudflare, Apple, your hosting company, and
-others). Those services are operated by their owners under their own
-terms, and we're not responsible for their availability, pricing,
-security, or the charges you incur with them.
+The Software works with third-party services (Tailscale, Cloudflare,
+Apple, your hosting company, and the AI provider you choose to
+configure on your OpenClaw gateway). Those services are operated by
+their owners under their own terms, and we're not responsible for
+their availability, pricing, security, or the charges you incur with
+them.
 
 ## 5. You agree to indemnify
 
