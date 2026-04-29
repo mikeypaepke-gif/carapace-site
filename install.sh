@@ -1623,9 +1623,21 @@ done
 # about this with "PATH missing npm global bin dir" — we re-source
 # the rc files and add the canonical install dirs explicitly so
 # the warning never has the chance to bite.
-[[ -s /etc/profile.d/openclaw.sh ]] && source /etc/profile.d/openclaw.sh 2>/dev/null || true
-[[ -s "$HOME/.bashrc" ]] && source "$HOME/.bashrc" 2>/dev/null || true
-[[ -s "$HOME/.profile" ]] && source "$HOME/.profile" 2>/dev/null || true
+# Temporarily relax `set -euo pipefail` while sourcing the user's
+# rc files. Real-world bashrc / profile files do all kinds of stuff
+# that's fine for an interactive shell but explodes under strict
+# mode — most commonly: accessing $PS1 (unset under `set -u` in a
+# non-interactive shell) which kills the install with "unbound
+# variable" before any of our own code runs. Using `|| true` after
+# `source` doesn't catch this because `set -e` exits BEFORE the `||`
+# is evaluated. Toggle the flags around the sources, then restore.
+{
+  set +eu
+  [[ -s /etc/profile.d/openclaw.sh ]] && source /etc/profile.d/openclaw.sh 2>/dev/null
+  [[ -s "$HOME/.bashrc" ]] && source "$HOME/.bashrc" 2>/dev/null
+  [[ -s "$HOME/.profile" ]] && source "$HOME/.profile" 2>/dev/null
+  set -eu
+} 2>/dev/null || true
 export PATH="$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:$PATH"
 if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
   source "$HOME/.nvm/nvm.sh" 2>/dev/null
