@@ -240,6 +240,106 @@ _carapace_is_main_workspace() {
   [[ "$1" == "$HOME/.openclaw/workspace" ]]
 }
 
+# Print all detected workspaces with friendly labels, one per line as
+# "<path>|<label>". Used by the workspace selector below.
+_carapace_list_workspaces_with_labels() {
+  while IFS= read -r ws; do
+    [[ -d "$ws" ]] || continue
+    local label
+    if _carapace_is_main_workspace "$ws"; then
+      label="main"
+    elif [[ "$ws" == "$HOME/.openclaw/agents/"* ]]; then
+      label="agent: $(basename "$ws")"
+    elif [[ "$ws" == "$HOME/.openclaw/workspace/agents/"* ]]; then
+      label="subagent: $(basename "$ws")"
+    elif [[ "$ws" == "$HOME/.openclaw/workspace-"* ]]; then
+      label="alt workspace: $(basename "$ws" | sed 's/^workspace-//')"
+    else
+      label="$(basename "$ws")"
+    fi
+    printf '%s|%s\n' "$ws" "$label"
+  done < <(_carapace_list_agent_workspaces)
+}
+
+# Interactive workspace selector. Sets CARAPACE_WORKSPACES (array) to
+# the user's chosen workspace paths. If only one workspace is detected,
+# skips the prompt entirely. Defaults to "install on all" for batch /
+# non-interactive runs, matching the historical behavior of
+# sweep_carapace_for_all_agents.
+#
+# Choice format:
+#   a / Enter — install on all detected workspaces (default)
+#   s        — skip workspace inject entirely
+#   N        — install on workspace #N only
+#   N,M,...  — install on a subset (comma-separated)
+carapace_select_workspaces() {
+  CARAPACE_WORKSPACES=()
+  local entries=()
+  while IFS= read -r line; do entries+=("$line"); done < <(_carapace_list_workspaces_with_labels)
+
+  if [[ ${#entries[@]} -eq 0 ]]; then
+    warn "No openclaw workspaces detected — skipping workspace inject"
+    return 0
+  fi
+
+  if [[ ${#entries[@]} -eq 1 ]]; then
+    # Only main detected — no choice to make
+    CARAPACE_WORKSPACES=("${entries[0]%%|*}")
+    return 0
+  fi
+
+  # Non-interactive (no /dev/tty) → install on all
+  if ! ( : < /dev/tty ) 2>/dev/null; then
+    for entry in "${entries[@]}"; do CARAPACE_WORKSPACES+=("${entry%%|*}"); done
+    ok "Multiple workspaces detected — installing on all (no TTY for prompt)"
+    return 0
+  fi
+
+  # Interactive selector
+  echo ""
+  echo -e "  ${BOLD}Detected ${#entries[@]} openclaw workspaces:${RESET}"
+  local i=1
+  for entry in "${entries[@]}"; do
+    local path="${entry%%|*}" label="${entry##*|}"
+    printf "    ${BOLD}%d${RESET}) %-50s ${DIM}%s${RESET}\n" "$i" "${path/#$HOME/~}" "$label"
+    i=$((i+1))
+  done
+  echo -e "    ${BOLD}a${RESET}) Install on all (recommended)"
+  echo -e "    ${BOLD}s${RESET}) Skip workspace inject (just install support tools)"
+  echo ""
+  echo -e "  ${DIM}Pick one number, a comma-separated subset (e.g. ${BOLD}1,3${RESET}${DIM}), or ${BOLD}a${RESET}${DIM} for all.${RESET}"
+  local choice
+  read -rp "  Choice [a]: " choice < /dev/tty
+  [[ -z "$choice" ]] && choice="a"
+
+  case "$choice" in
+    [aA]|all)
+      for entry in "${entries[@]}"; do CARAPACE_WORKSPACES+=("${entry%%|*}"); done
+      ok "Installing on all ${#entries[@]} workspaces"
+      ;;
+    [sS]|skip)
+      ok "Skipping workspace inject — only support tools will be installed"
+      ;;
+    *)
+      # Parse comma-separated number list
+      IFS=',' read -ra picks <<< "$choice"
+      for pick in "${picks[@]}"; do
+        pick="${pick// /}"
+        if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#entries[@]} )); then
+          CARAPACE_WORKSPACES+=("${entries[$((pick-1))]%%|*}")
+        else
+          warn "  Ignored invalid choice: '$pick'"
+        fi
+      done
+      if [[ ${#CARAPACE_WORKSPACES[@]} -eq 0 ]]; then
+        warn "No valid choices — defaulting to all"
+        for entry in "${entries[@]}"; do CARAPACE_WORKSPACES+=("${entry%%|*}"); done
+      fi
+      ok "Installing on ${#CARAPACE_WORKSPACES[@]} workspace(s)"
+      ;;
+  esac
+}
+
 inject_carapace_rules_into_workspace() {
   local workspace="$1"; local agents_md="${workspace}/AGENTS.md"
   local block_file
@@ -3141,11 +3241,42 @@ fi
 step "Carapace shell setup"
 
 ensure_carapace_bootstrap_caps || true
-echo -e "  ${DIM}Injecting CARAPACE workspace files...${RESET}"
-inject_carapace_first_light
-inject_carapace_bootstrap
-sweep_carapace_for_all_agents
-ok "CARAPACE injections complete"
+
+# Detect openclaw workspaces + ask the user where to install. If only
+# main is detected, no prompt fires (single-workspace shortcut). If
+# multiple agents/subagents/alt workspaces exist, the user picks
+# all / a subset / skip. Non-interactive runs default to all.
+carapace_select_workspaces
+
+if [[ ${#CARAPACE_WORKSPACES[@]} -eq 0 ]]; then
+  echo -e "  ${DIM}No workspace inject — only support tools installed.${RESET}"
+else
+  echo -e "  ${DIM}Injecting CARAPACE workspace files into ${#CARAPACE_WORKSPACES[@]} workspace(s)...${RESET}"
+  for ws in "${CARAPACE_WORKSPACES[@]}"; do
+    if _carapace_is_main_workspace "$ws"; then
+      # Main workspace gets the full treatment: AGENTS.md FIRST-LIGHT
+      # sentinel, CARAPACE-STARTUP.md hatch script, IDENTITY seed.
+      # These are user-facing-agent-only — subagents have their own
+      # named identities and don't need a re-hatch.
+      inject_carapace_first_light
+      inject_carapace_bootstrap
+    fi
+    # All workspaces (main + subagents + alts) get the rules + project
+    # tracker so they understand vision turns, project conventions, etc.
+    inject_carapace_rules_into_workspace "$ws" || true
+    seed_carapace_projects_for_workspace "$ws" || true
+  done
+  # Cross-cutting helpers that operate on the install as a whole, not
+  # any specific workspace: caps, identity seed for main, legacy
+  # cleanup, session-prompt-cache flip.
+  ensure_carapace_bootstrap_caps || true
+  install_self_to_carapace_dir || true
+  seed_main_identity_default || true
+  retire_legacy_per_agent_projects_files || true
+  retire_stale_subagent_bootstrap_files || true
+  flip_all_sessions_system_sent || true
+  ok "CARAPACE injections complete (${#CARAPACE_WORKSPACES[@]} workspace(s))"
+fi
 
 carapace_wipe_stale_sessions
 carapace_restart_gateway_and_wait_ready 120 || true
