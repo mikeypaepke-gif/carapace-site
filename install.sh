@@ -3106,8 +3106,25 @@ for arg in "$@"; do
   esac
 done
 
-SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
-[[ -d "$SESSIONS_DIR" ]] || { echo "No sessions dir at $SESSIONS_DIR"; exit 0; }
+# Walk ALL agents' sessions dirs, not just main. Status server is
+# multi-agent — every agent in ~/.openclaw/agents/<id>/sessions/ has
+# its own .jsonl + .trajectory.jsonl files that can accumulate. If
+# we only pruned main, secondary agents (subagents, per-project
+# agents created via `openclaw agents add`) would silently bloat
+# their session dirs forever. Build a find -path expression that
+# covers every agent.
+AGENTS_ROOT="$HOME/.openclaw/agents"
+[[ -d "$AGENTS_ROOT" ]] || { echo "No agents dir at $AGENTS_ROOT"; exit 0; }
+
+# Collect every agent's sessions dir
+SESSION_DIRS=()
+for agent_dir in "$AGENTS_ROOT"/*/; do
+  [[ -d "${agent_dir}sessions" ]] && SESSION_DIRS+=("${agent_dir}sessions")
+done
+if [[ ${#SESSION_DIRS[@]} -eq 0 ]]; then
+  echo "No agent sessions dirs found under $AGENTS_ROOT"
+  exit 0
+fi
 
 # Build find expression. NUKE mode includes the registry too, because
 # leaving sessions.json behind after wiping the data files leaves
@@ -3115,7 +3132,7 @@ SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
 # walks the registry, tries to load each .jsonl, hits ENOENT, stalls.
 # Discovered the hard way: --nuke felt clean but next chat.history
 # call timed out at 30s+ until sessions.json was also removed.
-FIND_ARGS=("$SESSIONS_DIR" -type f)
+FIND_ARGS=("${SESSION_DIRS[@]}" -type f)
 if $NUKE; then
   FIND_ARGS+=( \( -name "*.jsonl" -o -name "*.trajectory.jsonl" -o -name "*.trajectory-path.json" -o -name "sessions.json" -o -name "sessions.json.bak.*" \) )
 else
