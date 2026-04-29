@@ -338,13 +338,24 @@
         <div class="reveal reveal-delay-3 mt-6 max-w-lg mx-auto">
           <div class="flex items-center gap-2 mb-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-white/35">
             <svg class="w-3.5 h-3.5 text-[#00DCC8]/70" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z"/></svg>
-            <span>VPS / Linux / Raspberry Pi</span>
+            <span>VPS / Linux / Raspberry Pi · layers on top of OpenClaw</span>
           </div>
           <div class="relative rounded-xl bg-black/50 border border-white/[0.06] backdrop-blur-md overflow-hidden">
-            <div class="flex items-center gap-3 px-4 py-3">
-              <code class="flex-1 text-[12px] sm:text-[13px] font-mono text-[#00DCC8] truncate text-left select-all" id="linux-install-cmd">curl -fsSL https://carapace.info/install.sh | bash</code>
-              <button type="button" class="shrink-0 text-[11px] font-semibold tracking-wide uppercase px-2.5 py-1.5 rounded-md border border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/[0.10] hover:text-white transition-colors" id="linux-install-copy">
-                Copy
+            <div class="px-4 py-3 space-y-1.5">
+              <div class="flex items-center gap-3">
+                <span class="text-white/30 text-[11px] font-mono shrink-0 select-none">1</span>
+                <code class="flex-1 text-[12px] sm:text-[13px] font-mono text-[#00DCC8] truncate text-left select-all">curl -fsSL https://openclaw.ai/install.sh | bash</code>
+              </div>
+              <div class="flex items-center gap-3">
+                <span class="text-white/30 text-[11px] font-mono shrink-0 select-none">2</span>
+                <code class="flex-1 text-[12px] sm:text-[13px] font-mono text-[#00DCC8] truncate text-left select-all">curl -fsSL https://carapace.info/install.sh | bash</code>
+              </div>
+            </div>
+            <div class="border-t border-white/[0.04] flex items-center justify-between px-4 py-2 text-[11px] text-white/40">
+              <span>Two commands · ~5 min · non-destructive on existing OpenClaw</span>
+              <button type="button" class="shrink-0 text-[11px] font-semibold tracking-wide uppercase px-2.5 py-1.5 rounded-md border border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/[0.10] hover:text-white transition-colors" id="linux-install-copy" data-copy-multiline="curl -fsSL https://openclaw.ai/install.sh | bash
+curl -fsSL https://carapace.info/install.sh | bash">
+                Copy both
               </button>
             </div>
           </div>
@@ -769,9 +780,13 @@
               Free — no license required for headless
             </li>
           </ul>
-          <div class="code-block rounded-xl p-4 text-sm">
-            <div class="text-white/30 text-xs mb-2">Install with one command:</div>
-            <code class="text-[#00DCC8] text-xs sm:text-sm break-all">curl -fsSL https://carapace.info/install.sh | bash</code>
+          <div class="code-block rounded-xl p-4 text-sm space-y-2">
+            <div class="text-white/30 text-xs">Two commands — Carapace layers on top of OpenClaw:</div>
+            <div class="space-y-1">
+              <code class="block text-[#00DCC8] text-[11px] sm:text-xs break-all"><span class="text-white/30 select-none">1</span>  curl -fsSL https://openclaw.ai/install.sh | bash</code>
+              <code class="block text-[#00DCC8] text-[11px] sm:text-xs break-all"><span class="text-white/30 select-none">2</span>  curl -fsSL https://carapace.info/install.sh | bash</code>
+            </div>
+            <div class="text-white/25 text-[10px] pt-1">Non-destructive on existing OpenClaw setups — your chats, keys, and identity files are preserved.</div>
           </div>
           <a href="/install/linux/" class="block text-center text-xs text-white/40 hover:text-teal-400 transition-colors">
             Full install guide →
@@ -1386,9 +1401,13 @@
 
       <!-- Linux install -->
       <div class="reveal reveal-delay-3 max-w-lg mx-auto space-y-3">
-        <div class="code-block rounded-xl p-4 text-center">
-          <div class="text-white/30 text-xs mb-2">Linux / VPS / Raspberry Pi — free, headless, open source</div>
-          <code class="text-[#00DCC8] text-sm break-all">curl -fsSL https://carapace.info/install.sh | bash</code>
+        <div class="code-block rounded-xl p-4 text-center space-y-2">
+          <div class="text-white/30 text-xs">Linux / VPS / Raspberry Pi — Carapace layers on top of OpenClaw</div>
+          <div class="space-y-1 text-left">
+            <code class="block text-[#00DCC8] text-xs sm:text-sm break-all"><span class="text-white/30 select-none">1</span>  curl -fsSL https://openclaw.ai/install.sh | bash</code>
+            <code class="block text-[#00DCC8] text-xs sm:text-sm break-all"><span class="text-white/30 select-none">2</span>  curl -fsSL https://carapace.info/install.sh | bash</code>
+          </div>
+          <div class="text-white/25 text-[10px]">Two commands · ~5 min · safe to layer onto an existing OpenClaw</div>
         </div>
         <div class="flex flex-wrap justify-center items-center gap-x-5 gap-y-2 text-xs text-white/40">
           <a href="/install/mac/" class="hover:text-teal-400 transition-colors">Mac guide →</a>
@@ -1484,11 +1503,15 @@
     // API with a visible "Copied!" confirmation that reverts after 2s.
     (() => {
       const btn = document.getElementById('linux-install-copy');
-      const cmd = document.getElementById('linux-install-cmd');
-      if (!btn || !cmd) return;
+      if (!btn) return;
+      // Copy text comes from data-copy-multiline (preferred — supports
+      // the new two-command flow) or falls back to the legacy
+      // #linux-install-cmd <code> element if the data attr is absent.
+      const text = btn.dataset.copyMultiline ||
+                   document.getElementById('linux-install-cmd')?.textContent.trim() || '';
       btn.addEventListener('click', async () => {
         try {
-          await navigator.clipboard.writeText(cmd.textContent.trim());
+          await navigator.clipboard.writeText(text);
           const original = btn.textContent;
           btn.textContent = 'Copied!';
           btn.classList.add('text-[#00DCC8]');
@@ -1497,13 +1520,10 @@
             btn.classList.remove('text-[#00DCC8]');
           }, 2000);
         } catch (e) {
-          // Clipboard API unavailable (http, old browser). Fallback:
-          // select the text so the user can cmd-C / ctrl-C manually.
-          const range = document.createRange();
-          range.selectNodeContents(cmd);
-          const sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
+          // Clipboard API unavailable (http, old browser). User can
+          // still select+copy the visible code blocks manually.
+          btn.textContent = 'Press ⌘C';
+          setTimeout(() => { btn.textContent = 'Copy both'; }, 2000);
         }
       });
     })();

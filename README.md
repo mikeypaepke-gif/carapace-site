@@ -23,9 +23,16 @@
 ---
 
 This repository hosts the marketing site for [CARAPACE](https://carapace.info/)
-and the open-source Linux installer (`install.sh`) that provisions a headless
-[OpenClaw](https://openclaw.ai/) gateway on any Ubuntu / Debian / Raspberry Pi
-or Rocky / Alma / Fedora host.
+and the open-source Linux installer (`install.sh`) that **layers Carapace on
+top of an existing [OpenClaw](https://openclaw.ai/) gateway** on any Ubuntu /
+Debian / Raspberry Pi or Rocky / Alma / Fedora host.
+
+Carapace is a **shell on top of OpenClaw** — OpenClaw owns the AI runtime,
+your provider, your API key, and the gateway service. Carapace adds
+Tailscale serve, the iOS pairing layer, sentinel-bounded workspace prompts,
+a status server, and helper commands. The carapace install is **non-
+destructive on existing OpenClaw setups** — your chats, keys, and identity
+files are preserved by design.
 
 ---
 
@@ -33,41 +40,87 @@ or Rocky / Alma / Fedora host.
 
 | Asset | License | Notes |
 |---|---|---|
-| `install.sh` | **MIT** — see [LICENSE](./LICENSE) | The one-liner Linux installer. Inspect it, fork it, send PRs. |
+| `install.sh` | **MIT** — see [LICENSE](./LICENSE) | The Linux installer that layers Carapace onto an existing OpenClaw. Inspect it, fork it, send PRs. |
 | `index.html`, `install/`, `assets/`, other web content | **MIT** | Marketing site deployed to Cloudflare Pages at carapace.info. |
+| `status-server.js`, `cognitive/` | **MIT** | The status server + cognitive memory modules dropped at `~/.carapace/` during install. |
 | `Carapace-*.dmg` | **Proprietary** | Signed macOS application binary. Distributed from this repo for convenience; **not** covered by the MIT license. |
 
 **Not in this repository:**
 - The macOS app source (closed-source).
 - The iOS app source (closed-source; App Store distribution only).
+- OpenClaw itself (separate project, [openclaw.ai](https://openclaw.ai)).
 
-If you're looking to contribute, you're contributing to `install.sh` or the
-website. The Mac and iOS apps are closed and PRs against them have nowhere to
-land — see [CONTRIBUTING.md](./CONTRIBUTING.md).
+If you're looking to contribute, you're contributing to `install.sh`,
+`status-server.js`, or the website. The Mac and iOS apps are closed and PRs
+against them have nowhere to land — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ---
 
-## The Linux installer
+## The Linux installer (two commands)
+
+Carapace is a **shell** on top of OpenClaw. Install OpenClaw first
+(handles Node, npm, and the interactive provider/key/model wizard),
+then layer Carapace on top:
 
 ```bash
+# 1. Install OpenClaw (one-time, handles node + provider/key/model)
+curl -fsSL https://openclaw.ai/install.sh | bash
+# When asked "Hatch in Terminal? [y/N]" → say NO. The terminal hatch
+# fires a chat turn that races Carapace's setup. Skip it.
+
+# 2. Layer Carapace on top
 curl -fsSL https://carapace.info/install.sh | bash
 ```
 
-It walks the user through:
+The Carapace installer (this repo's `install.sh`) walks through:
 
-1. Prerequisites — installs `curl`, `python3`, `git`, `build-essential`
-   (`gcc`/`g++`/`make`), `jq`, and `cron` on their behalf.
-2. Node.js via `nvm`.
-3. OpenClaw via `npm install -g openclaw`.
-4. Tailscale for secure remote access to the gateway.
-5. A confirm-or-re-enter loop on API-key entry so a typo doesn't require
-   restarting the whole installer.
-6. Provider picker (Gemini / Claude / OpenAI Codex via ChatGPT OAuth /
-   OpenAI API / xAI / Skip).
-7. QR-code pair with the Carapace iOS app.
+1. **Pre-flight** — verifies OpenClaw is installed and has at least one
+   AI provider configured. Bails clean with actionable instructions if
+   either is missing.
+2. **Tailscale** — installs + interactive auth (one click in your browser).
+3. **HTTPS verification** — confirms Tailscale serve will work over HTTPS.
+4. **Gateway service** — installs/restarts the openclaw-gateway systemd
+   unit with a dynamic openclaw path resolver (handles per-user nvm,
+   sudo-npm system, and `~/.npm-global` install layouts).
+5. **Status server** — drops `status-server.js` + cognitive memory modules
+   at `~/.carapace/`, registers as systemd service, exposes `/agents`,
+   `/cron`, `/sessions`, `/projects`, `/history`, `/chat`, etc.
+6. **Helper commands** — installs `carapace-qr`, `carapace-onboard`,
+   `carapace-prune` to `/usr/local/bin/`.
+7. **Health check** — port-bind probe (NOT `/health` curl, which is
+   unreliable during the openclaw acpx runtime cold-start window).
+8. **Carapace shell setup** — bumps `agents.defaults.timeoutSeconds`
+   (180s, only if your value is lower), `bootstrapMaxChars` (50K),
+   `gateway.trustedProxies` (Tailscale CGNAT range). Sentinel-bounded
+   inserts into `AGENTS.md` + `MEMORY.md`. Preserves any non-default
+   `IDENTITY.md`. Writes `PROJECTS.md` only if missing. Removes
+   `BOOTSTRAP.md` only if it carries our sentinel or known openclaw-stock
+   headers.
+9. **Connect** — verifies gateway responsive, Tailscale serve active,
+   workspace files present, gateway token present. Runs a single warmup
+   chat completion against the configured provider so the user's first
+   iOS message after pairing isn't stuck in cold-start. Then prints the
+   QR + pair URL.
+10. **Cron jobs** — installs nightly gateway restart (3am UTC) + daily
+    trajectory prune (3:30am UTC) so the TUI/iOS history tabs stay
+    snappy without the user ever managing trajectory bloat manually.
 
-The installer is idempotent — safe to re-run without breaking existing
-pairings or authentication tokens.
+The installer is **idempotent** — safe to re-run any time you want to
+refresh the workspace prompts, pull updated helper commands, or pick up
+a newer Carapace release. Re-runs respect every safeguard above.
+
+### What Carapace never touches
+
+| File / state | Behavior |
+|---|---|
+| `~/.openclaw/agents/main/sessions/*.jsonl` (your chat history) | **Never touched** |
+| `~/.openclaw/agents/main/agent/auth-profiles.json` (your API keys) | **Never touched** |
+| Custom workspace files (`SOUL.md`, `USER.md`, `OPS.md`, `TASKS.md`, etc.) | **Never touched** |
+| `IDENTITY.md` with a non-default Name field | **Never touched** (only seeds if openclaw's unfilled template) |
+| `openclaw.json` config values larger than ours | **Never reduced** (caps only bump if your value is lower) |
+| Existing Tailscale serve routes | **Never reset** (only adds) |
+
+Want a snapshot before running? `tar czf ~/openclaw-backup.tar.gz -C ~ .openclaw`
 
 ### Tested on
 
