@@ -2903,6 +2903,99 @@ ONBOARDCMD
 $SUDO chmod +x /usr/local/bin/carapace-onboard
 ok "carapace-onboard installed (wraps openclaw onboard)"
 
+# ── carapace-prune helper ────────────────────────────────
+# Mitigates upstream openclaw issues that the openclaw maintainers
+# have explicitly declined to fix:
+#   * #18700 — session JSONL retention/archival (closed: NOT PLANNED)
+#   * #20588 — chat client hangs on large session history
+#   * #65572 — TUI chat.history fails after gateway restart, no retry
+#
+# Symptom: TUI shows "connecting | idle" forever / iOS history tab
+# spins / chat.history times out. Root cause: every chat turn writes
+# to a per-session .trajectory.jsonl file that grows unbounded
+# (50–100x bigger than the chat itself for reasoning models). On
+# launch, openclaw single-thread JSON-parses the whole file before
+# the TUI/iOS can render anything. Once it crosses ~1MB the parse
+# exceeds the WS RPC budget and the client gives up.
+#
+# This helper wipes ONLY .trajectory.jsonl files, never .jsonl
+# (which is the user's actual chat scrollback). Default safety:
+# skip files modified within the last hour (don't kill mid-
+# conversation reasoning), and refuse to touch files smaller than
+# 256KB unless --all is passed (no point chasing tiny files).
+$SUDO tee /usr/local/bin/carapace-prune > /dev/null << 'PRUNECMD'
+#!/usr/bin/env bash
+# carapace-prune — wipe agent reasoning trajectories to keep TUI snappy.
+# Usage:
+#   carapace-prune              # default: trajectories >256KB, idle >1h
+#   carapace-prune --dry-run    # show what would be removed
+#   carapace-prune --all        # also remove tiny + recently-modified
+#   carapace-prune --nuke       # also remove .jsonl chat history (full reset)
+set -uo pipefail
+
+DRY=false; ALL=false; NUKE=false
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run|-n) DRY=true ;;
+    --all)        ALL=true ;;
+    --nuke)       NUKE=true; ALL=true ;;
+    -h|--help)
+      sed -n '2,7p' "$0" | sed 's/^# *//'
+      exit 0 ;;
+  esac
+done
+
+SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
+[[ -d "$SESSIONS_DIR" ]] || { echo "No sessions dir at $SESSIONS_DIR"; exit 0; }
+
+# Build find expression
+FIND_ARGS=("$SESSIONS_DIR" -type f)
+if $NUKE; then
+  FIND_ARGS+=( \( -name "*.jsonl" -o -name "*.trajectory.jsonl" -o -name "*.trajectory-path.json" \) )
+else
+  FIND_ARGS+=( -name "*.trajectory.jsonl" )
+fi
+if ! $ALL; then
+  FIND_ARGS+=( -size +256k -mmin +60 )
+fi
+
+CANDIDATES=$(find "${FIND_ARGS[@]}" 2>/dev/null)
+if [[ -z "$CANDIDATES" ]]; then
+  echo "Nothing to prune."
+  exit 0
+fi
+
+COUNT=$(echo "$CANDIDATES" | wc -l)
+BYTES=$(echo "$CANDIDATES" | xargs -d '\n' -I{} stat -c %s {} 2>/dev/null | awk '{s+=$1} END {print s+0}')
+HUMAN=$(numfmt --to=iec --suffix=B "$BYTES" 2>/dev/null || echo "${BYTES}B")
+
+echo "Carapace prune ($($DRY && echo 'DRY RUN' || echo 'will remove'))"
+echo "  files:   $COUNT"
+echo "  size:    $HUMAN"
+$NUKE && echo "  scope:   --nuke (chat .jsonl + trajectory + path metadata)"
+$ALL  && ! $NUKE && echo "  scope:   --all (trajectories regardless of age/size)"
+$ALL  || echo "  scope:   safe defaults (trajectories >256KB AND idle >1h)"
+echo ""
+echo "$CANDIDATES" | while read -r f; do
+  printf "  %-12s %s\n" "$(stat -c %s "$f" 2>/dev/null | numfmt --to=iec --suffix=B 2>/dev/null || echo '?')" "${f##*/}"
+done
+echo ""
+
+if $DRY; then
+  echo "(dry run — nothing removed; re-run without --dry-run to actually prune)"
+  exit 0
+fi
+
+echo "$CANDIDATES" | xargs -d '\n' rm -f
+echo "✓ Removed $COUNT file(s), freed $HUMAN"
+echo ""
+echo "Note: gateway holds session state in memory. For a fully clean"
+echo "TUI/iOS launch, restart the gateway:"
+echo "    systemctl --user restart openclaw-gateway"
+PRUNECMD
+$SUDO chmod +x /usr/local/bin/carapace-prune
+ok "carapace-prune installed (wipe trajectory bloat without losing chats)"
+
 # ── Nightly maintenance cron ────────────────────────────
 # Resolve the real openclaw binary (npm-global takes precedence — nvm's node/bin
 # only contains node/npm/npx/corepack, NOT openclaw). Falls back through other
@@ -2920,8 +3013,14 @@ if [[ -z "$OC_BIN" ]]; then
 else
   CRON_LINE="0 3 * * * export TZ=UTC; export NVM_DIR=\"\$HOME/.nvm\"; [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"; export PATH=\"\$HOME/.npm-global/bin:\$PATH\"; $OC_BIN gateway restart >/dev/null 2>&1"
 fi
-( crontab -l 2>/dev/null | grep -v 'openclaw gateway restart' | grep -v 'sync-trackers' || true; echo "$SYNC_CRON"; echo "$CRON_LINE" ) | crontab -
-ok "Nightly gateway restart scheduled (3am UTC)"
+# Daily trajectory prune at 3:30am UTC — 30min after the nightly
+# gateway restart so the prune sees fully-flushed files. Default
+# safety: only files >256KB AND idle >1h (skips current/active
+# session reasoning). Uses the carapace-prune helper installed
+# above so the prune logic stays in one auditable place.
+PRUNE_CRON_LINE="30 3 * * * /usr/local/bin/carapace-prune >/dev/null 2>&1"
+( crontab -l 2>/dev/null | grep -v 'openclaw gateway restart' | grep -v 'carapace-prune' | grep -v 'sync-trackers' || true; echo "$SYNC_CRON"; echo "$CRON_LINE"; echo "$PRUNE_CRON_LINE" ) | crontab -
+ok "Nightly gateway restart scheduled (3am UTC) + trajectory prune (3:30am UTC)"
 
 # Reload shell profile
 if [[ -f /etc/profile.d/openclaw.sh ]]; then
