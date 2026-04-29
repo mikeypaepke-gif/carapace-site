@@ -644,26 +644,29 @@ print('0')" 2>/dev/null || echo "0")
   [[ "$has_key" == "1" ]]
 }
 
-# Clear ONLY bootstrap artifacts that we recognize as safe to remove.
-# Never wipes session jsonl, never wipes user-customized BOOTSTRAP.md.
-# Carapace is a SHELL — it must not destroy user state on a layer-on
-# install.
+# Clear ONLY openclaw-stock BOOTSTRAP.md so its [Bootstrap pending]
+# wrapper doesn't trigger the runtime infinite-loop bug. Never wipes
+# session jsonl, never wipes user-customized BOOTSTRAP.md, never
+# wipes our own CARAPACE-STARTUP.md (the agent self-cleans that one).
 #
-# Why we touch BOOTSTRAP.md at all: while the file exists, openclaw
-# injects a "[Bootstrap pending]" wrapper into EVERY agent turn,
-# instructing the agent to read+delete the file before replying. The
-# canonical exit signal is the agent deleting BOOTSTRAP.md after
-# first-light. In practice with default tool profiles, the agent
-# can't actually delete files (only `read` is in its inventory), so
-# the wrapper re-fires forever and every turn pays the cold-start
-# prompt cost. The fix is to delete the file ourselves post-install.
+# Why we touch BOOTSTRAP.md at all: while a file literally named
+# `BOOTSTRAP.md` exists in the workspace, openclaw injects a
+# "[Bootstrap pending]" wrapper into EVERY agent turn, instructing
+# the agent to read+delete the file before replying. The canonical
+# exit signal is the agent deleting BOOTSTRAP.md after first-light.
+# In practice with default tool profiles, the agent often can't
+# actually delete files (only `read` is in its inventory), so the
+# wrapper re-fires forever and every turn pays the cold-start
+# prompt cost.
 #
-# But ONLY if it's a file we KNOW is safe to remove:
-#   1. Our own injection (carries BEGIN CARAPACE BOOTSTRAP sentinel)
-#   2. OpenClaw's stock template (recognizable header)
-# If it's something else — a user-customized BOOTSTRAP.md they
-# deliberately wrote — leave it alone and warn that the wrapper
-# will keep firing until they handle it.
+# Carapace's solution: ship our first-light prompt as
+# CARAPACE-STARTUP.md instead (different filename, no wrapper
+# trigger), and remove openclaw-stock BOOTSTRAP.md if found so the
+# wrapper doesn't fire. We never write BOOTSTRAP.md ourselves
+# anymore, so all we need to do here is recognize + remove openclaw's
+# stock template. User-customized BOOTSTRAP.md (anything we don't
+# recognize as openclaw-stock) is left alone with a warning — they
+# wrote it deliberately, we won't second-guess them.
 #
 # Sessions/*.jsonl are NEVER touched here. If a user has corrupt
 # session jsonl from a failed-key incident and chat.history is
@@ -672,17 +675,21 @@ print('0')" 2>/dev/null || echo "0")
 carapace_wipe_stale_sessions() {
   local bs="$HOME/.openclaw/workspace/BOOTSTRAP.md"
   [[ -f "$bs" ]] || return 0
-  if grep -q "BEGIN CARAPACE BOOTSTRAP" "$bs" 2>/dev/null; then
-    rm -f "$bs"
-    return 0
-  fi
   # OpenClaw's stock BOOTSTRAP.md headers we've observed across versions
   if grep -qE "^# BOOTSTRAP\.md|^# Hello, World|^_You just woke up\." "$bs" 2>/dev/null; then
     rm -f "$bs"
     return 0
   fi
+  # Legacy: pre-2026-04-29 versions of carapace wrote our own
+  # BOOTSTRAP.md with a "BEGIN CARAPACE BOOTSTRAP" sentinel. Clean
+  # those up too — same wrapper-trigger problem regardless of who
+  # wrote the content.
+  if grep -q "BEGIN CARAPACE BOOTSTRAP" "$bs" 2>/dev/null; then
+    rm -f "$bs"
+    return 0
+  fi
   # Unknown/customized BOOTSTRAP.md — leave alone, but flag it
-  warn "BOOTSTRAP.md exists but isn't ours or openclaw-stock — leaving alone."
+  warn "BOOTSTRAP.md exists but isn't openclaw-stock or legacy carapace — leaving alone."
   warn "  Agent will see the [Bootstrap pending] wrapper on every turn until you delete it:"
   warn "    rm ~/.openclaw/workspace/BOOTSTRAP.md"
 }
@@ -949,24 +956,24 @@ fi
 # The two pieces work together: hook is the trigger, BOOTSTRAP.md
 # is the script.
 inject_carapace_bootstrap() {
-  local bootstrap_file="$HOME/.openclaw/workspace/BOOTSTRAP.md"
+  local startup_file="$HOME/.openclaw/workspace/CARAPACE-STARTUP.md"
   local identity_file="$HOME/.openclaw/workspace/IDENTITY.md"
 
-  # Bootstrap-already-completed guard. If IDENTITY.md exists AND has a
+  # Startup-already-completed guard. If IDENTITY.md exists AND has a
   # Name field set to anything OTHER than the install seed value
   # ("Main"), the user already ran the first-light hatch — the agent
   # has a name, the user has been greeted, the relationship is
-  # established. Re-writing BOOTSTRAP.md would trigger the FIRST-LIGHT
-  # block to fire on the next turn and ask "what's your name?" again,
-  # potentially overwriting IDENTITY.md/USER.md with whatever the
-  # confused user types in response. That's worse than not re-running
-  # the bootstrap at all.
+  # established. Re-writing CARAPACE-STARTUP.md would trigger the
+  # FIRST-LIGHT block to fire on the next turn and ask "what's your
+  # name?" again, potentially overwriting IDENTITY.md/USER.md with
+  # whatever the confused user types in response. That's worse than
+  # not re-running the startup at all.
   #
-  # Skip silently in that case. The user can always FORCE a re-bootstrap
-  # by deleting both IDENTITY.md and any sentinel-stripped BOOTSTRAP.md
-  # before re-running install.sh.
+  # Skip silently in that case. The user can always FORCE a re-startup
+  # by deleting both IDENTITY.md and any sentinel-stripped
+  # CARAPACE-STARTUP.md before re-running install.sh.
   if [[ -f "$identity_file" ]]; then
-    # Detect if the agent is already named (skip overwriting BOOTSTRAP).
+    # Detect if the agent is already named (skip overwriting STARTUP).
     # IMPORTANT: do NOT use `current_name=$(grep ... | sed ...)` here —
     # under `set -euo pipefail`, when grep finds no match (the COMMON
     # case for fresh openclaw with stock unfilled IDENTITY.md), grep
@@ -980,31 +987,28 @@ inject_carapace_bootstrap() {
       current_name=$(printf '%s\n' "$raw_name_line" | sed -E "s/^- \*\*Name:\*\* +//;s/[[:space:]]+$//")
     fi
     if [[ -n "$current_name" && "$current_name" != "Main" ]]; then
-      ok "CARAPACE bootstrap skipped (agent named '$current_name', already hatched)."
+      ok "CARAPACE startup skipped (agent named '$current_name', already hatched)."
       return 0
     fi
   fi
 
-  if [[ -f "$bootstrap_file" ]]; then
+  if [[ -f "$startup_file" ]]; then
     # If it's ALREADY ours (has our sentinel), leave alone — agent
     # may be mid-flight on first hatch and we don't want to clobber
     # any user-edits or interrupt the run.
-    if grep -q "BEGIN CARAPACE BOOTSTRAP" "$bootstrap_file" 2>/dev/null; then
+    if grep -q "BEGIN CARAPACE STARTUP" "$startup_file" 2>/dev/null; then
       return 0
     fi
-    # Otherwise it's openclaw's stock bootstrap (or a stale file from
-    # an old install). Back it up and overwrite — our hook in MEMORY.md
-    # is going to send the agent to read this file, so it MUST be ours.
-    local stamp; stamp="$(date +%Y%m%d_%H%M%S)"
-    cp "$bootstrap_file" "${bootstrap_file}.openclaw.bak.${stamp}" 2>/dev/null || true
   fi
-  mkdir -p "$(dirname "$bootstrap_file")"
-  local tmp_file="${bootstrap_file}.carapace.tmp.$$"
-  cat > "$tmp_file" << 'CARAPACE_BOOTSTRAP_EOF'
-<!-- BEGIN CARAPACE BOOTSTRAP (created by Carapace installer · the agent should follow this then DELETE it after first conversation completes) -->
-# BOOTSTRAP.md — First Light
+  mkdir -p "$(dirname "$startup_file")"
+  local tmp_file="${startup_file}.carapace.tmp.$$"
+  cat > "$tmp_file" << 'CARAPACE_STARTUP_EOF'
+<!-- BEGIN CARAPACE STARTUP (created by Carapace installer · the agent should follow this then DELETE it after first conversation completes) -->
+# CARAPACE-STARTUP.md — First Light
 
 You just came online. This is your first conversation with the human you'll be living with. Before you reply to anything else, run this once.
+
+> **Why this file is named `CARAPACE-STARTUP.md` and not `BOOTSTRAP.md`:** OpenClaw injects a "[Bootstrap pending]" wrapper into EVERY turn while a literal `BOOTSTRAP.md` exists. That wrapper races with cold-start model calls and triggers infinite loops. We use a different filename so we get the same first-light prompt without tripping openclaw's wrapper.
 
 ## Step 1 — Greet honestly
 
@@ -1036,12 +1040,12 @@ If the user skipped, leave the template fields blank but add a single line in US
 
 ## Step 4 — Delete this file (CRITICAL)
 
-Bootstrap is a one-time event. **You must delete `BOOTSTRAP.md` after step 3 completes**, or the runtime will keep prepending a "[Bootstrap pending]" wrapper to every single turn — yours and theirs — until it's gone. That wrapper costs 30+ seconds per turn and makes the whole agent feel broken.
+First-light is a one-time event. **You must delete `CARAPACE-STARTUP.md` after step 3 completes** — otherwise the FIRST-LIGHT block in `AGENTS.md` will keep telling you to read this file on every subsequent turn and you'll re-run the introduction every time the user opens a new session.
 
 Use your `exec` tool to delete it. Run this exact command:
 
 ```
-exec: rm BOOTSTRAP.md
+exec: rm CARAPACE-STARTUP.md
 ```
 
 (Working directory is the workspace root — `~/.openclaw/workspace/` — so the bare filename is correct.)
@@ -1049,10 +1053,10 @@ exec: rm BOOTSTRAP.md
 Verify it's gone before replying. If `exec` is blocked or fails, fall back to `write` with empty contents to neutralize it:
 
 ```
-write: BOOTSTRAP.md (contents: "")
+write: CARAPACE-STARTUP.md (contents: "")
 ```
 
-Don't skip this step. Don't defer it. Do it BEFORE replying to the user's first follow-up. The runtime cannot tell that you've finished bootstrap any other way.
+Don't skip this step. Don't defer it. Do it BEFORE replying to the user's first follow-up.
 
 ---
 
@@ -1073,10 +1077,10 @@ There's a sentinel-marked block in `memory/MEMORY.md` titled **CARAPACE VISION R
 You're an expert in roughly anything the user might bring up. Wear it lightly. **Wit lands better than performative confidence; charm lands better than salesmanship.** When a question is hard or your knowledge is stale, say so plainly and go check before guessing. Don't pad with hedges. Don't open with "Great question!" or "I'd be happy to help!" — just help.
 
 Be the kind of mind a person would actually want to live with.
-<!-- END CARAPACE BOOTSTRAP -->
-CARAPACE_BOOTSTRAP_EOF
-  mv "$tmp_file" "$bootstrap_file"
-  ok "CARAPACE bootstrap installed (agent will run first-light hatch on first turn)."
+<!-- END CARAPACE STARTUP -->
+CARAPACE_STARTUP_EOF
+  mv "$tmp_file" "$startup_file"
+  ok "CARAPACE startup installed → CARAPACE-STARTUP.md (agent will run first-light hatch on first turn)."
 }
 
 # ── FIRST-LIGHT injector (into AGENTS.md) ────────────────
@@ -1117,11 +1121,13 @@ inject_carapace_first_light() {
 
 **This check runs BEFORE you process anything else this turn.** It overrides the `## Session Startup` rule below ("do not manually reread startup files"), it overrides any `[ctx]` tone hints ("reply tight, ≤2 short sentences"), and it overrides your impulse to respond to whatever the user just sent (vision photo, voice message, text — doesn't matter).
 
-**Step 1.** Check whether `~/.openclaw/workspace/BOOTSTRAP.md` exists. Use the Read tool — don't guess.
+**Step 1.** Check whether `~/.openclaw/workspace/CARAPACE-STARTUP.md` exists. Use the Read tool — don't guess.
 
-**Step 2a.** If it EXISTS: That file is your birth certificate. Read its full contents, then execute its instructions completely before replying to the user's actual message. The instructions include greeting the human as a first-time conversation, asking 4 short questions across 1-2 turns, writing `IDENTITY.md` + `USER.md`, and **deleting `BOOTSTRAP.md`** (this is the off-switch — without the delete, this check fires forever).
+**Step 2a.** If it EXISTS: That file is your birth certificate. Read its full contents, then execute its instructions completely before replying to the user's actual message. The instructions include greeting the human as a first-time conversation, asking 4 short questions across 1-2 turns, writing `IDENTITY.md` + `USER.md`, and **deleting `CARAPACE-STARTUP.md`** (this is the off-switch — without the delete, this check fires forever).
 
 **Step 2b.** If it DOES NOT EXIST: Bootstrap is already complete. Skip silently and respond to the user normally per the rest of this AGENTS.md.
+
+> **Why this isn't named `BOOTSTRAP.md`:** OpenClaw injects a "[Bootstrap pending]" wrapper into every turn while a literal `BOOTSTRAP.md` exists. That wrapper races with cold-start xAI calls and triggers infinite loops. Carapace ships its first-light prompt as `CARAPACE-STARTUP.md` instead — same instructions, no wrapper trigger, no loop.
 
 This block stays in AGENTS.md permanently as a managed sentinel. It is harmless after first run because the file existence check fails fast and falls through to normal reply. Do not edit between the BEGIN/END markers — the Carapace installer overwrites them on every install.
 
@@ -1546,9 +1552,11 @@ echo -e "    ${BOLD}1.${RESET} ${TEAL}CARAPACE VISION RULES${RESET}  → ~/.open
 echo -e "       Tone + framing rules for camera turns (image grid"
 echo -e "       structure, [ctx] line, anti-narration rule, etc.)"
 echo ""
-echo -e "    ${BOLD}2.${RESET} ${TEAL}CARAPACE BOOTSTRAP${RESET}     → ~/.openclaw/workspace/BOOTSTRAP.md"
-echo -e "       One-shot first-conversation hatch sequence (deletes"
-echo -e "       itself after the agent's first turn)"
+echo -e "    ${BOLD}2.${RESET} ${TEAL}CARAPACE STARTUP${RESET}       → ~/.openclaw/workspace/CARAPACE-STARTUP.md"
+echo -e "       One-shot first-conversation hatch sequence. Named"
+echo -e "       CARAPACE-STARTUP.md (not BOOTSTRAP.md) so openclaw's"
+echo -e "       wrapper doesn't trigger. Agent self-deletes after"
+echo -e "       its first conversation."
 echo ""
 echo -e "    ${BOLD}3.${RESET} ${TEAL}CARAPACE FIRST-LIGHT${RESET}   → ~/.openclaw/workspace/AGENTS.md"
 echo -e "       Agent identity + persona seed (name, emoji, voice)"
