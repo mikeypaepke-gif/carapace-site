@@ -730,15 +730,16 @@ carapace_warmup_turn() {
     warn "Skipping warmup — no gateway token found"
     return 0
   fi
-  echo -e "  ${DIM}Warming up your agent (cold-start: 60-180s, then sub-30s)...${RESET}"
+  echo -e "  ${DIM}Warming up your agent (cold-start: 60-180s typical, up to 6min on heavy boxes)...${RESET}"
   local out_file="/tmp/carapace-warmup-$$.out"
   local code_file="/tmp/carapace-warmup-$$.code"
   rm -f "$out_file" "$code_file"
   start=$(date +%s)
-  # Background curl so we can show a progress indicator. 240s budget
-  # covers worst-case cold xAI; longer than that and there's something
-  # genuinely wrong that won't be fixed by waiting.
-  ( curl -sS --max-time 240 -o "$out_file" \
+  # Background curl so we can show a progress indicator. 360s budget
+  # covers worst-case cold xAI on a heavy box (large session history,
+  # reasoning model, slow VPS). Past 360s is genuinely wrong and won't
+  # be fixed by waiting longer.
+  ( curl -sS --max-time 360 -o "$out_file" \
       -w "%{http_code}" \
       -X POST http://127.0.0.1:18789/v1/chat/completions \
       -H "Authorization: Bearer $token" \
