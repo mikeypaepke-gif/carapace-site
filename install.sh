@@ -2082,34 +2082,74 @@ if $IS_ROOT && have_cmd systemctl; then
   # github.com/openclaw/openclaw/issues/46256 (WS handshake timeouts).
   cat > /usr/local/bin/openclaw-gateway-run << 'GWWRAPPER'
 #!/bin/bash
+# CARAPACE gateway wrapper — resolves openclaw + node paths
+# dynamically at every startup so it works on:
+#   * nvm install            (~/.nvm/versions/node/*/...)
+#   * sudo npm install -g    (/usr/lib/node_modules/openclaw/...)
+#   * per-user npm install   (~/.npm-global/lib/node_modules/openclaw/...)
+# An earlier revision hardcoded /root/.npm-global paths and broke on
+# nvm-based installs ("Cannot find module .../dist/index.js"). Resolve
+# at runtime so we survive openclaw upgrades + nvm version changes
+# without reinstalling the wrapper.
 export HOME=/root
-export PATH="/usr/bin:$HOME/.npm-global/bin:$PATH"
+
+# Source nvm if present so PATH includes the user's preferred node
+[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" 2>/dev/null
+for _d in "$HOME"/.nvm/versions/node/*/bin; do
+  [ -d "$_d" ] && export PATH="$_d:$PATH"
+done
+export PATH="/usr/local/bin:/usr/bin:$HOME/.npm-global/bin:$PATH"
+
+# Find openclaw entry script (dist/index.js) — walk known layouts
+OC_DIST=""
+for _c in \
+  "$HOME"/.nvm/versions/node/*/lib/node_modules/openclaw/dist/index.js \
+  /usr/lib/node_modules/openclaw/dist/index.js \
+  /usr/local/lib/node_modules/openclaw/dist/index.js \
+  "$HOME"/.npm-global/lib/node_modules/openclaw/dist/index.js; do
+  if [ -f "$_c" ]; then OC_DIST="$_c"; break; fi
+done
+if [ -z "$OC_DIST" ]; then
+  echo "openclaw-gateway-run: cannot locate openclaw/dist/index.js (PATH=$PATH)" >&2
+  exit 1
+fi
+
+# Pick the node binary that owns openclaw. For nvm/per-user installs,
+# the right node lives next to dist/ — extract it from OC_DIST. For
+# system installs (/usr/lib), fall back to /usr/bin/node. Critical:
+# openclaw needs Node 22.12+, and a stale system /usr/bin/node may be
+# older than the nvm/system node where openclaw is actually installed.
+NODE_BIN=""
+case "$OC_DIST" in
+  "$HOME"/.nvm/versions/node/*)
+    # /root/.nvm/versions/node/vX/lib/node_modules/openclaw/dist/index.js
+    NODE_BIN="${OC_DIST%/lib/node_modules/openclaw/dist/index.js}/bin/node" ;;
+  *)
+    NODE_BIN="/usr/bin/node" ;;
+esac
+[ -x "$NODE_BIN" ] || NODE_BIN="$(command -v node 2>/dev/null)"
+if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
+  echo "openclaw-gateway-run: cannot locate a node binary (tried $NODE_BIN)" >&2
+  exit 1
+fi
+
 # Tune Node heap by system RAM so heavy-usage tails don't OOM during
 # startup (the gateway's own sessions.json + checkpoints can push past
-# Node's default on busy installs after months of use). Keep headroom
-# for the OS and other processes on small-memory boxes:
+# Node's default on busy installs after months of use):
 #   * < 1.5 GB (Raspberry Pi 3, tiny VPS):  512 MB heap
 #   * < 3 GB  (Raspberry Pi 4 2 GB):        1024 MB heap
 #   * ≥ 3 GB  (most VPSes, RPi 4 4/8 GB):   2048 MB heap
 TOTAL_RAM_MB=$(free -m 2>/dev/null | awk '/^Mem:/ {print $2}' || echo "")
-if [[ -z "$TOTAL_RAM_MB" || "$TOTAL_RAM_MB" -lt 1500 ]]; then
+if [ -z "$TOTAL_RAM_MB" ] || [ "$TOTAL_RAM_MB" -lt 1500 ]; then
   OC_HEAP=512
-elif [[ "$TOTAL_RAM_MB" -lt 3000 ]]; then
+elif [ "$TOTAL_RAM_MB" -lt 3000 ]; then
   OC_HEAP=1024
 else
   OC_HEAP=2048
 fi
 export NODE_OPTIONS="--max-old-space-size=${OC_HEAP}"
-# CRITICAL: invoke /usr/bin/node directly with the openclaw entry. Older
-# revisions did `exec openclaw gateway run --allow-unconfigured` and
-# relied on PATH for `openclaw` resolution — but on a box where nvm
-# was previously set up, $PATH could still bring nvm's openclaw shim
-# (and its nvm node) into the wrapper, defeating the whole "system
-# node only" rationale of issue #46256. Match the per-user drop-in's
-# ExecStart format: bare `gateway --port 18789` is what `openclaw
-# gateway install` itself writes for non-root, and it accepts an
-# unconfigured agent (creates one on first run).
-exec /usr/bin/node /root/.npm-global/lib/node_modules/openclaw/dist/index.js gateway --port 18789
+
+exec "$NODE_BIN" "$OC_DIST" gateway --port 18789
 GWWRAPPER
   chmod +x /usr/local/bin/openclaw-gateway-run
 
