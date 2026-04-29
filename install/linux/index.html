@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Install CARAPACE on Linux — Open Source, ~5 min</title>
-  <meta name="description" content="Provision a headless OpenClaw gateway on any Ubuntu/Debian VPS. MIT-licensed installer, one curl command, five minutes.">
+  <meta name="description" content="Layer Carapace on top of OpenClaw on any Ubuntu/Debian VPS. Two MIT-licensed installers, ~5 minutes total. Non-destructive on existing OpenClaw setups.">
   <meta property="og:title" content="Install CARAPACE on Linux">
-  <meta property="og:description" content="Headless OpenClaw gateway on any VPS. Open source, one curl command, five minutes.">
+  <meta property="og:description" content="Carapace + OpenClaw on any VPS. Two curl commands, five minutes, paired to your iPhone over Tailscale.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://carapace.info/install/linux/">
   <meta property="og:image" content="https://carapace.info/assets/carapace-og.png">
@@ -173,13 +173,13 @@
       </div>
       <h1 class="reveal reveal-delay-1 text-[clamp(2rem,5vw,3.5rem)] font-extrabold leading-[1.05] tracking-tight mb-6">
         Install CARAPACE on Linux.<br>
-        <span class="gradient-text">One command. ~5 minutes.</span>
+        <span class="gradient-text">Two commands. ~5 minutes.</span>
       </h1>
       <p class="reveal reveal-delay-2 text-lg text-white/45 max-w-2xl mx-auto leading-relaxed mb-4">
-        A headless OpenClaw gateway on any Ubuntu or Debian VPS. Provision, pick a provider, paste your key, connect Tailscale, pair your phone. Done.
+        Carapace layers on top of OpenClaw — install both, pair your phone over Tailscale, and chat from anywhere. Non-destructive on existing OpenClaw setups.
       </p>
       <p class="reveal reveal-delay-2 text-sm text-white/30 max-w-xl mx-auto">
-        The installer is <a href="https://github.com/mikeypaepke-gif/carapace-site/blob/main/install.sh" class="text-teal-400 hover:text-teal-300 underline-offset-4 hover:underline">open source</a> — read it, fork it, send PRs.
+        Both installers are <a href="https://github.com/mikeypaepke-gif/carapace-site/blob/main/install.sh" class="text-teal-400 hover:text-teal-300 underline-offset-4 hover:underline">open source</a> — read it, fork it, send PRs.
       </p>
     </div>
   </section>
@@ -196,54 +196,107 @@
           </li>
           <li class="flex items-start gap-3">
             <svg class="w-5 h-5 text-teal-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
-            <div><span class="text-white">SSH access</span> — `ssh user@your.vps.ip` needs to work. The installer runs as your user; it'll `sudo` when it needs to.</div>
+            <div><span class="text-white">SSH access</span> — <code class="font-mono text-white/60">ssh user@your.vps.ip</code> needs to work. The installer runs as your user; it'll <code class="font-mono text-white/60">sudo</code> when it needs to.</div>
           </li>
           <li class="flex items-start gap-3">
             <svg class="w-5 h-5 text-teal-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
-            <div><span class="text-white">An API key</span> for your chosen provider — or nothing if you want to skip and configure it later. <span class="text-white/40">Gemini's free tier is the easiest on-ramp.</span></div>
+            <div><span class="text-white">An API key</span> for your AI provider — xAI, OpenAI, Anthropic, or Google. <span class="text-white/40">Each provider has its own free-tier or pay-as-you-go entry point.</span></div>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-teal-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+            <div><span class="text-white">Carapace is a shell on top of OpenClaw.</span> OpenClaw owns the AI runtime, your API key, and your model. Carapace adds Tailscale, the iOS pairing layer, the workspace prompts, and a few helper commands. <span class="text-white/40">Two installs, in order — that's the whole flow.</span></div>
           </li>
         </ul>
       </div>
     </div>
   </section>
 
-  <!-- ==================== STEP 1 ==================== -->
+  <!-- ==================== STEP 1: INSTALL OPENCLAW ==================== -->
   <section class="py-12">
     <div class="max-w-4xl mx-auto px-6">
       <div class="flex items-center gap-4 mb-6">
         <div class="step-badge">1</div>
         <div>
-          <h2 class="text-2xl font-bold tracking-tight">Run the one-liner</h2>
-          <p class="text-sm text-white/40 mt-1">SSH into your VPS and paste this.</p>
+          <h2 class="text-2xl font-bold tracking-tight">Install OpenClaw</h2>
+          <p class="text-sm text-white/40 mt-1">SSH into your VPS and paste this. Handles Node, npm, and the interactive provider/key/model wizard.</p>
         </div>
       </div>
 
-      <div class="reveal glass rounded-2xl p-1.5">
+      <div class="reveal glass rounded-2xl p-1.5 mb-4">
+        <div class="flex items-center justify-between px-5 py-4">
+          <code class="font-mono text-sm text-teal-400 tracking-tight select-all">curl -fsSL https://openclaw.ai/install.sh | bash</code>
+          <button class="copy-btn" data-copy="curl -fsSL https://openclaw.ai/install.sh | bash">Copy</button>
+        </div>
+      </div>
+
+      <p class="text-xs text-white/30 mb-6 leading-relaxed">
+        Installs Node 22 (via nvm or system package), drops the <code class="font-mono text-white/50">openclaw</code> CLI, and launches the onboard wizard. Pick a provider, paste your API key, choose a model. The whole openclaw side takes about 90 seconds.
+      </p>
+
+      <div class="reveal glass-elevated border border-yellow-400/20 rounded-2xl p-5 mb-6">
+        <div class="flex items-start gap-3">
+          <svg class="w-5 h-5 text-yellow-400/80 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <div class="text-sm text-white/80 leading-relaxed">
+            <span class="text-yellow-400 font-semibold">Important:</span> when openclaw onboard asks <span class="text-white">"Hatch in Terminal? [y/N]"</span> at the end — <span class="text-white font-semibold">say NO</span>. The terminal hatch fires a chat turn that races Carapace's setup. Skip it; you'll chat from your phone in a couple minutes.
+          </div>
+        </div>
+      </div>
+
+      <div class="reveal term-window">
+        <div class="term-chrome">
+          <div class="term-dot red"></div>
+          <div class="term-dot yellow"></div>
+          <div class="term-dot green"></div>
+          <div class="term-title">ubuntu@vps ~ — openclaw onboard</div>
+        </div>
+<div class="term-body">  <span class="bold">🦞 OpenClaw setup</span>
+
+  <span class="dim">Model/auth provider:</span>
+    <span class="teal">›</span> xAI (Grok)
+      OpenAI (GPT)
+      Anthropic (Claude)
+      Google (Gemini)
+
+  <span class="dim">Enter xAI API key</span>
+  Key: <span class="teal">xai-•••••••••••••••••••</span>
+
+  <span class="green">✓</span> Default model set to xai/grok-4-1-fast-non-reasoning
+  <span class="green">✓</span> Gateway service installed
+
+  <span class="dim">Hatch in Terminal? [y/N]:</span> <span class="yellow">N</span>
+  <span class="green">✓</span> Setup complete.
+</div>
+      </div>
+
+      <p class="text-xs text-white/30 mt-4 leading-relaxed">
+        <span class="text-white/50">Recommended models</span> (fastest stable per provider):
+        <code class="font-mono text-white/60">xai/grok-4-1-fast-non-reasoning</code>,
+        <code class="font-mono text-white/60">openai/gpt-5-mini</code>,
+        <code class="font-mono text-white/60">anthropic/claude-haiku-4-5</code>,
+        <code class="font-mono text-white/60">google/gemini-2.5-flash</code>.
+        Avoid anything with <span class="text-white/60">beta</span>, <span class="text-white/60">preview</span>, or <span class="text-white/60">4.20</span> in the name — they hit safety filters or stall.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==================== STEP 2: INSTALL CARAPACE ==================== -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="flex items-center gap-4 mb-6">
+        <div class="step-badge">2</div>
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight">Layer Carapace on top</h2>
+          <p class="text-sm text-white/40 mt-1">One curl, no prompts beyond Tailscale auth. Verifies openclaw, sets up Tailscale serve, drops the workspace prompts, restarts the gateway, warms it up, dumps the QR.</p>
+        </div>
+      </div>
+
+      <div class="reveal glass rounded-2xl p-1.5 mb-6">
         <div class="flex items-center justify-between px-5 py-4">
           <code class="font-mono text-sm text-teal-400 tracking-tight select-all">curl -fsSL https://carapace.info/install.sh | bash</code>
           <button class="copy-btn" data-copy="curl -fsSL https://carapace.info/install.sh | bash">Copy</button>
         </div>
       </div>
 
-      <p class="text-xs text-white/30 mt-4 leading-relaxed">
-        <span class="text-yellow-400/80">Heads up:</span> piping to <code class="font-mono text-white/50">bash</code> means you trust the code. Read it first if you want —
-        <a href="https://github.com/mikeypaepke-gif/carapace-site/blob/main/install.sh" class="text-teal-400 hover:text-teal-300 underline-offset-4 hover:underline">it's on GitHub</a>.
-        The script installs OpenClaw, Node via nvm, tmux, jq, and sets up your gateway. It's idempotent — safe to re-run.
-      </p>
-    </div>
-  </section>
-
-  <!-- ==================== STEP 2: PICK PROVIDER ==================== -->
-  <section class="py-12">
-    <div class="max-w-4xl mx-auto px-6">
-      <div class="flex items-center gap-4 mb-6">
-        <div class="step-badge">2</div>
-        <div>
-          <h2 class="text-2xl font-bold tracking-tight">Pick your AI provider</h2>
-          <p class="text-sm text-white/40 mt-1">The installer pauses here. Press the number for the one you want.</p>
-        </div>
-      </div>
-
       <div class="reveal term-window">
         <div class="term-chrome">
           <div class="term-dot red"></div>
@@ -251,32 +304,49 @@
           <div class="term-dot green"></div>
           <div class="term-title">ubuntu@vps ~ — carapace install</div>
         </div>
-<div class="term-body">  <span class="bold">Pick your AI provider:</span>
-    <span class="dim">1)</span> Google Gemini    <span class="dim">(free tier, recommended)</span>
-    <span class="dim">2)</span> OpenAI Codex     <span class="dim">(ChatGPT OAuth — Plus/Pro subscription)</span>
-    <span class="dim">3)</span> Anthropic Claude <span class="dim">(API key — pay-as-you-go)</span>
-    <span class="dim">4)</span> OpenAI API       <span class="dim">(API key — pay-as-you-go)</span>
-    <span class="dim">5)</span> xAI Grok         <span class="dim">(API key — pay-as-you-go)</span>
-    <span class="dim">6)</span> Skip             <span class="dim">(I'll do this myself later)</span>
+<div class="term-body">  <span class="bold">CARAPACE — Headless Setup  🐚</span>
 
-  Choice [1]: <span class="teal">1</span><span class="cursor"></span>
+  <span class="green">✓</span> OpenClaw 2026.4.26 detected + configured
+
+  <span class="bold">━━━ Step 1/10: Tailscale ━━━</span>
+  <span class="green">✓</span> Tailscale connected as your-vps.tail932ab9.ts.net
+
+  <span class="bold">━━━ Step 5/10: Helper Commands ━━━</span>
+  <span class="green">✓</span> carapace-qr installed
+  <span class="green">✓</span> carapace-onboard installed
+  <span class="green">✓</span> carapace-prune installed
+  <span class="green">✓</span> Nightly gateway restart (3am UTC) + trajectory prune (3:30am UTC)
+
+  <span class="bold">━━━ Step 7/10: Carapace shell setup ━━━</span>
+  <span class="green">✓</span> Bumped agent timeout (180s), trustedProxies (Tailscale CGNAT)
+  <span class="green">✓</span> CARAPACE first-light installed in AGENTS.md
+  <span class="green">✓</span> CARAPACE injections complete
+  <span class="green">✓</span> Agent runtime ready (63s)
+
+  <span class="bold">━━━ Step 8/10: Connect ━━━</span>
+  <span class="green">✓</span> Gateway responsive
+  <span class="green">✓</span> Tailscale serve active
+  <span class="green">✓</span> Workspace prompts present
+  <span class="green">✓</span> Gateway token present
+  <span class="dim">Warming up your agent (cold-start: 60-180s, then sub-30s)...</span>
+  <span class="green">✓</span> AI alive (94s) — first reply: "ok"
 </div>
       </div>
 
       <p class="text-xs text-white/30 mt-4 leading-relaxed">
-        <span class="text-white/50">Don't have a key yet?</span> Grab a free Gemini key at <a href="https://aistudio.google.com/apikey" class="text-teal-400 hover:text-teal-300">aistudio.google.com/apikey</a> — no credit card, ~60 requests/min on the free tier. Or pick Skip (6) and configure it from the dashboard later.
+        <span class="text-yellow-400/80">Heads up:</span> piping to <code class="font-mono text-white/50">bash</code> means you trust the code. Read it first if you want — <a href="https://github.com/mikeypaepke-gif/carapace-site/blob/main/install.sh" class="text-teal-400 hover:text-teal-300 underline-offset-4 hover:underline">it's on GitHub</a>, MIT-licensed, line-numbered. Idempotent — safe to re-run any time you want to refresh the workspace prompts or update the helper commands.
       </p>
     </div>
   </section>
 
-  <!-- ==================== STEP 3: PASTE KEY ==================== -->
+  <!-- ==================== STEP 3: TAILSCALE AUTH ==================== -->
   <section class="py-12">
     <div class="max-w-4xl mx-auto px-6">
       <div class="flex items-center gap-4 mb-6">
         <div class="step-badge">3</div>
         <div>
-          <h2 class="text-2xl font-bold tracking-tight">Paste your API key</h2>
-          <p class="text-sm text-white/40 mt-1">Each character echoes as <code class="font-mono text-white/60">*</code> so you can see your paste landed.</p>
+          <h2 class="text-2xl font-bold tracking-tight">Tailscale auth (one click)</h2>
+          <p class="text-sm text-white/40 mt-1">The only place where you leave the terminal during install — happens partway through Step 2 above.</p>
         </div>
       </div>
 
@@ -287,64 +357,38 @@
           <div class="term-dot green"></div>
           <div class="term-title">ubuntu@vps ~ — carapace install</div>
         </div>
-<div class="term-body">  <span class="bold">Paste your google API key</span> <span class="dim">(AIza...)</span>
-  <span class="dim">(each character echoes as * — paste + press Enter)</span>
-  Key: <span class="teal">*********************************</span>
-    <span class="dim">→ captured: AIzaSy•••1nU</span>
+<div class="term-body">  <span class="bold">Tailscale needs authentication.</span>
 
-  <span class="green">✓</span> AI configured: google/gemini-2.5-flash
+  ┌─────────────────────────────────────────────────────┐
+  │  Open this URL in your browser to authenticate:     │
+  │                                                     │
+  │  <span class="teal">https://login.tailscale.com/a/abc123xyz</span>          │
+  │                                                     │
+  │  Waiting... (press Ctrl+C to cancel)                │
+  └─────────────────────────────────────────────────────┘
+
+  <span class="green">✓</span> Tailscale connected as your-vps.tail932ab9.ts.net
 </div>
       </div>
+
+      <p class="text-xs text-white/30 mt-4 leading-relaxed">
+        <span class="text-white/50">No Tailscale account?</span> Sign up free at <a href="https://tailscale.com/start/" class="text-teal-400 hover:text-teal-300">tailscale.com/start</a> — personal use is free up to 100 devices. Tailscale gives you a secure mesh so your phone can reach your VPS anywhere, without exposing any ports to the internet.
+      </p>
     </div>
   </section>
 
-  <!-- ==================== STEP 4: TAILSCALE ==================== -->
+  <!-- ==================== STEP 4: PAIR iPHONE ==================== -->
   <section class="py-12">
     <div class="max-w-4xl mx-auto px-6">
       <div class="flex items-center gap-4 mb-6">
         <div class="step-badge">4</div>
         <div>
-          <h2 class="text-2xl font-bold tracking-tight">Connect Tailscale</h2>
-          <p class="text-sm text-white/40 mt-1">The only step where you leave the terminal — click the auth URL and approve.</p>
-        </div>
-      </div>
-
-      <div class="reveal term-window">
-        <div class="term-chrome">
-          <div class="term-dot red"></div>
-          <div class="term-dot yellow"></div>
-          <div class="term-dot green"></div>
-          <div class="term-title">ubuntu@vps ~ — carapace install</div>
-        </div>
-<div class="term-body">  <span class="bold">Connecting Tailscale...</span>
-
-  To authenticate, visit:
-
-      <span class="teal">https://login.tailscale.com/a/abc123xyz</span>
-
-  <span class="dim">Waiting for authentication...</span>
-  <span class="green">✓</span> Tailscale connected — your-vps.example.ts.net
-</div>
-      </div>
-
-      <p class="text-xs text-white/30 mt-4 leading-relaxed">
-        <span class="text-white/50">No Tailscale account?</span> Sign up free at <a href="https://tailscale.com/start/" class="text-teal-400 hover:text-teal-300">tailscale.com/start</a> — personal use is free up to 100 devices. Tailscale gives you a secure mesh so your phone can reach your VPS anywhere, without exposing any ports.
-      </p>
-    </div>
-  </section>
-
-  <!-- ==================== STEP 5: PAIR iPHONE ==================== -->
-  <section class="py-12">
-    <div class="max-w-4xl mx-auto px-6">
-      <div class="flex items-center gap-4 mb-6">
-        <div class="step-badge">5</div>
-        <div>
           <h2 class="text-2xl font-bold tracking-tight">Pair your iPhone</h2>
-          <p class="text-sm text-white/40 mt-1">Open the Carapace iOS app → Settings → Add Gateway → Scan. That's it.</p>
+          <p class="text-sm text-white/40 mt-1">Open Carapace on iOS → tap Connect Server → scan. That's it.</p>
         </div>
       </div>
 
-      <div class="reveal grid md:grid-cols-[1fr_auto] gap-6 items-start">
+      <div class="reveal grid md:grid-cols-[1fr_auto] gap-6 items-start mb-6">
         <div class="term-window">
           <div class="term-chrome">
             <div class="term-dot red"></div>
@@ -352,15 +396,19 @@
             <div class="term-dot green"></div>
             <div class="term-title">ubuntu@vps ~ — carapace install</div>
           </div>
-<div class="term-body">  <span class="bold">Ready to pair.</span> <span class="dim">Scan the QR →</span>
+<div class="term-body">  ╔══════════════════════════════════════════════════╗
+  ║      <span class="bold">CARAPACE READY — pair your phone below</span>      ║
+  ╚══════════════════════════════════════════════════╝
 
-  <span class="green">✓</span> Gateway listening on your-vps.example.ts.net:18789
-  <span class="green">✓</span> Pair token active — expires in 5 minutes
+  <span class="dim">Gateway:</span> https://your-vps.tail932ab9.ts.net
+  <span class="dim">Token:</span>   09db544947f32fc8...
 
-  <span class="dim"># If you'd rather not scan, paste this into the iOS app:</span>
-  <span class="teal">carapace://config?gatewayBaseURL=https%3A%2F%2F...</span>
+  <span class="dim">Scan with CARAPACE iOS app:</span>
 
-  <span class="dim">Waiting for device...</span><span class="cursor"></span>
+  <span class="dim">[QR CODE]</span>
+
+  <span class="dim">Pair URL:</span>
+    <span class="teal">carapace://config?gatewayBaseURL=...&amp;token=...</span>
 </div>
         </div>
 
@@ -372,6 +420,79 @@
             Mock QR for preview only. Scans to <span class="text-white/50">carapace.info</span> — your real pair QR embeds a one-time token.
           </p>
         </div>
+      </div>
+
+      <div class="reveal glass rounded-2xl p-6">
+        <h3 class="text-sm font-semibold uppercase tracking-[0.15em] text-white/40 mb-4">On your iPhone — one-time setup</h3>
+        <ol class="space-y-3 text-sm text-white/70 list-decimal list-inside marker:text-teal-400">
+          <li>Install <span class="text-white">Carapace</span> from the <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="text-teal-400 hover:text-teal-300">App Store</a>.</li>
+          <li>Install <span class="text-white">Tailscale</span> from the App Store and sign in with the same account you used during the install.</li>
+          <li>In the Tailscale iOS app: <span class="text-white">enable both</span> "Always-On VPN" and "Use Tailscale DNS Settings". <span class="text-white/40">Wifi often resolves <code class="font-mono text-white/50">.ts.net</code> hostnames without these — but cellular silently fails to pair without them on.</span></li>
+          <li>Open Carapace → tap <span class="text-white">Connect Server</span> → scan the QR above.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== HELPERS ==================== -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="reveal glass rounded-2xl p-7">
+        <h2 class="text-sm font-semibold uppercase tracking-[0.15em] text-white/40 mb-5">Helper commands installed</h2>
+        <div class="space-y-4 text-sm">
+          <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-5">
+            <code class="font-mono text-teal-400 whitespace-nowrap">carapace-qr</code>
+            <span class="text-white/60">Re-print the pair QR + URL — handy when you reset your phone or pair a second device.</span>
+          </div>
+          <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-5">
+            <code class="font-mono text-teal-400 whitespace-nowrap">carapace-onboard</code>
+            <span class="text-white/60">Re-run OpenClaw's provider/key/model wizard. Useful if you want to swap providers or rotate keys.</span>
+          </div>
+          <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-5">
+            <code class="font-mono text-teal-400 whitespace-nowrap">carapace-prune</code>
+            <span class="text-white/60">Wipe accumulated agent reasoning trajectories so the TUI + iOS history tab stay snappy. Runs automatically at 3:30am UTC daily — safe defaults never touch your chat history. Pass <code class="font-mono text-white/50">--dry-run</code> to preview, <code class="font-mono text-white/50">--all</code> for power-user clean, <code class="font-mono text-white/50">--nuke</code> for a true reset.</span>
+          </div>
+          <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-5">
+            <code class="font-mono text-teal-400 whitespace-nowrap">openclaw tui</code>
+            <span class="text-white/60">Terminal chat interface, built into OpenClaw. Useful for debugging — your phone's the daily driver.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== DATA SAFETY ==================== -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="reveal glass rounded-2xl p-7">
+        <h2 class="text-sm font-semibold uppercase tracking-[0.15em] text-white/40 mb-5">What Carapace does — and doesn't — touch</h2>
+        <p class="text-sm text-white/60 mb-5 leading-relaxed">
+          Carapace is built to layer on top of an existing OpenClaw without destroying user state. If you're already chatting with an OpenClaw agent and want to add the iOS surface, every install is non-destructive by design.
+        </p>
+        <div class="grid sm:grid-cols-2 gap-5 text-sm">
+          <div>
+            <div class="text-white/50 text-xs font-semibold uppercase tracking-wider mb-3">Never touched</div>
+            <ul class="space-y-2 text-white/70">
+              <li class="flex items-start gap-2"><span class="text-teal-400 mt-0.5">·</span> Your chat history (<code class="font-mono text-white/50">sessions/*.jsonl</code>)</li>
+              <li class="flex items-start gap-2"><span class="text-teal-400 mt-0.5">·</span> Your API keys (<code class="font-mono text-white/50">auth-profiles.json</code>)</li>
+              <li class="flex items-start gap-2"><span class="text-teal-400 mt-0.5">·</span> Custom <code class="font-mono text-white/50">SOUL.md</code>, <code class="font-mono text-white/50">USER.md</code>, <code class="font-mono text-white/50">OPS.md</code>, etc.</li>
+              <li class="flex items-start gap-2"><span class="text-teal-400 mt-0.5">·</span> A non-default <code class="font-mono text-white/50">IDENTITY.md</code> (named agents stay)</li>
+              <li class="flex items-start gap-2"><span class="text-teal-400 mt-0.5">·</span> Existing Tailscale serve routes</li>
+            </ul>
+          </div>
+          <div>
+            <div class="text-white/50 text-xs font-semibold uppercase tracking-wider mb-3">Modified surgically</div>
+            <ul class="space-y-2 text-white/70">
+              <li class="flex items-start gap-2"><span class="text-teal-400 mt-0.5">·</span> <code class="font-mono text-white/50">AGENTS.md</code> + <code class="font-mono text-white/50">MEMORY.md</code> — sentinel-bounded inserts only</li>
+              <li class="flex items-start gap-2"><span class="text-teal-400 mt-0.5">·</span> <code class="font-mono text-white/50">openclaw.json</code> caps — bumped only if your value is below ours</li>
+              <li class="flex items-start gap-2"><span class="text-teal-400 mt-0.5">·</span> systemd unit drop-in — adds bonjour-disable + dynamic openclaw path resolver</li>
+              <li class="flex items-start gap-2"><span class="text-teal-400 mt-0.5">·</span> Crontab — adds 3am gateway restart + 3:30am trajectory prune (preserves other entries)</li>
+            </ul>
+          </div>
+        </div>
+        <p class="text-xs text-white/30 mt-5 leading-relaxed">
+          Want a snapshot before you run? <code class="font-mono text-white/50">tar czf ~/openclaw-backup.tar.gz -C ~ .openclaw</code> — restores with <code class="font-mono text-white/50">tar xzf ~/openclaw-backup.tar.gz -C ~</code>.
+        </p>
       </div>
     </div>
   </section>
