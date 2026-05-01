@@ -1275,6 +1275,124 @@ http.createServer((req, res) => {
 
     if (p === "/health") { res.end(JSON.stringify({ ok: true })); return; }
 
+    // ── DIAG endpoint — surfaces silent failure modes ─────────────────
+    // Why: without this, three classes of failure are invisible to the
+    // user until the TUI hangs:
+    //   (a) provider billing/auth failures (gateway logs them but the
+    //       iOS app sees the gateway as healthy because /health passes)
+    //   (b) gateway event-loop saturation (high CPU + high p99 latency
+    //       caused by retry-storms or zombie TUIs)
+    //   (c) orphan openclaw-tui processes with deleted ptys
+    //   (d) main agent configured with a single provider — about to
+    //       become a hang the moment that provider blips
+    //
+    // GET /diag returns a structured snapshot. Status field is the
+    // single source of truth for the iOS app's red/yellow/green banner.
+    if (p === "/diag") {
+      try {
+        const { execSync } = require("child_process");
+        const sh = (cmd) => {
+          try {
+            return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"], timeout: 3000, encoding: "utf8" }).trim();
+          } catch { return ""; }
+        };
+
+        // 1. Gateway HTTP health (cheap upstream check)
+        let gateway_health = null;
+        try {
+          const h = sh('curl -s --max-time 2 http://127.0.0.1:18789/health');
+          gateway_health = h ? JSON.parse(h) : null;
+        } catch { gateway_health = null; }
+
+        // 2. Recent gateway log markers (last ~500 lines of today's log)
+        // Counts billing/error/fallback-to-none patterns. The "to none"
+        // pattern is the high-signal one — it means a chat request had
+        // nowhere to go, which is what produces the "TUI hung" symptom.
+        const log_summary = { errors: 0, warnings: 0, billing_failures: 0, fallbacks_to_none: 0, last_billing_failure_at: null };
+        const latest_log = sh('ls -t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -1');
+        if (latest_log) {
+          const recent = sh(`tail -500 "${latest_log}"`);
+          if (recent) {
+            log_summary.errors = (recent.match(/"logLevelName":"ERROR"/g) || []).length;
+            log_summary.warnings = (recent.match(/"logLevelName":"WARN"/g) || []).length;
+            log_summary.billing_failures = (recent.match(/billing issue/g) || []).length;
+            log_summary.fallbacks_to_none = (recent.match(/next=none/g) || []).length;
+            // Surface timestamp of most recent billing failure for the
+            // iOS app to render "billing failed at HH:MM" diagnostics.
+            const billingMatches = recent.split("\n").filter(l => l.includes("billing issue"));
+            if (billingMatches.length > 0) {
+              const last = billingMatches[billingMatches.length - 1];
+              const tsMatch = last.match(/"time":"([^"]+)"/) || last.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/);
+              if (tsMatch) log_summary.last_billing_failure_at = tsMatch[1];
+            }
+          }
+        }
+
+        // 3. TUI process audit — total + orphans (deleted ptys)
+        const tui_pids_raw = sh("pgrep -x openclaw-tui");
+        const tui_pids = tui_pids_raw ? tui_pids_raw.split("\n").filter(Boolean) : [];
+        let tui_orphans = 0;
+        const orphan_pids = [];
+        for (const pid of tui_pids) {
+          const fd0 = sh(`ls -l /proc/${pid}/fd/0 2>/dev/null`);
+          if (fd0.includes("(deleted)")) {
+            tui_orphans++;
+            orphan_pids.push(parseInt(pid, 10));
+          }
+        }
+
+        // 4. Model configuration audit — main agent provider-fallback
+        // health. Single-provider main agent is a latent failure waiting
+        // to fire the next time the provider blips.
+        let model_config = null;
+        try {
+          const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".openclaw/openclaw.json"), "utf8"));
+          const main_agent = (cfg.agents?.list || []).find(a => a.id === "main");
+          const main_models = main_agent
+            ? [main_agent.model?.primary, ...(main_agent.model?.fallbacks || [])].filter(Boolean)
+            : [];
+          const main_providers = [...new Set(main_models.map(m => (m || "").split("/")[0]).filter(Boolean))];
+          model_config = {
+            main_primary: main_agent?.model?.primary || null,
+            main_fallbacks: main_agent?.model?.fallbacks || [],
+            main_providers_count: main_providers.length,
+            main_providers,
+            compaction_model: cfg.agents?.defaults?.compaction?.model || null,
+            heartbeat_model: cfg.agents?.defaults?.heartbeat?.model || null,
+            auth_profiles: Object.keys(cfg.auth?.profiles || {}),
+          };
+        } catch { model_config = null; }
+
+        // 5. Roll-up status — single field the iOS app keys off.
+        // "ok"       = all green
+        // "warning"  = degraded, still functional (e.g. orphans accumulating, single-provider main)
+        // "degraded" = active failures user can feel right now
+        const issues = [];
+        if (log_summary.billing_failures > 0) issues.push({ kind: "billing_failure", count: log_summary.billing_failures, last_at: log_summary.last_billing_failure_at });
+        if (log_summary.fallbacks_to_none > 0) issues.push({ kind: "no_model_available", count: log_summary.fallbacks_to_none });
+        if (tui_orphans > 0) issues.push({ kind: "tui_orphans", count: tui_orphans, pids: orphan_pids });
+        if (model_config && model_config.main_providers_count < 2) issues.push({ kind: "main_single_provider", provider: model_config.main_providers[0] || null });
+        if (gateway_health === null) issues.push({ kind: "gateway_unreachable" });
+
+        const has_active_failure = issues.some(i => ["billing_failure", "no_model_available", "gateway_unreachable"].includes(i.kind));
+        const status = issues.length === 0 ? "ok" : (has_active_failure ? "degraded" : "warning");
+
+        res.end(JSON.stringify({
+          status,
+          issues,
+          gateway: gateway_health,
+          log_summary,
+          tui: { active: tui_pids.length, orphans: tui_orphans, orphan_pids },
+          model_config,
+          checked_at: new Date().toISOString(),
+        }, null, 2));
+      } catch (e) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ error: e.message }));
+      }
+      return;
+    }
+
     // ── COGNITIVE MEMORY endpoints ────────────────────────────────────
     if (p === "/cognitive/health") {
       try {

@@ -712,6 +712,113 @@ except Exception: print('False')" 2>/dev/null || echo False)
   fi
 }
 
+# ── Validate main agent has cross-provider fallback ──────
+# Symptom we're preventing: openclaw configure typically sets the main
+# agent to a single provider (e.g. anthropic/claude-sonnet-4-6 with
+# anthropic/claude-opus-4-6 as fallback — same provider, both fail
+# together). When that provider has a billing/network issue, every
+# TUI/iOS chat hangs because there's nowhere to fall back to. The
+# gateway accumulates pending requests, the event loop saturates, and
+# the box becomes effectively unusable until manually restarted with
+# the model swapped.
+#
+# Real-world incident (this is why this function exists): a Carapace
+# user's Anthropic billing failed at 3am. Heartbeat cron fired every
+# 15 min hammering the main agent → gateway hit 97% CPU + 16s event-
+# loop delays → new TUI sessions hung on first message → SSH drops left
+# orphans → snowballed for ~12 hours before the user noticed.
+#
+# Fix: if the main agent uses one provider AND the user has another
+# provider authed, append a model from the other provider to fallbacks.
+# Non-destructive (preserves existing fallbacks), idempotent (skips if
+# fallback already cross-provider), reversible (timestamped backup).
+ensure_carapace_main_agent_fallback() {
+  command -v openclaw >/dev/null 2>&1 || return 0
+  local config="$HOME/.openclaw/openclaw.json"
+  [[ -f "$config" ]] || return 0
+  have_cmd jq || return 0  # jq is a hard prereq but be defensive
+
+  local main_providers
+  main_providers=$(jq -r '
+    [(.agents.list[]? | select(.id == "main"))]
+    | if length == 0 then 0 else
+        .[0]
+        | [(.model.primary // ""), ((.model.fallbacks // [])[])]
+        | map(select(type == "string" and length > 0) | split("/")[0])
+        | unique
+        | length
+      end
+  ' "$config" 2>/dev/null || echo 0)
+
+  if [[ "${main_providers:-0}" -ge 2 ]]; then
+    ok "Main agent has cross-provider fallback (${main_providers} providers configured)"
+    return 0
+  fi
+
+  local current_provider
+  current_provider=$(jq -r '
+    .agents.list[]? | select(.id == "main") | .model.primary // ""
+    | split("/")[0]
+  ' "$config" 2>/dev/null | head -1)
+
+  # Find other authed providers (auth.profiles keys are "provider:label")
+  local other_providers
+  other_providers=$(jq -r --arg cur "$current_provider" '
+    .auth.profiles // {}
+    | keys
+    | map(split(":")[0])
+    | unique
+    | map(select(. != $cur and . != ""))
+    | .[]
+  ' "$config" 2>/dev/null || true)
+
+  if [[ -z "$other_providers" ]]; then
+    warn "Main agent is single-provider ($current_provider) and no other providers are authed."
+    warn "  → If $current_provider has billing/network issues, your TUI will hang silently."
+    warn "  → Recommended: 'carapace-onboard' to add a second provider, then re-run installer."
+    return 0
+  fi
+
+  # Pick a sensible fallback model per provider. These are the smallest/
+  # fastest model in each provider's lineup as of 2026-04 — cheap to use
+  # as a fallback that only fires when the primary is down.
+  local fb_provider fb_model
+  fb_provider=$(echo "$other_providers" | head -1)
+  case "$fb_provider" in
+    openai-codex)  fb_model="openai-codex/gpt-5.4-mini" ;;
+    openai)        fb_model="openai/gpt-4.1-nano" ;;
+    xai)           fb_model="xai/grok-4-fast-non-reasoning" ;;
+    anthropic)     fb_model="anthropic/claude-sonnet-4-6" ;;
+    google)        fb_model="google/gemini-2.5-flash" ;;
+    groq)          fb_model="groq/llama-3.3-70b-versatile" ;;
+    *)             fb_model="${fb_provider}/default" ;;
+  esac
+
+  echo -e "  ${YELLOW}Main agent is single-provider ($current_provider).${RESET}"
+  echo -e "  ${DIM}  → Adding ${fb_model} as cross-provider fallback so TUI doesn't hang${RESET}"
+  echo -e "  ${DIM}    if $current_provider has billing/network issues.${RESET}"
+
+  local backup_ts
+  backup_ts=$(date +%s)
+  cp "$config" "${config}.bak.fallback-${backup_ts}" 2>/dev/null || true
+  /usr/bin/env python3 - "$config" "$fb_model" <<'PY' 2>/dev/null || warn "Could not write cross-provider fallback to openclaw.json — leaving config alone."
+import json, sys
+config_path, fb_model = sys.argv[1], sys.argv[2]
+with open(config_path) as f:
+    c = json.load(f)
+for a in c.get("agents", {}).get("list", []):
+    if a.get("id") == "main":
+        m = a.setdefault("model", {})
+        fbs = m.setdefault("fallbacks", [])
+        if fb_model not in fbs:
+            fbs.append(fb_model)
+        break
+with open(config_path, "w") as f:
+    json.dump(c, f, indent=2)
+PY
+  ok "Added ${fb_model} as cross-provider fallback for main agent (backup: ${config}.bak.fallback-${backup_ts})"
+}
+
 # ══════════════════════════════════════════════════════════
 # Carapace = a SHELL on top of OpenClaw
 # ══════════════════════════════════════════════════════════
@@ -931,6 +1038,7 @@ install_self_to_carapace_dir() {
 
 sweep_carapace_for_all_agents() {
   ensure_carapace_bootstrap_caps || true
+  ensure_carapace_main_agent_fallback || true
   install_self_to_carapace_dir || true
   seed_main_identity_default || true
   while IFS= read -r ws; do
@@ -1638,6 +1746,39 @@ if ! have_cmd crontab; then
   have_cmd crontab || fail "cron is required but could not be installed. See /tmp/carapace-install.log for details."
 fi
 ok "cron available"
+
+# tmux — used by the carapace-tui wrapper to make TUI sessions survive
+# SSH disconnects without orphaning openclaw-tui processes.
+#
+# Without this, an SSH drop leaves openclaw-tui running forever with
+# its stdin/stdout/stderr pointing at a (deleted) pty. The orphan keeps
+# polling the gateway over WebSocket. Multiple orphans accumulate and
+# saturate the gateway's event loop (we observed 16-second p99 event-
+# loop delays from just 2 orphans on a 4GB VPS, leading to a "TUI
+# frozen" symptom for every new session). The reaper cron at
+# /usr/local/bin/carapace-reap-orphans cleans up edge cases, but tmux
+# prevents the orphan-creation in the first place.
+#
+# Soft-fail (warn, not fail): the wrapper degrades gracefully to bare
+# openclaw if tmux isn't installed — user just loses SSH-disconnect
+# survivability. Better than blocking the whole install on a tmux
+# package mirror hiccup.
+if ! have_cmd tmux; then
+  if have_cmd apt-get; then
+    run $SUDO apt-get install -y tmux || true
+  elif have_cmd dnf; then
+    run $SUDO dnf install -y tmux || true
+  elif have_cmd yum; then
+    run $SUDO yum install -y tmux || true
+  elif have_cmd pacman; then
+    run $SUDO pacman -Sy --noconfirm tmux || true
+  elif have_cmd zypper; then
+    run $SUDO zypper -n install tmux || true
+  elif have_cmd apk; then
+    run $SUDO apk add --no-cache tmux || true
+  fi
+fi
+have_cmd tmux && ok "tmux available" || warn "tmux not installed — carapace-tui will fall back to bare openclaw (no SSH-disconnect survival). Install tmux and re-run for full protection."
 
 # Swap check moved to BEFORE prereq installs (see top of prereq block).
 # Low-RAM boxes need swap in place before dnf/apt runs, or dep resolution
@@ -3229,6 +3370,155 @@ PRUNECMD
 $SUDO chmod +x /usr/local/bin/carapace-prune
 ok "carapace-prune installed (wipe trajectory bloat without losing chats)"
 
+# ── carapace-tui wrapper ─────────────────────────────────
+# Launches openclaw TUI inside a persistent tmux session so it survives
+# SSH disconnects without orphaning. Ships as `carapace-tui` (and a
+# `tui` alias on the carapace command if/when we add one).
+#
+# Why this exists: openclaw-tui doesn't trap SIGHUP. When an SSH session
+# closes — network blip, laptop sleep, terminal Cmd+W — the pty is
+# destroyed but openclaw-tui keeps running with PPID=1 and (deleted)
+# fd 0/1/2. It still polls the gateway over WebSocket. Multiples
+# accumulate over weeks of normal usage and saturate the gateway's
+# event loop. Symptom presented to the user: "TUI frozen" on every new
+# session because the gateway is too busy servicing zombies to handle
+# real chat turns.
+#
+# tmux fixes this at the source: the TUI runs in a long-lived tmux
+# session, the SSH client is decoupled from the TUI's lifecycle, and
+# reconnecting just re-attaches to the same session. Also gives users
+# scroll-back across reconnects, which they kept asking for anyway.
+$SUDO tee /usr/local/bin/carapace-tui > /dev/null << 'TUICMD'
+#!/usr/bin/env bash
+# carapace-tui — launch openclaw TUI inside a persistent tmux session.
+#
+# Usage:
+#   carapace-tui            # attach to (or create) the carapace tmux session
+#   carapace-tui --kill     # kill the carapace tmux session (clean restart)
+#   carapace-tui --status   # show whether a session exists, plus orphan count
+#
+# Inside tmux already? We detect via $TMUX and exec openclaw directly to
+# avoid nested tmux (which steals prefix keys + breaks copy-mode).
+
+set -uo pipefail
+
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+for d in "$HOME"/.nvm/versions/node/*/bin; do
+  [ -d "$d" ] && export PATH="$d:$PATH"
+done
+export PATH="$HOME/.npm-global/bin:$PATH"
+
+case "${1:-}" in
+  --kill)
+    if command -v tmux >/dev/null 2>&1 && tmux has-session -t carapace 2>/dev/null; then
+      tmux kill-session -t carapace
+      echo "killed carapace tmux session"
+    else
+      echo "no carapace tmux session to kill"
+    fi
+    exit 0
+    ;;
+  --status)
+    if command -v tmux >/dev/null 2>&1 && tmux has-session -t carapace 2>/dev/null; then
+      echo "carapace tmux session: ACTIVE"
+      tmux list-clients -t carapace 2>/dev/null | sed 's/^/  client: /'
+    else
+      echo "carapace tmux session: not running"
+    fi
+    orphans=0
+    for pid in $(pgrep -x openclaw-tui 2>/dev/null); do
+      if ls -l "/proc/$pid/fd/0" 2>/dev/null | grep -q '(deleted)'; then
+        orphans=$((orphans + 1))
+      fi
+    done
+    echo "openclaw-tui orphans (deleted ptys): $orphans"
+    exit 0
+    ;;
+esac
+
+# Already inside tmux — don't nest. exec openclaw directly so the user
+# stays in their existing tmux window and the openclaw process inherits
+# their tty cleanly.
+if [ -n "${TMUX:-}" ]; then
+  exec openclaw "$@"
+fi
+
+# tmux missing — degrade gracefully but warn loudly. The TUI will still
+# work, it just won't survive an SSH disconnect.
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "warning: tmux not installed — TUI won't survive SSH disconnects." >&2
+  echo "  install tmux to fix:  sudo apt install tmux  (or your distro's equivalent)" >&2
+  echo "" >&2
+  exec openclaw "$@"
+fi
+
+# Attach to existing carapace session if it exists, create otherwise.
+# -A makes new-session attach-or-create. -s sets the session name.
+# -- separates tmux args from the command tmux should run.
+exec tmux new-session -A -s carapace -- openclaw "$@"
+TUICMD
+$SUDO chmod +x /usr/local/bin/carapace-tui
+# Friendly alias: also install as `carapace tui`-ish via the existing
+# command name. We don't ship a `carapace` binary (Carapace is the iOS
+# app + the install layer; the CLI is openclaw underneath), so we use
+# carapace-tui as the user-facing command name.
+ok "carapace-tui installed (tmux-wrapped openclaw — survives SSH disconnects)"
+
+# ── carapace-reap-orphans reaper ─────────────────────────
+# Catches orphan openclaw-tui processes that the carapace-tui wrapper
+# can't prevent: manual `openclaw` invocations, tmux server crashes,
+# kernel OOM kills mid-session, users who didn't read the docs.
+#
+# Reap criterion: process is openclaw-tui AND its fd 0 (stdin) points
+# to a "(deleted)" pty. Live user TUIs always have a real pty — never
+# touched. Dead orphans always have (deleted) markers — always killed.
+# This is a strict criterion with no false positives we've seen.
+$SUDO tee /usr/local/bin/carapace-reap-orphans > /dev/null << 'REAPCMD'
+#!/usr/bin/env bash
+# carapace-reap-orphans — kill openclaw-tui processes whose pty is gone.
+#
+# Runs every 5 minutes via cron. Logs to syslog (`logger -t`) when it
+# actually reaps something so you can correlate with gateway slowness.
+# Silent when there's nothing to do — does not spam syslog.
+
+set -uo pipefail
+
+REAPED=0
+for pid in $(pgrep -x openclaw-tui 2>/dev/null); do
+  # The "(deleted)" suffix only appears in `ls -l` rendering of the
+  # /proc/PID/fd/0 symlink, never in the readlink target. So we have
+  # to grep the ls output directly.
+  fd0_link=$(ls -l "/proc/$pid/fd/0" 2>/dev/null || echo "")
+  if echo "$fd0_link" | grep -q '(deleted)'; then
+    # Capture parent PID before we kill — we want to reap the openclaw
+    # wrapper too if it's also orphaned, but never PID 1 (init).
+    ppid=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null || echo 1)
+
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 1
+    kill -KILL "$pid" 2>/dev/null || true
+
+    # Only reap parent if it's still alive AND it's an openclaw process
+    # AND it's not init. Three guards because killing the wrong PPID
+    # could nuke a user's shell or tmux server.
+    if [ "${ppid:-1}" -gt 1 ] && [ -d "/proc/$ppid" ]; then
+      ppid_name=$(cat "/proc/$ppid/comm" 2>/dev/null || echo "")
+      if [ "$ppid_name" = "openclaw" ]; then
+        kill -TERM "$ppid" 2>/dev/null || true
+      fi
+    fi
+    REAPED=$((REAPED + 1))
+  fi
+done
+
+if [ "$REAPED" -gt 0 ]; then
+  logger -t carapace-reap-orphans "reaped $REAPED orphan openclaw-tui process(es) with deleted ptys"
+fi
+REAPCMD
+$SUDO chmod +x /usr/local/bin/carapace-reap-orphans
+ok "carapace-reap-orphans installed (zombie-tui reaper, runs via cron every 5 min)"
+
 # ── Nightly maintenance cron ────────────────────────────
 # Resolve the real openclaw binary (npm-global takes precedence — nvm's node/bin
 # only contains node/npm/npx/corepack, NOT openclaw). Falls back through other
@@ -3252,8 +3542,14 @@ fi
 # session reasoning). Uses the carapace-prune helper installed
 # above so the prune logic stays in one auditable place.
 PRUNE_CRON_LINE="30 3 * * * /usr/local/bin/carapace-prune >/dev/null 2>&1"
-( crontab -l 2>/dev/null | grep -v 'openclaw gateway restart' | grep -v 'carapace-prune' | grep -v 'sync-trackers' || true; echo "$SYNC_CRON"; echo "$CRON_LINE"; echo "$PRUNE_CRON_LINE" ) | crontab -
-ok "Nightly gateway restart scheduled (3am UTC) + trajectory prune (3:30am UTC)"
+# Reap orphaned openclaw-tui processes every 5 minutes. The carapace-tui
+# wrapper prevents most orphans by running in tmux, but edge cases (manual
+# `openclaw` invocations, OOM kills, tmux server crashes) still produce
+# them. Without this reaper, orphans accumulate over weeks and saturate
+# the gateway event loop. See /usr/local/bin/carapace-reap-orphans.
+REAP_CRON_LINE="*/5 * * * * /usr/local/bin/carapace-reap-orphans >/dev/null 2>&1"
+( crontab -l 2>/dev/null | grep -v 'openclaw gateway restart' | grep -v 'carapace-prune' | grep -v 'sync-trackers' | grep -v 'carapace-reap-orphans' || true; echo "$SYNC_CRON"; echo "$CRON_LINE"; echo "$PRUNE_CRON_LINE"; echo "$REAP_CRON_LINE" ) | crontab -
+ok "Nightly gateway restart scheduled (3am UTC) + trajectory prune (3:30am UTC) + tui-orphan reaper (every 5 min)"
 
 # Reload shell profile
 if [[ -f /etc/profile.d/openclaw.sh ]]; then
@@ -3308,6 +3604,7 @@ fi
 step "Carapace shell setup"
 
 ensure_carapace_bootstrap_caps || true
+ensure_carapace_main_agent_fallback || true
 
 # Detect openclaw workspaces + ask the user where to install. If only
 # main is detected, no prompt fires (single-workspace shortcut). If
@@ -3337,6 +3634,7 @@ else
   # any specific workspace: caps, identity seed for main, legacy
   # cleanup, session-prompt-cache flip.
   ensure_carapace_bootstrap_caps || true
+  ensure_carapace_main_agent_fallback || true
   install_self_to_carapace_dir || true
   seed_main_identity_default || true
   retire_legacy_per_agent_projects_files || true

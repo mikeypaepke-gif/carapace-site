@@ -21,6 +21,20 @@
   <img src="assets/ios-home.png" alt="CARAPACE iOS home screen" width="300">
 </p>
 
+<p align="center">
+  <strong>Tested platforms</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/macOS%2014%2B-%E2%9C%93-00C853?style=flat-square&logo=apple&logoColor=white" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/iOS%2017%2B-%E2%9C%93-00C853?style=flat-square&logo=apple&logoColor=white" alt="iOS 17+">
+  <img src="https://img.shields.io/badge/Ubuntu%2022%2F24-%E2%9C%93-00C853?style=flat-square&logo=ubuntu&logoColor=white" alt="Ubuntu 22/24">
+  <img src="https://img.shields.io/badge/Debian%2012-%E2%9C%93-00C853?style=flat-square&logo=debian&logoColor=white" alt="Debian 12">
+  <img src="https://img.shields.io/badge/Rocky%209-%E2%9C%93-00C853?style=flat-square&logo=rockylinux&logoColor=white" alt="Rocky 9">
+  <img src="https://img.shields.io/badge/Fedora-%E2%9C%93-00C853?style=flat-square&logo=fedora&logoColor=white" alt="Fedora">
+  <img src="https://img.shields.io/badge/Raspberry%20Pi%205-%E2%9C%93-00C853?style=flat-square&logo=raspberrypi&logoColor=white" alt="Raspberry Pi 5">
+</p>
+
 ---
 
 This repository hosts the marketing site for [CARAPACE](https://carapace.info/)
@@ -87,7 +101,8 @@ The Carapace installer (this repo's `install.sh`) walks through:
    at `~/.carapace/`, registers as systemd service, exposes `/agents`,
    `/cron`, `/sessions`, `/projects`, `/history`, `/chat`, etc.
 6. **Helper commands** — installs `carapace-qr`, `carapace-onboard`,
-   `carapace-prune` to `/usr/local/bin/`.
+   `carapace-prune`, `carapace-tui`, and `carapace-reap-orphans` to
+   `/usr/local/bin/`.
 7. **Health check** — port-bind probe (NOT `/health` curl, which is
    unreliable during the openclaw acpx runtime cold-start window).
 8. **Carapace shell setup** — bumps `agents.defaults.timeoutSeconds`
@@ -102,13 +117,80 @@ The Carapace installer (this repo's `install.sh`) walks through:
    chat completion against the configured provider so the user's first
    iOS message after pairing isn't stuck in cold-start. Then prints the
    QR + pair URL.
-10. **Cron jobs** — installs nightly gateway restart (3am UTC) + daily
-    trajectory prune (3:30am UTC) so the TUI/iOS history tabs stay
-    snappy without the user ever managing trajectory bloat manually.
+10. **Cron jobs** — installs nightly gateway restart (3am UTC), daily
+    trajectory prune (3:30am UTC), and a 5-minute reaper for orphan
+    `openclaw-tui` processes (see "Running the TUI on a remote VPS"
+    below). All three keep the TUI/iOS surfaces snappy without the
+    user managing anything manually.
+11. **Cross-provider fallback validation** — if your `main` agent is
+    configured with a single provider (the most common shape openclaw's
+    setup wizard produces), Carapace adds a fallback model from a
+    different provider you've authed. This prevents the TUI from
+    silently hanging the next time your primary provider has a
+    billing/network blip. Backed up to `openclaw.json.bak.fallback-*`
+    before the edit; skipped if you've already configured a multi-
+    provider setup.
 
 The installer is **idempotent** — safe to re-run any time you want to
 refresh the workspace prompts, pull updated helper commands, or pick up
 a newer Carapace release. Re-runs respect every safeguard above.
+
+### Running the TUI on a remote VPS
+
+If you're SSH'd into a Linux VPS where you ran the Carapace installer,
+**always launch the TUI via `carapace-tui`, not bare `openclaw`**:
+
+```bash
+ssh root@your-vps
+carapace-tui              # attach (or create) a persistent tmux session
+```
+
+`carapace-tui` wraps the openclaw TUI inside a tmux session so the TUI
+survives SSH disconnects. Without this, an SSH drop (network blip,
+laptop sleep, terminal Cmd+W) leaves `openclaw-tui` running with a
+deleted controlling pty — it keeps polling the gateway forever, and
+multiples accumulate over weeks of normal usage until the gateway
+event loop saturates and every new TUI session "freezes."
+
+| Command | What it does |
+|---|---|
+| `carapace-tui` | Attach to (or create) the persistent `carapace` tmux session |
+| `carapace-tui --status` | Show whether the session is active + count any orphan TUI processes |
+| `carapace-tui --kill` | Kill the tmux session (clean restart) |
+| `tmux detach` *(Ctrl-b d)* | Detach without killing — TUI keeps running, reattach later |
+
+A `*/5 * * * * /usr/local/bin/carapace-reap-orphans` cron is also
+installed as a safety net for orphans that slip through (manual
+`openclaw` invocations, OOM kills, tmux server crashes). Reaped
+events are logged to syslog with tag `carapace-reap-orphans`.
+
+### Diagnostics — `/diag` endpoint
+
+The status server exposes `GET /diag` (over your Tailscale URL or
+locally at `http://127.0.0.1:18794/diag`) which returns a structured
+health snapshot:
+
+```json
+{
+  "status": "ok | warning | degraded",
+  "issues": [{ "kind": "billing_failure", "count": 3, "last_at": "..." }],
+  "gateway": { "ok": true, "status": "live" },
+  "log_summary": { "errors": 0, "warnings": 2, "billing_failures": 3, "fallbacks_to_none": 3 },
+  "tui": { "active": 1, "orphans": 0 },
+  "model_config": {
+    "main_primary": "anthropic/claude-sonnet-4-6",
+    "main_providers_count": 2,
+    "auth_profiles": ["anthropic:default", "xai:default"]
+  }
+}
+```
+
+The iOS app reads this every minute to render its red/yellow/green
+banner. Use it from the CLI when something feels off:
+
+```bash
+curl -s http://127.0.0.1:18794/diag | jq .
+```
 
 ### What Carapace never touches
 
