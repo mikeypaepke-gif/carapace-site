@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/mac-chat.png" alt="CARAPACE on macOS" width="820">
+  <img src="assets/ios-home.png" alt="CARAPACE iOS home screen" width="300">
 </p>
 
 ---
