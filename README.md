@@ -1,15 +1,16 @@
 <p align="center">
-  <img src="assets/app-icon.png" alt="CARAPACE" width="128" height="128">
+  <img src="assets/carapace-logo.png" alt="CARAPACE" width="200">
 </p>
 
 <h1 align="center">CARAPACE</h1>
 
 <p align="center">
   <strong>Your OpenClaw. Your machine. Your rules.</strong><br>
-  <sub>We're just helping you feed it the data it's craving.</sub>
+  <sub>Get your mom on OpenClaw in ten minutes.</sub>
 </p>
 
 <p align="center">
+  <a href="https://github.com/mikeypaepke-gif/carapace-site/releases/latest"><img src="https://img.shields.io/badge/release-v2.0.6-00DCC8?style=flat-square" alt="v2.0.6"></a>
   <a href="https://carapace.info"><img src="https://img.shields.io/badge/website-carapace.info-00DCC8?style=flat-square" alt="Website"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-00C4B4?style=flat-square" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/platforms-macOS%20%E2%80%A2%20iOS%20%E2%80%A2%20Linux%20%E2%80%A2%20Raspberry%20Pi-888?style=flat-square" alt="Platforms">
@@ -17,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/mac-nb-1.png" alt="CARAPACE on macOS" width="820">
+  <img src="assets/mac-chat.png" alt="CARAPACE on macOS" width="820">
 </p>
 
 ---
