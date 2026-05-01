@@ -3002,21 +3002,37 @@ ok "Cron jobs sync running every 2 minutes (projects now real-time via MEMORY.md
 # ══════════════════════════════════════════════════════════
 step "Helper Commands"
 
-# Ensure qrencode is installed
-if ! have_cmd qrencode; then
+# Ensure qrencode is installed across every Linux distro carapace-site
+# claims to support. The post-install QR pairing step is the literal
+# reason most users ran the script, so silently skipping it because a
+# package manager wasn't matched is not OK.
+#
+# Distro coverage:
+#   - apt-get:  Debian / Ubuntu / Pi OS (qrencode in main repo)
+#   - dnf:      Rocky / Alma / RHEL / Fedora — qrencode lives in EPEL
+#               on RHEL-family, not the default repos. Enable EPEL first.
+#   - yum:      legacy CentOS 7 (same EPEL story as dnf)
+#   - pacman:   Arch / Manjaro (qrencode in extra)
+#   - zypper:   openSUSE (qrencode in OSS)
+#   - apk:      Alpine (libqrencode-tools)
+qrencode_install() {
   if have_cmd apt-get; then
-    $SUDO apt-get install -y qrencode >/dev/null 2>&1 || true
+    $SUDO apt-get install -y qrencode >/dev/null 2>&1
   elif have_cmd dnf; then
-    # Rocky / Alma / RHEL ship qrencode in EPEL, not the default repos.
-    # Stock `dnf install qrencode` silently no-ops on those distros and
-    # the QR pairing step that ends every install gets skipped, leaving
-    # users to paste the pair URL by hand. Enable EPEL first if needed.
-    if ! $SUDO dnf list --installed qrencode >/dev/null 2>&1; then
-      $SUDO dnf install -y epel-release >/dev/null 2>&1 || true
-      $SUDO dnf install -y qrencode >/dev/null 2>&1 || true
-    fi
+    $SUDO dnf install -y epel-release >/dev/null 2>&1 || true
+    $SUDO dnf install -y qrencode >/dev/null 2>&1
+  elif have_cmd yum; then
+    $SUDO yum install -y epel-release >/dev/null 2>&1 || true
+    $SUDO yum install -y qrencode >/dev/null 2>&1
+  elif have_cmd pacman; then
+    $SUDO pacman -Sy --noconfirm qrencode >/dev/null 2>&1
+  elif have_cmd zypper; then
+    $SUDO zypper -n install qrencode >/dev/null 2>&1
+  elif have_cmd apk; then
+    $SUDO apk add --no-cache libqrencode-tools >/dev/null 2>&1
   fi
-fi
+}
+if ! have_cmd qrencode; then qrencode_install; fi
 have_cmd qrencode && ok "qrencode ready" || warn "qrencode not installed — pair URL still printed below; copy it into the iOS app instead of scanning"
 
 # carapace-qr command
@@ -3042,7 +3058,24 @@ echo "  Gateway: $GW"
 echo "  Token:   ${TOKEN:0:16}..."
 echo ""
 if ! command -v qrencode >/dev/null 2>&1; then
-  apt-get install -y qrencode >/dev/null 2>&1 || true
+  # Multi-distro install attempt — same coverage as install.sh's
+  # qrencode_install helper. RHEL family needs EPEL enabled first.
+  SUDO=$([ "$EUID" -eq 0 ] || command -v sudo >/dev/null && echo "sudo" || echo "")
+  if command -v apt-get >/dev/null 2>&1; then
+    $SUDO apt-get install -y qrencode >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then
+    $SUDO dnf install -y epel-release >/dev/null 2>&1 || true
+    $SUDO dnf install -y qrencode >/dev/null 2>&1 || true
+  elif command -v yum >/dev/null 2>&1; then
+    $SUDO yum install -y epel-release >/dev/null 2>&1 || true
+    $SUDO yum install -y qrencode >/dev/null 2>&1 || true
+  elif command -v pacman >/dev/null 2>&1; then
+    $SUDO pacman -Sy --noconfirm qrencode >/dev/null 2>&1 || true
+  elif command -v zypper >/dev/null 2>&1; then
+    $SUDO zypper -n install qrencode >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    $SUDO apk add --no-cache libqrencode-tools >/dev/null 2>&1 || true
+  fi
 fi
 if command -v qrencode >/dev/null 2>&1; then
   echo "  Scan with CARAPACE iOS app:"
