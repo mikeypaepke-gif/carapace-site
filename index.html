@@ -319,13 +319,17 @@
 
         <!-- CTA buttons -->
         <div class="reveal reveal-delay-3 flex flex-wrap justify-center gap-4">
-          <a href="Carapace-2.0.9.dmg" download class="inline-flex items-center gap-3 pl-4 pr-6 py-3 rounded-xl bg-white text-black hover:bg-white/90 transition-all duration-300 shadow-lg shadow-black/20 hover:shadow-xl hover:-translate-y-0.5 group">
-            <svg class="w-7 h-7 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          <!-- macOS download disabled while we polish the wizard.
+               Linux + iOS App Store remain fully functional.
+               When ready to re-enable: revert to the <a href="Carapace-X.Y.Z.dmg" download …>
+               pattern, bump version refs, run ./notarize.sh && ./deploy.sh. -->
+          <div class="inline-flex items-center gap-3 pl-4 pr-6 py-3 rounded-xl bg-white/[0.04] border border-white/10 cursor-not-allowed select-none" aria-disabled="true" title="macOS app temporarily paused — use the Linux installer below or the iOS App Store.">
+            <svg class="w-7 h-7 text-white/30" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
             <div class="text-left">
-              <div class="text-[10px] font-normal opacity-60 leading-none">Download for</div>
-              <div class="text-[17px] font-semibold leading-tight -mt-0.5">macOS — v2.0.9</div>
+              <div class="text-[10px] font-normal text-white/35 leading-none">macOS</div>
+              <div class="text-[17px] font-semibold leading-tight text-white/40 -mt-0.5">Coming soon</div>
             </div>
-          </a>
+          </div>
           <a href="https://apps.apple.com/us/app/carapace/id6760282881" class="inline-flex items-center gap-3 pl-4 pr-6 py-3 rounded-xl glass-elevated border border-white/10 hover:bg-white/[0.08] hover:border-white/15 transition-all duration-300 hover:-translate-y-0.5 group">
             <svg class="w-7 h-7 text-white/70 transition-transform group-hover:scale-105" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
             <div class="text-left">
@@ -1028,12 +1032,14 @@ curl -fsSL https://carapace.info/install.sh | bash">
               Free — unlimited devices, no login
             </li>
           </ul>
-          <a href="Carapace-2.0.9.dmg" download class="block w-full py-3 rounded-xl glass-elevated border border-white/10 text-center font-semibold text-sm hover:bg-white/[0.08] transition-all duration-300 hover:-translate-y-0.5">
-            Download DMG — v2.0.9
-          </a>
-          <a href="/install/mac/" class="block text-center text-xs text-white/40 hover:text-teal-400 transition-colors">
-            Full install guide →
-          </a>
+          <!-- macOS download paused (see comment at hero CTA above) -->
+          <div class="block w-full py-3 rounded-xl border border-white/[0.07] bg-white/[0.02] text-center font-semibold text-sm text-white/35 cursor-not-allowed select-none" aria-disabled="true">
+            Coming soon
+          </div>
+          <p class="block text-center text-xs text-white/40 mt-1">
+            For now, install on a <a href="/install/linux/" class="text-teal-400/80 hover:text-teal-400 transition-colors">Linux box (VPS or Pi)</a>
+            and pair from the iOS app.
+          </p>
         </div>
 
         <!-- Linux -->
