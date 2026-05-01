@@ -3513,6 +3513,21 @@ for d in "$HOME"/.nvm/versions/node/*/bin; do
 done
 export PATH="$HOME/.npm-global/bin:$PATH"
 
+# IMPORTANT: this wrapper invokes `openclaw chat` — NOT bare `openclaw`.
+#
+# In openclaw 2026.4.29+, bare `openclaw` (no subcommand) launches the
+# `crestodian` ring-zero setup/repair helper, which is a tiny rescue
+# UI with NO chat, NO /model picker, NO history. Users hitting the
+# rescue tool by accident conclude "the TUI is broken" — when in fact
+# they were never in the chat TUI at all. Spent half a day diagnosing
+# that exact symptom on a VPS the day this wrapper was first written.
+#
+# `openclaw chat` is an alias for `openclaw tui --local` and opens the
+# real chat TUI against the local main agent runtime. Slash commands
+# (/model, /help, etc) work there. If you want the gateway-routed TUI
+# instead, run `openclaw tui` (no --local). We default to chat because
+# it works without requiring a gateway token in the env.
+
 case "${1:-}" in
   --kill)
     if command -v tmux >/dev/null 2>&1 && tmux has-session -t carapace 2>/dev/null; then
@@ -3539,13 +3554,29 @@ case "${1:-}" in
     echo "openclaw-tui orphans (deleted ptys): $orphans"
     exit 0
     ;;
+  --gateway|--tui)
+    # Escape hatch: --gateway / --tui forces the gateway-routed TUI
+    # (openclaw tui) instead of the local chat. Requires a gateway
+    # token; we read it from openclaw.json and pass via env so users
+    # don't need to find it themselves.
+    shift
+    GW_TOKEN=$(/usr/bin/env python3 -c "import json,os; c=json.load(open(os.path.expanduser('~/.openclaw/openclaw.json'))); print(c.get('gateway',{}).get('auth',{}).get('token',''))" 2>/dev/null || echo "")
+    if [ -z "${GW_TOKEN}" ]; then
+      echo "warning: no gateway token in ~/.openclaw/openclaw.json — gateway TUI may fail to connect." >&2
+    fi
+    SUBCMD=("tui")
+    export OPENCLAW_GATEWAY_TOKEN="${GW_TOKEN}"
+    ;;
+  *)
+    SUBCMD=("chat")
+    ;;
 esac
 
 # Already inside tmux — don't nest. exec openclaw directly so the user
 # stays in their existing tmux window and the openclaw process inherits
 # their tty cleanly.
 if [ -n "${TMUX:-}" ]; then
-  exec openclaw "$@"
+  exec openclaw "${SUBCMD[@]}" "$@"
 fi
 
 # tmux missing — degrade gracefully but warn loudly. The TUI will still
@@ -3554,13 +3585,16 @@ if ! command -v tmux >/dev/null 2>&1; then
   echo "warning: tmux not installed — TUI won't survive SSH disconnects." >&2
   echo "  install tmux to fix:  sudo apt install tmux  (or your distro's equivalent)" >&2
   echo "" >&2
-  exec openclaw "$@"
+  exec openclaw "${SUBCMD[@]}" "$@"
 fi
 
 # Attach to existing carapace session if it exists, create otherwise.
 # -A makes new-session attach-or-create. -s sets the session name.
 # -- separates tmux args from the command tmux should run.
-exec tmux new-session -A -s carapace -- openclaw "$@"
+# Note: `openclaw chat` is the right invocation — bare `openclaw`
+# would dump the user into the `crestodian` rescue helper, which has
+# no chat surface.
+exec tmux new-session -A -s carapace -- openclaw "${SUBCMD[@]}" "$@"
 TUICMD
 $SUDO chmod +x /usr/local/bin/carapace-tui
 # Friendly alias: also install as `carapace tui`-ish via the existing
