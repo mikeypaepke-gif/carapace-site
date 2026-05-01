@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mikeypaepke-gif/carapace-site/releases/latest"><img src="https://img.shields.io/badge/release-v2.0.8-00DCC8?style=flat-square" alt="v2.0.8"></a>
+  <a href="https://github.com/mikeypaepke-gif/carapace-site/releases/latest"><img src="https://img.shields.io/badge/release-v2.0.9-00DCC8?style=flat-square" alt="v2.0.9"></a>
   <a href="https://carapace.info"><img src="https://img.shields.io/badge/website-carapace.info-00DCC8?style=flat-square" alt="Website"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-00C4B4?style=flat-square" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/platforms-macOS%20%E2%80%A2%20iOS%20%E2%80%A2%20Linux%20%E2%80%A2%20Raspberry%20Pi-888?style=flat-square" alt="Platforms">
