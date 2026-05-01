@@ -3007,10 +3007,17 @@ if ! have_cmd qrencode; then
   if have_cmd apt-get; then
     $SUDO apt-get install -y qrencode >/dev/null 2>&1 || true
   elif have_cmd dnf; then
-    $SUDO dnf install -y qrencode >/dev/null 2>&1 || true
+    # Rocky / Alma / RHEL ship qrencode in EPEL, not the default repos.
+    # Stock `dnf install qrencode` silently no-ops on those distros and
+    # the QR pairing step that ends every install gets skipped, leaving
+    # users to paste the pair URL by hand. Enable EPEL first if needed.
+    if ! $SUDO dnf list --installed qrencode >/dev/null 2>&1; then
+      $SUDO dnf install -y epel-release >/dev/null 2>&1 || true
+      $SUDO dnf install -y qrencode >/dev/null 2>&1 || true
+    fi
   fi
 fi
-have_cmd qrencode && ok "qrencode ready" || true
+have_cmd qrencode && ok "qrencode ready" || warn "qrencode not installed — pair URL still printed below; copy it into the iOS app instead of scanning"
 
 # carapace-qr command
 $SUDO tee /usr/local/bin/carapace-qr > /dev/null << 'QRCMD'
