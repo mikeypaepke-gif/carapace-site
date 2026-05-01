@@ -819,6 +819,109 @@ PY
   ok "Added ${fb_model} as cross-provider fallback for main agent (backup: ${config}.bak.fallback-${backup_ts})"
 }
 
+# ── Auto-populate /model picker allowlist from user's existing config ──
+# Symptom we're preventing: openclaw's /model picker only shows models
+# present in `agents.defaults.models` (the allowlist). Setup wizard
+# typically writes 1-2 entries — usually whichever single model the
+# user picked during onboard. Result: user opens TUI, types /model,
+# picker is empty or shows only the model they're already on, and the
+# obvious conclusion is "TUI's model switcher is broken."
+#
+# But the user often has more models referenced elsewhere in the same
+# config: per-agent overrides, fallback chains, compaction/heartbeat
+# models, custom provider model definitions. They've been telling
+# OpenClaw "I want to use these models" all along — the allowlist just
+# never caught up.
+#
+# Fix: walk every model reference in openclaw.json and ensure each one
+# appears in `agents.defaults.models`. Strictly additive (preserves
+# aliases and any user customization on existing entries). Strictly
+# user-data-driven (never invents models they don't already have).
+ensure_carapace_model_allowlist() {
+  command -v openclaw >/dev/null 2>&1 || return 0
+  local config="$HOME/.openclaw/openclaw.json"
+  [[ -f "$config" ]] || return 0
+  have_cmd jq || return 0
+
+  # Pull every provider/model reference from anywhere meaningful in the
+  # config. Sources covered:
+  #   - agents.defaults.model.primary / .fallbacks      (default agent)
+  #   - agents.defaults.compaction.model                (compaction model)
+  #   - agents.defaults.heartbeat.model                 (heartbeat model)
+  #   - agents.list[*].model.primary / .fallbacks       (per-agent overrides)
+  #   - models.providers.<id>.models[*].id              (custom provider defs)
+  # Filter to non-empty strings that contain "/" (i.e. provider-prefixed
+  # model refs — bare model ids without provider prefix aren't allowlist-
+  # eligible and would just confuse the picker).
+  local referenced_models
+  referenced_models=$(jq -r '
+    [
+      (.agents.defaults.model.primary // empty),
+      ((.agents.defaults.model.fallbacks // [])[]),
+      (.agents.defaults.compaction.model // empty),
+      (.agents.defaults.heartbeat.model // empty),
+      ((.agents.list // [])[]? | (.model.primary // empty), ((.model.fallbacks // [])[]?)),
+      ((.models.providers // {}) | to_entries[] | . as $p | ($p.value.models // [])[]? | ($p.key + "/" + (.id // empty)))
+    ]
+    | map(select(type == "string" and contains("/") and length > 1))
+    | unique
+    | .[]
+  ' "$config" 2>/dev/null)
+
+  if [[ -z "$referenced_models" ]]; then
+    return 0
+  fi
+
+  local current_count
+  current_count=$(jq -r '(.agents.defaults.models // {}) | keys | length' "$config" 2>/dev/null || echo 0)
+
+  local backup_ts
+  backup_ts=$(date +%s)
+  cp "$config" "${config}.bak.allowlist-${backup_ts}" 2>/dev/null || true
+
+  # Write referenced models to a temp file and have python read it from
+  # there. We can't use `echo "$refs" | python3 - <<'PY'` because the
+  # heredoc replaces stdin, so the echo's output never reaches python.
+  # Tested-the-hard-way bug: that approach silently produces an empty
+  # `referenced` list and reports "no additions" while the user's
+  # allowlist remains unchanged. Temp file is unambiguous.
+  local refs_file
+  refs_file=$(mktemp)
+  printf '%s\n' "$referenced_models" > "$refs_file"
+  local added
+  added=$(/usr/bin/env python3 - "$config" "$refs_file" 2>/dev/null <<'PY' || true
+import json, sys
+config_path, refs_path = sys.argv[1], sys.argv[2]
+with open(refs_path) as f:
+    referenced = [line.strip() for line in f if line.strip()]
+with open(config_path) as f:
+    c = json.load(f)
+defaults = c.setdefault("agents", {}).setdefault("defaults", {})
+allowlist = defaults.setdefault("models", {})
+added = []
+for m in referenced:
+    if m not in allowlist:
+        allowlist[m] = {}  # empty dict — preserves the entry, no alias / no overrides
+        added.append(m)
+if added:
+    with open(config_path, "w") as f:
+        json.dump(c, f, indent=2)
+print("|".join(added))
+PY
+)
+  rm -f "$refs_file"
+
+  local new_count
+  new_count=$(jq -r '(.agents.defaults.models // {}) | keys | length' "$config" 2>/dev/null || echo 0)
+
+  if [[ -n "${added}" ]]; then
+    local diff=$((new_count - current_count))
+    ok "Expanded /model picker from ${current_count} to ${new_count} models (+${diff} from existing config refs; backup: ${config}.bak.allowlist-${backup_ts})"
+  elif [[ "${new_count}" -gt 0 ]]; then
+    ok "/model picker allowlist already covers every referenced model (${new_count} entries)"
+  fi
+}
+
 # ══════════════════════════════════════════════════════════
 # Carapace = a SHELL on top of OpenClaw
 # ══════════════════════════════════════════════════════════
@@ -1039,6 +1142,7 @@ install_self_to_carapace_dir() {
 sweep_carapace_for_all_agents() {
   ensure_carapace_bootstrap_caps || true
   ensure_carapace_main_agent_fallback || true
+  ensure_carapace_model_allowlist || true
   install_self_to_carapace_dir || true
   seed_main_identity_default || true
   while IFS= read -r ws; do
@@ -3605,6 +3709,7 @@ step "Carapace shell setup"
 
 ensure_carapace_bootstrap_caps || true
 ensure_carapace_main_agent_fallback || true
+ensure_carapace_model_allowlist || true
 
 # Detect openclaw workspaces + ask the user where to install. If only
 # main is detected, no prompt fires (single-workspace shortcut). If
@@ -3635,6 +3740,7 @@ else
   # cleanup, session-prompt-cache flip.
   ensure_carapace_bootstrap_caps || true
   ensure_carapace_main_agent_fallback || true
+  ensure_carapace_model_allowlist || true
   install_self_to_carapace_dir || true
   seed_main_identity_default || true
   retire_legacy_per_agent_projects_files || true

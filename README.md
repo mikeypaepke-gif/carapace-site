@@ -130,6 +130,16 @@ The Carapace installer (this repo's `install.sh`) walks through:
     billing/network blip. Backed up to `openclaw.json.bak.fallback-*`
     before the edit; skipped if you've already configured a multi-
     provider setup.
+12. **`/model` picker allowlist** — the openclaw TUI's `/model` command
+    only shows models that appear in `agents.defaults.models`, but the
+    setup wizard typically writes only 1-2 entries (whichever model the
+    user picked at onboard). Carapace walks every model reference
+    already in your `openclaw.json` (default model + fallbacks,
+    compaction model, heartbeat model, per-agent overrides, custom
+    provider model definitions) and adds any missing one to the
+    picker's allowlist. Strictly user-data-driven — never invents a
+    model you don't already have configured. Backed up to
+    `openclaw.json.bak.allowlist-*` before the edit.
 
 The installer is **idempotent** — safe to re-run any time you want to
 refresh the workspace prompts, pull updated helper commands, or pick up
