@@ -272,7 +272,7 @@
           <div class="fix">
             <strong>Fix:</strong>
             <ul>
-              <li>On the gateway machine, check <code>~/.openclaw/openclaw.json</code> — confirm your Anthropic / Gemini / OpenAI key is set and current.</li>
+              <li>On the gateway machine, check <code>~/.openclaw/openclaw.json</code> — confirm your AI provider's API key is set and current.</li>
               <li>Check the provider's dashboard for quota / billing alerts.</li>
               <li>Try a manual <code>curl https://yourmac.your-tailnet.ts.net/health</code> — it'll tell you which provider is failing.</li>
             </ul>
@@ -340,13 +340,13 @@
 
         <div class="issue">
           <div class="symptom">Camera is black, or only shows a preview but no AI response.</div>
-          <div class="cause"><strong>Most likely:</strong> Camera permission denied, or the Gemini Live key isn't configured on your gateway.</div>
+          <div class="cause"><strong>Most likely:</strong> Camera permission denied, or your gateway's vision-mode AI key isn't configured.</div>
           <div class="fix">
             <strong>Fix:</strong>
             <ul>
               <li>iOS Settings → Carapace → Camera → <strong>ON</strong>.</li>
-              <li>On the gateway, set <code>GEMINI_API_KEY</code> in <code>~/.openclaw/openclaw.json</code>. Get a free key at <a href="https://aistudio.google.com">aistudio.google.com</a>.</li>
-              <li>Optionally paste the key into iPhone Settings → Advanced → Gemini API Key as a fallback.</li>
+              <li>On the gateway, configure your vision-mode AI provider key in <code>~/.openclaw/openclaw.json</code> (your OpenClaw onboard wizard walks you through provider + key selection).</li>
+              <li>Optionally paste a vision-mode key into iPhone Settings → Advanced → Vision API Key as a fallback.</li>
             </ul>
           </div>
         </div>
@@ -399,7 +399,7 @@
             <ol>
               <li>Add a swapfile:<span class="cmd">sudo fallocate -l 2G /swapfile &amp;&amp; sudo chmod 600 /swapfile &amp;&amp; sudo mkswap /swapfile &amp;&amp; sudo swapon /swapfile</span></li>
               <li>Re-run the install script. It auto-tunes Node's heap based on available RAM.</li>
-              <li>If you're on a $5/month VPS with 1GB RAM, consider bumping to the $10 tier — 1GB isn't enough for comfortable Claude / Gemini use.</li>
+              <li>If you're on a $5/month VPS with 1GB RAM, consider bumping to the $10 tier — 1GB isn't enough for comfortable AI inference proxying.</li>
             </ol>
           </div>
         </div>

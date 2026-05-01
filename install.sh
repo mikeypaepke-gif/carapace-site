@@ -724,9 +724,18 @@ except Exception: print('False')" 2>/dev/null || echo False)
 #   npm install -g openclaw && openclaw onboard
 # and has at least one provider with an auth key configured.
 
-# Returns 0 if any provider has a real key in auth-profiles.json.
+# Returns 0 if any provider has real credentials in auth-profiles.json.
 # We use this to verify the precondition (openclaw is configured)
 # before doing anything else.
+#
+# Three credential shapes openclaw writes, all valid:
+#   API key providers (xai, google, vllm, anthropic-api):  prof['key']
+#   Anthropic Claude Max OAuth:                             prof['token']
+#   OpenAI Codex OAuth (browser login):                     prof['access']
+# Earlier versions of this check only matched 'key', which made the
+# install bail with "OpenClaw not configured" when the user had
+# completed `openclaw onboard` via Codex's OAuth flow (the most
+# common path on fresh VPS installs — no API key to paste).
 carapace_provider_already_configured() {
   local auth_file="$HOME/.openclaw/agents/main/agent/auth-profiles.json"
   [[ -f "$auth_file" ]] || return 1
@@ -736,9 +745,10 @@ import json
 try:
   d = json.load(open('$auth_file'))
   for prof in d.get('profiles', {}).values():
-    k = prof.get('key', '')
-    if k and len(k) > 10:
-      print('1'); raise SystemExit
+    for field in ('key', 'token', 'access'):
+      v = prof.get(field, '')
+      if v and len(v) > 10:
+        print('1'); raise SystemExit
 except Exception: pass
 print('0')" 2>/dev/null || echo "0")
   [[ "$has_key" == "1" ]]
@@ -1409,7 +1419,7 @@ export DEBIAN_FRONTEND=noninteractive
 echo ""
 echo -e "${TEAL}${BOLD}  ╔══════════════════════════════════════════════════╗${RESET}"
 echo -e "${TEAL}${BOLD}  ║           CARAPACE — Headless Setup  🐚         ║${RESET}"
-echo -e "${TEAL}${BOLD}  ║        Your AI, your server, always free.       ║${RESET}"
+echo -e "${TEAL}${BOLD}  ║      Your OpenClaw, your server, always free.   ║${RESET}"
 echo -e "${TEAL}${BOLD}  ╚══════════════════════════════════════════════════╝${RESET}"
 echo ""
 echo -e "  ${DIM}By continuing, you agree to the Terms of Use at${RESET}"

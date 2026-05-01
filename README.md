@@ -5,7 +5,7 @@
 <h1 align="center">CARAPACE</h1>
 
 <p align="center">
-  <strong>Your AI. Your machine. Your rules.</strong><br>
+  <strong>Your OpenClaw. Your machine. Your rules.</strong><br>
   <sub>We're just helping you feed it the data it's craving.</sub>
 </p>
 

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Support — CARAPACE</title>
+  <meta name="description" content="Get help with CARAPACE. Contact options, quick fixes, and the full troubleshooting guide.">
+  <meta property="og:title" content="Support — CARAPACE">
+  <meta property="og:description" content="Contact, quick fixes, and full troubleshooting for the CARAPACE iPhone client.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://carapace.info/support/">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="icon" href="/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'] },
+          colors: { teal: { 400: '#00DCC8', 500: '#00C4B4', 600: '#00A89A' } },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { background: #080A12; }
+    .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06); }
+
+    .legal h2 {
+      font-size: 1.125rem;
+      font-weight: 700;
+      color: rgba(255,255,255,0.9);
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.01em;
+    }
+    .legal p, .legal li {
+      color: rgba(255,255,255,0.55);
+      line-height: 1.7;
+      font-size: 0.9rem;
+    }
+    .legal p { margin-bottom: 0.9rem; }
+    .legal ul { margin: 0.5rem 0 1rem 1.4rem; list-style-type: disc; }
+    .legal li { margin-bottom: 0.45rem; }
+    .legal .callout {
+      display: block;
+      background: rgba(0,220,200,0.04);
+      border-left: 2px solid rgba(0,220,200,0.4);
+      padding: 0.9rem 1.1rem;
+      margin: 0.8rem 0 1.2rem;
+      font-size: 0.88rem;
+      line-height: 1.65;
+      color: rgba(255,255,255,0.7);
+    }
+    .legal a { color: #00DCC8; }
+    .legal a:hover { text-decoration: underline; }
+    .legal strong { color: rgba(255,255,255,0.8); }
+
+    .contact-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 1.1rem 1.3rem;
+      margin-bottom: 0.7rem;
+    }
+    .contact-card .label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #00DCC8;
+      margin-bottom: 0.3rem;
+    }
+    .contact-card .value {
+      font-size: 1rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.92);
+    }
+    .contact-card .value a { color: rgba(255,255,255,0.92); }
+    .contact-card .value a:hover { color: #00DCC8; }
+    .contact-card .hint {
+      font-size: 0.78rem;
+      color: rgba(255,255,255,0.45);
+      margin-top: 0.3rem;
+      line-height: 1.5;
+    }
+
+    .deep-link {
+      display: block;
+      background: linear-gradient(135deg, rgba(0,220,200,0.08) 0%, rgba(0,220,200,0.02) 100%);
+      border: 1px solid rgba(0,220,200,0.25);
+      border-radius: 14px;
+      padding: 1.2rem 1.4rem;
+      margin: 1.2rem 0;
+      text-decoration: none;
+      transition: all 0.18s;
+    }
+    .deep-link:hover {
+      border-color: rgba(0,220,200,0.5);
+      background: linear-gradient(135deg, rgba(0,220,200,0.12) 0%, rgba(0,220,200,0.04) 100%);
+    }
+    .deep-link .heading {
+      font-size: 1rem;
+      font-weight: 700;
+      color: rgba(255,255,255,0.95);
+      margin-bottom: 0.25rem;
+    }
+    .deep-link .description {
+      font-size: 0.85rem;
+      color: rgba(255,255,255,0.55);
+      line-height: 1.55;
+    }
+    .deep-link .arrow {
+      color: #00DCC8;
+      font-weight: 700;
+      margin-left: 4px;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #080A12; }
+    ::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
+  </style>
+</head>
+<body class="text-white font-sans antialiased">
+
+  <nav class="fixed top-0 w-full z-50 backdrop-blur-xl bg-[#080A12]/80 border-b border-white/[0.05]">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-8 h-8 rounded-lg">
+        <span class="font-bold tracking-tight">CARAPACE</span>
+      </a>
+      <div class="hidden sm:flex items-center gap-8 text-sm">
+        <a href="/install/mac/" class="text-white/50 hover:text-white transition-colors">Mac</a>
+        <a href="/install/linux/" class="text-white/50 hover:text-white transition-colors">Linux</a>
+        <a href="/install/ios/" class="text-white/50 hover:text-white transition-colors">iOS</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="text-white/50 hover:text-white transition-colors">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <section class="pt-32 pb-8 md:pt-40">
+    <div class="max-w-2xl mx-auto px-6">
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-teal-400 mb-4">Help</p>
+      <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight mb-3">Support</h1>
+      <p class="text-sm text-white/40">Stuck on something? Get a human, or jump into the full troubleshooting guide.</p>
+    </div>
+  </section>
+
+  <section class="pb-20">
+    <div class="max-w-2xl mx-auto px-6">
+      <div class="glass rounded-2xl p-8 md:p-10 legal">
+
+        <div class="callout">
+          <strong>Reminder.</strong> CARAPACE is the iPhone client for your own self-hosted OpenClaw bridge. We don't operate a cloud, so most issues you'll hit are between your phone, your bridge, and your network. The contact paths below all go to a real human.
+        </div>
+
+        <h2>Get a human</h2>
+
+        <div class="contact-card">
+          <div class="label">Email</div>
+          <div class="value"><a href="mailto:feedback@carapace.info">feedback@carapace.info</a></div>
+          <div class="hint">Bug reports, questions, feedback. Response within 48 hours on weekdays. Include your iPhone model + iOS version + bridge platform (Mac / Linux / VPS) for fastest help.</div>
+        </div>
+
+        <div class="contact-card">
+          <div class="label">GitHub Issues — iOS app</div>
+          <div class="value"><a href="https://github.com/mikeypaepke-gif/carapace-ios/issues">github.com/mikeypaepke-gif/carapace-ios/issues</a></div>
+          <div class="hint">Public bug tracker for the iPhone app. Search existing issues first; open a new one if your problem isn't there.</div>
+        </div>
+
+        <div class="contact-card">
+          <div class="label">GitHub Issues — Mac, Linux installer, marketing site</div>
+          <div class="value"><a href="https://github.com/mikeypaepke-gif/carapace-site/issues">github.com/mikeypaepke-gif/carapace-site/issues</a></div>
+          <div class="hint">For bridge install scripts, the macOS Bridge app, or anything on carapace.info.</div>
+        </div>
+
+        <h2>Self-help</h2>
+
+        <a class="deep-link" href="/troubleshooting/">
+          <div class="heading">Full troubleshooting guide <span class="arrow">→</span></div>
+          <div class="description">Step-by-step fixes organized by area: Tailscale &amp; HTTPS, pairing, iPhone app, voice &amp; vision, Mac app, Linux/Pi, in-app purchases. Start here if you're trying to debug a specific symptom.</div>
+        </a>
+
+        <a class="deep-link" href="/install/ios/">
+          <div class="heading">iOS install + pairing walk-through <span class="arrow">→</span></div>
+          <div class="description">If you haven't paired yet or want to start fresh.</div>
+        </a>
+
+        <a class="deep-link" href="/install/mac/">
+          <div class="heading">macOS Bridge install guide <span class="arrow">→</span></div>
+          <div class="description">For setting up the bridge on your Mac.</div>
+        </a>
+
+        <a class="deep-link" href="/install/linux/">
+          <div class="heading">Linux / VPS install guide <span class="arrow">→</span></div>
+          <div class="description">For setting up the bridge on a Linux box, Raspberry Pi, or cloud VM.</div>
+        </a>
+
+        <h2>Refunds</h2>
+        <p>In-app purchases are processed by Apple — we don't have access to the transaction and can't refund directly. Use Apple's standard process: Settings → Apple ID → Subscriptions → Report a Problem, or visit <a href="https://reportaproblem.apple.com">reportaproblem.apple.com</a>. Family Sharing propagation is handled by Apple too.</p>
+
+        <h2>Privacy questions</h2>
+        <p>See the <a href="/privacy/">Privacy Policy</a> for what data is sent where (short version: nothing touches our servers). Privacy-specific concerns or data-deletion requests: email <a href="mailto:feedback@carapace.info">feedback@carapace.info</a>.</p>
+
+      </div>
+
+      <p class="mt-6 text-center text-xs text-white/25">
+        <a href="/" class="hover:text-white/60 transition-colors">← Back to carapace.info</a>
+        <span class="mx-2">·</span>
+        <a href="/privacy/" class="hover:text-white/60 transition-colors">Privacy Policy</a>
+        <span class="mx-2">·</span>
+        <a href="/terms/" class="hover:text-white/60 transition-colors">Terms of Use</a>
+      </p>
+    </div>
+  </section>
+
+  <footer class="border-t border-white/[0.05] py-10">
+    <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-white/30">
+      <div class="flex items-center gap-3">
+        <img src="/assets/app-icon.png" alt="" class="w-6 h-6 rounded-md opacity-60">
+        <span>CARAPACE · <a href="/" class="hover:text-white/60 transition-colors">carapace.info</a></span>
+      </div>
+      <div class="flex items-center gap-5">
+        <a href="/install/mac/" class="hover:text-white/60 transition-colors">Mac</a>
+        <a href="/install/linux/" class="hover:text-white/60 transition-colors">Linux</a>
+        <a href="/install/ios/" class="hover:text-white/60 transition-colors">iOS</a>
+        <a href="/terms/" class="hover:text-white/60 transition-colors">Terms</a>
+        <a href="/privacy/" class="hover:text-white/60 transition-colors">Privacy</a>
+        <a href="/support/" class="hover:text-white/60 transition-colors">Support</a>
+        <a href="https://github.com/mikeypaepke-gif/carapace-site" class="hover:text-white/60 transition-colors">GitHub</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

@@ -6,3 +6,6 @@ node_modules/
 
 # DMGs are served via Cloudflare Pages uploads; don't bloat git with binaries
 Carapace-*.dmg
+
+# Claude Code session metadata (per-machine, not source)
+.claude/
