@@ -3528,6 +3528,39 @@ export PATH="$HOME/.npm-global/bin:$PATH"
 # instead, run `openclaw tui` (no --local). We default to chat because
 # it works without requiring a gateway token in the env.
 
+# ──────────────────────────────────────────────────────────────
+# WORKAROUND for openclaw busy-loop bug #75137 / fix in PR #75503
+# ──────────────────────────────────────────────────────────────
+#
+# openclaw 2026.4.29's TUI pegs at 100% CPU and renders blank (input
+# starvation) because pi-model-discovery.ts calls normalizeDiscoveredPiModel
+# on every model, which iterates ALL bundled plugin manifests. ~50 models
+# × 3 hooks × ~50 plugins = ~7,500 file open/stat/close ops per
+# getAvailable() call, and getAvailable runs synchronously on TUI
+# startup → main thread starved → render thread can't draw.
+#
+# Setting OPENCLAW_DISABLE_BUNDLED_PLUGINS=1 disables the bundled
+# provider plugin scan, dropping the work to ~0 and letting the TUI
+# render. The cost: only providers explicitly configured in
+# auth-profiles.json are available (i.e. the ones you actually use).
+# Pre-bundled "potential" providers (cerebras, chutes, deepinfra,
+# qianfan, byteplus, etc.) won't appear in /model picker.
+#
+# Power users who actually need to scan/switch among bundled providers
+# can opt back in with `carapace-tui --all-plugins`. We expect to delete
+# this entire block once openclaw 2026.4.30+ ships PR #75503.
+#
+# Upstream tracking:
+#   bug:    https://github.com/openclaw/openclaw/issues/75137
+#   fix PR: https://github.com/openclaw/openclaw/pull/75503
+if [ "${1:-}" != "--all-plugins" ]; then
+  export OPENCLAW_DISABLE_BUNDLED_PLUGINS=1
+else
+  shift  # consume the --all-plugins flag, leave any further args intact
+  echo "carapace-tui: bundled plugins ENABLED — TUI may be unusably slow on" >&2
+  echo "  openclaw <= 2026.4.29. See https://github.com/openclaw/openclaw/issues/75137" >&2
+fi
+
 case "${1:-}" in
   --kill)
     if command -v tmux >/dev/null 2>&1 && tmux has-session -t carapace 2>/dev/null; then
@@ -3552,6 +3585,8 @@ case "${1:-}" in
       fi
     done
     echo "openclaw-tui orphans (deleted ptys): $orphans"
+    echo "bundled-plugin scan: ${OPENCLAW_DISABLE_BUNDLED_PLUGINS:+DISABLED (workaround for openclaw#75137)}"
+    [ -z "${OPENCLAW_DISABLE_BUNDLED_PLUGINS:-}" ] && echo "bundled-plugin scan: enabled (TUI may be slow on openclaw <= 2026.4.29)"
     exit 0
     ;;
   --gateway|--tui)
