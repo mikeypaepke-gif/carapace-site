@@ -1265,6 +1265,8 @@ http.createServer((req, res) => {
   req.on("end", async () => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
     const rawPath = req.url || "/";
