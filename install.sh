@@ -3529,6 +3529,53 @@ export PATH="$HOME/.npm-global/bin:$PATH"
 # it works without requiring a gateway token in the env.
 
 case "${1:-}" in
+  --force-broken-tui)
+    # Opt-in to launching anyway despite the upstream bug. Skip the
+    # warning banner. Useful for power users debugging openclaw itself
+    # or testing whether the upstream fix has landed.
+    shift
+    ;;
+  --kill|--status|--gateway|--tui)
+    # Management subcommands — skip the warning banner so they always work.
+    :
+    ;;
+  *)
+    # ── UPSTREAM BUG NOTICE — openclaw#75137 ──
+    #
+    # carapace-tui's underlying openclaw-tui process pegs at 100% CPU
+    # and renders blank on openclaw 2026.4.29 due to a busy-loop in
+    # pi-model-discovery.ts (~7,500 manifest open/stat/close cycles
+    # per registry.getAvailable() call, all on the main thread).
+    #
+    # Upstream PR #75503 has the fix; until it merges and ships in
+    # 2026.4.30+, the iOS app is the supported chat surface on Linux.
+    # That matches how Mac has always worked: Carapace.app + iOS app,
+    # never openclaw-tui.
+    #
+    # We deliberately don't auto-launch the broken TUI. Bypass with:
+    #   carapace-tui --force-broken-tui
+    cat <<BANNER >&2
+
+⚠  carapace-tui is currently affected by upstream openclaw bug #75137.
+   Symptom: TUI pegs at 100% CPU, renders blank, doesn't accept input.
+
+   For chat, please use the CARAPACE iOS app:
+       carapace-qr           # re-display the QR pair URL
+       (open CARAPACE on iPhone → Connect Server → scan)
+
+   Track the upstream fix:
+       https://github.com/openclaw/openclaw/issues/75137
+       https://github.com/openclaw/openclaw/pull/75503
+
+   To launch the TUI anyway (will spin at 100% CPU):
+       carapace-tui --force-broken-tui
+
+BANNER
+    exit 1
+    ;;
+esac
+
+case "${1:-}" in
   --kill)
     if command -v tmux >/dev/null 2>&1 && tmux has-session -t carapace 2>/dev/null; then
       tmux kill-session -t carapace
@@ -3898,8 +3945,19 @@ echo ""
 echo -e "  ${BOLD}First message:${RESET} ${DIM}30-90s cold-start (openclaw warms the agent runtime).${RESET}"
 echo -e "  ${DIM}                Subsequent messages are sub-second.${RESET}"
 echo ""
-echo -e "  ${BOLD}Helpers:${RESET} ${BOLD}carapace-qr${RESET} (re-show QR) · ${BOLD}openclaw tui${RESET} (terminal chat) · ${BOLD}carapace-onboard${RESET} (re-run AI setup)"
+echo -e "  ${BOLD}Helpers:${RESET} ${BOLD}carapace-qr${RESET} (re-show QR) · ${BOLD}carapace-onboard${RESET} (re-run AI setup)"
 echo -e "  ${DIM}Install log: ${LOGFILE}${RESET}"
+echo ""
+
+# Terminal-chat note. The TUI is currently affected by openclaw#75137
+# (busy-loop / 100% CPU / blank pane) until upstream PR #75503 ships.
+# We deliberately don't promote `carapace-tui` here — the iOS app is
+# the primary chat surface on Linux now, same as on Mac. The TUI
+# remains available as an SSH-only debug escape hatch but with a clear
+# banner explaining the upstream issue.
+echo -e "  ${DIM}Terminal chat (carapace-tui) is currently affected by upstream${RESET}"
+echo -e "  ${DIM}openclaw bug #75137 — chat from your iPhone instead. Tracker:${RESET}"
+echo -e "  ${DIM}  https://github.com/openclaw/openclaw/issues/75137${RESET}"
 echo ""
 
 # ── Codex OAuth fallback ──
@@ -3931,9 +3989,13 @@ fi
 # but the user's CURRENT shell predates it, so `openclaw tui` from
 # this shell may not even find the binary. Reboot or `source
 # ~/.bashrc` fixes both at once.
-echo -e "  ${TEAL}${BOLD}Last step — make ${BOLD}openclaw${RESET}${TEAL}${BOLD} available in this shell:${RESET}"
+echo -e "  ${TEAL}${BOLD}You're done. Chat from your iPhone — that's it.${RESET}"
+echo -e "      ${DIM}Open CARAPACE → Connect Server → scan the QR above${RESET}"
+echo ""
+echo -e "  ${DIM}If you need shell access for ops/config:${RESET}"
 echo -e "      ${BOLD}source ~/.bashrc${RESET}      ${DIM}# pick up new PATH from openclaw install${RESET}"
-echo -e "      ${BOLD}openclaw tui${RESET}          ${DIM}# optional — chat from terminal${RESET}"
+echo -e "      ${BOLD}openclaw doctor${RESET}       ${DIM}# health check${RESET}"
+echo -e "      ${BOLD}carapace-qr${RESET}           ${DIM}# re-show pair URL${RESET}"
 echo ""
 echo -e "  ${DIM}Or just open a new SSH session — same effect.${RESET}"
 echo -e "  ${DIM}For mobile use, scan the QR above with the iOS Carapace app.${RESET}"

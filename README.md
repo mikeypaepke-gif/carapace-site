@@ -145,34 +145,64 @@ The installer is **idempotent** — safe to re-run any time you want to
 refresh the workspace prompts, pull updated helper commands, or pick up
 a newer Carapace release. Re-runs respect every safeguard above.
 
-### Running the TUI on a remote VPS
+### Chat surface: iOS app, not the terminal
 
-If you're SSH'd into a Linux VPS where you ran the Carapace installer,
-**always launch the TUI via `carapace-tui`, not bare `openclaw`**:
+**On Linux — same model as Mac — the CARAPACE iOS app is the chat
+surface.** The installer prints a QR; you scan it with the iOS app;
+chat happens on your phone.
 
 ```bash
 ssh root@your-vps
-carapace-tui              # attach (or create) a persistent tmux session
+carapace-qr               # re-display the pair URL / QR if you closed it
 ```
 
-`carapace-tui` wraps the openclaw TUI inside a tmux session so the TUI
-survives SSH disconnects. Without this, an SSH drop (network blip,
-laptop sleep, terminal Cmd+W) leaves `openclaw-tui` running with a
-deleted controlling pty — it keeps polling the gateway forever, and
-multiples accumulate over weeks of normal usage until the gateway
-event loop saturates and every new TUI session "freezes."
+Open CARAPACE on iPhone → Connect Server → scan. Done.
 
-| Command | What it does |
-|---|---|
-| `carapace-tui` | Attach to (or create) the persistent `carapace` tmux session |
-| `carapace-tui --status` | Show whether the session is active + count any orphan TUI processes |
-| `carapace-tui --kill` | Kill the tmux session (clean restart) |
-| `tmux detach` *(Ctrl-b d)* | Detach without killing — TUI keeps running, reattach later |
+#### Why not the terminal TUI?
 
-A `*/5 * * * * /usr/local/bin/carapace-reap-orphans` cron is also
-installed as a safety net for orphans that slip through (manual
-`openclaw` invocations, OOM kills, tmux server crashes). Reaped
-events are logged to syslog with tag `carapace-reap-orphans`.
+`openclaw-tui` (and `openclaw chat`) on **openclaw 2026.4.29** is
+affected by upstream bug
+[openclaw#75137](https://github.com/openclaw/openclaw/issues/75137):
+`pi-model-discovery.ts` runs `normalizeDiscoveredPiModel` on every
+model on every `registry.getAvailable()` call, which iterates ALL
+plugin manifests via three plugin-resolution hooks — ~7,500 file
+open/stat/close cycles per call, synchronously on the main thread.
+Result: 100% CPU, blank pane, input starvation.
+
+The fix is in upstream PR
+[openclaw#75503](https://github.com/openclaw/openclaw/pull/75503).
+Once it ships in 2026.4.30+, this section will be revised.
+
+In the meantime, `carapace-tui` prints a banner explaining the issue
+and refuses to launch. Override with `carapace-tui --force-broken-tui`
+if you want to try anyway (it will spin at 100% CPU). Management
+subcommands (`--status`, `--kill`, `--gateway`, `--tui`) work as
+before.
+
+#### Why this is fine for production
+
+The Mac app has always worked this way — Carapace.app provides a menu
+bar icon, the iOS app is the chat surface, `openclaw-tui` is never on
+the critical path. Linux now matches: the installer sets up Tailscale,
+the gateway, the status server, and prints a QR. Your phone is the
+chat client. SSH is for ops (config, gateway restarts, logs).
+
+For SSH-only operational work that doesn't need chat, the unaffected
+commands all work:
+
+```bash
+openclaw doctor              # health check
+openclaw config get|set|...  # configuration
+openclaw gateway status      # gateway state
+openclaw cron list           # scheduled jobs
+carapace-qr                  # re-display pair URL
+```
+
+A `*/5 * * * * /usr/local/bin/carapace-reap-orphans` cron is installed
+as a safety net for any orphan `openclaw-tui` processes that slip
+through (e.g., users who run `--force-broken-tui` and lose their SSH
+session). Reaped events are logged to syslog with tag
+`carapace-reap-orphans`.
 
 ### Diagnostics — `/diag` endpoint
 
