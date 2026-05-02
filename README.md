@@ -5,7 +5,7 @@
 <h1 align="center">CARAPACE</h1>
 
 <p align="center">
-  <strong>Your OpenClaw. Your machine. Your rules.</strong><br>
+  <strong>Your OpenClaw has eyes.</strong><br>
   <sub>Get your mom on OpenClaw in ten minutes.</sub>
 </p>
 

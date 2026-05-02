@@ -1631,7 +1631,7 @@ export DEBIAN_FRONTEND=noninteractive
 echo ""
 echo -e "${TEAL}${BOLD}  ╔══════════════════════════════════════════════════╗${RESET}"
 echo -e "${TEAL}${BOLD}  ║           CARAPACE — Headless Setup  🐚         ║${RESET}"
-echo -e "${TEAL}${BOLD}  ║      Your OpenClaw, your server, always free.   ║${RESET}"
+echo -e "${TEAL}${BOLD}  ║             Your OpenClaw has eyes.              ║${RESET}"
 echo -e "${TEAL}${BOLD}  ╚══════════════════════════════════════════════════╝${RESET}"
 echo ""
 echo -e "  ${DIM}By continuing, you agree to the Terms of Use at${RESET}"
