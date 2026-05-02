@@ -3650,6 +3650,72 @@ $SUDO chmod +x /usr/local/bin/carapace-tui
 # carapace-tui as the user-facing command name.
 ok "carapace-tui installed (tmux-wrapped openclaw — survives SSH disconnects)"
 
+# ── Shell function: route TUI-launching openclaw invocations through carapace-tui ──
+#
+# Why: muscle memory has users typing one of:
+#   openclaw                  (defaults to crestodian rescue helper — confusing)
+#   openclaw chat             (alias for tui --local — hits openclaw#75137 freeze)
+#   openclaw tui              (gateway TUI — hits openclaw#75137 freeze)
+#   openclaw terminal         (alias for chat — hits openclaw#75137 freeze)
+#
+# All four go straight to bugs (Crestodian or the freeze). Routing them
+# through carapace-tui lets users see the upstream-bug banner with the
+# iOS-app pointer, instead of either:
+#   (a) sitting in front of a 100% CPU blank pane wondering what's wrong
+#   (b) hitting a confusing rescue UI they didn't ask for
+#
+# A shell function (vs alias) is selective: only the TUI-launching
+# subcommands get rerouted. Everything else (config, gateway, cron,
+# doctor, agents, etc.) passes through to the real openclaw binary
+# unchanged. Cron jobs and scripts are unaffected — bash functions only
+# fire in interactive shells.
+#
+# Sentinel-bounded so re-runs are idempotent. Opt-out via
+# CARAPACE_DISABLE_OPENCLAW_WRAPPER=1 for users who explicitly want bare
+# openclaw behavior (e.g. testing whether the upstream fix has landed).
+#
+# Once openclaw 2026.4.30+ ships PR #75503, delete the BEGIN/END
+# sentinel block from the user's rc files (or update install.sh to
+# install a no-op stub).
+
+_install_openclaw_shell_function() {
+  local rc="$1"
+  [[ -f "$rc" || ! -e "$rc" ]] || return 0
+  if [[ -f "$rc" ]] && grep -q "BEGIN CARAPACE openclaw shell wrapper" "$rc" 2>/dev/null; then
+    return 0  # already installed, idempotent
+  fi
+  cat >> "$rc" <<'OPENCLAW_FN_BLOCK'
+
+# ── BEGIN CARAPACE openclaw shell wrapper ─────────────────────────────
+# Routes TUI-launching openclaw invocations through carapace-tui (which
+# shows the upstream-bug banner for openclaw#75137 — TUI 100% CPU /
+# blank pane). Other subcommands pass through to the real openclaw
+# binary. Remove this block once openclaw ships PR #75503, or set
+# CARAPACE_DISABLE_OPENCLAW_WRAPPER=1 in your shell to opt out.
+openclaw() {
+  if [ -n "${CARAPACE_DISABLE_OPENCLAW_WRAPPER:-}" ]; then
+    command openclaw "$@"
+    return $?
+  fi
+  case "${1:-}" in
+    "" | chat | tui | terminal)
+      command carapace-tui
+      ;;
+    *)
+      command openclaw "$@"
+      ;;
+  esac
+}
+# ── END CARAPACE openclaw shell wrapper ───────────────────────────────
+OPENCLAW_FN_BLOCK
+  return 0
+}
+
+[[ ! -f "$HOME/.bashrc" ]] && touch "$HOME/.bashrc"
+_install_openclaw_shell_function "$HOME/.bashrc"
+[[ -f "$HOME/.zshrc" ]] && _install_openclaw_shell_function "$HOME/.zshrc"
+ok "Shell function installed: typing 'openclaw' / 'openclaw chat' / 'openclaw tui' / 'openclaw terminal' interactively now routes through carapace-tui (which shows openclaw#75137 banner). Open a new shell or 'source ~/.bashrc' to activate."
+
 # ── carapace-reap-orphans reaper ─────────────────────────
 # Catches orphan openclaw-tui processes that the carapace-tui wrapper
 # can't prevent: manual `openclaw` invocations, tmux server crashes,
