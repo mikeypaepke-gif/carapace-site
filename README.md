@@ -101,8 +101,7 @@ The Carapace installer (this repo's `install.sh`) walks through:
    at `~/.carapace/`, registers as systemd service, exposes `/agents`,
    `/cron`, `/sessions`, `/projects`, `/history`, `/chat`, etc.
 6. **Helper commands** — installs `carapace-qr`, `carapace-onboard`,
-   `carapace-prune`, `carapace-tui`, and `carapace-reap-orphans` to
-   `/usr/local/bin/`.
+   and `carapace-prune` to `/usr/local/bin/`.
 7. **Health check** — port-bind probe (NOT `/health` curl, which is
    unreliable during the openclaw acpx runtime cold-start window).
 8. **Carapace shell setup** — bumps `agents.defaults.timeoutSeconds`
@@ -158,34 +157,13 @@ carapace-qr               # re-display the pair URL / QR if you closed it
 
 Open CARAPACE on iPhone → Connect Server → scan. Done.
 
-#### Why not the terminal TUI?
+#### Why iOS-first
 
-`openclaw-tui` (and `openclaw chat`) on **openclaw 2026.4.29** is
-affected by upstream bug
-[openclaw#75137](https://github.com/openclaw/openclaw/issues/75137):
-`pi-model-discovery.ts` runs `normalizeDiscoveredPiModel` on every
-model on every `registry.getAvailable()` call, which iterates ALL
-plugin manifests via three plugin-resolution hooks — ~7,500 file
-open/stat/close cycles per call, synchronously on the main thread.
-Result: 100% CPU, blank pane, input starvation.
-
-The fix is in upstream PR
-[openclaw#75503](https://github.com/openclaw/openclaw/pull/75503).
-Once it ships in 2026.4.30+, this section will be revised.
-
-In the meantime, `carapace-tui` prints a banner explaining the issue
-and refuses to launch. Override with `carapace-tui --force-broken-tui`
-if you want to try anyway (it will spin at 100% CPU). Management
-subcommands (`--status`, `--kill`, `--gateway`, `--tui`) work as
-before.
-
-#### Why this is fine for production
-
-The Mac app has always worked this way — Carapace.app provides a menu
-bar icon, the iOS app is the chat surface, `openclaw-tui` is never on
-the critical path. Linux now matches: the installer sets up Tailscale,
-the gateway, the status server, and prints a QR. Your phone is the
-chat client. SSH is for ops (config, gateway restarts, logs).
+Carapace.app on Mac has always worked this way — menu bar icon for
+ops, iPhone for chat. Linux mirrors it: the installer sets up
+Tailscale, the gateway, the status server, and prints a QR. Your
+phone is the chat client. SSH is for ops (config, gateway restarts,
+logs).
 
 For SSH-only operational work that doesn't need chat, the unaffected
 commands all work:
