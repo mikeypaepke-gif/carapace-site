@@ -3638,6 +3638,80 @@ $SUDO chmod +x /usr/local/bin/carapace-tui
 # carapace-tui as the user-facing command name.
 ok "carapace-tui installed (tmux-wrapped openclaw — survives SSH disconnects)"
 
+# ── Shell function: hijack interactive `openclaw` to route through carapace-tui ──
+#
+# Why: muscle memory makes users type `openclaw` (which in 2026.4.29
+# launches Crestodian rescue helper, not the chat TUI) or `openclaw
+# chat` (which hits the freeze bug #75137 because it doesn't set
+# OPENCLAW_DISABLE_BUNDLED_PLUGINS=1). The carapace-tui wrapper does
+# both right.
+#
+# A shell function is safer than an alias because we can be selective
+# about WHICH invocations get rerouted:
+#   - `openclaw`               → routes to carapace-tui (workaround)
+#   - `openclaw chat`          → routes to carapace-tui (workaround)
+#   - `openclaw config X Y`    → passes through to real openclaw binary
+#   - `openclaw gateway X`     → passes through
+#   - `openclaw cron list`     → passes through
+#   - `openclaw --version`     → passes through
+#   - anything in a script     → not affected (functions only fire in
+#                                 interactive shells when sourced)
+#
+# Cron jobs, systemd units, and other scripts that call `openclaw`
+# directly via PATH are NOT affected — they execute the binary, not
+# the function.
+#
+# Sentinel-bounded so we can update or remove this on re-runs and
+# when openclaw 2026.4.30 ships the upstream fix (#75503).
+
+_install_openclaw_shell_function() {
+  local rc="$1"
+  [[ -f "$rc" || ! -e "$rc" ]] || return 0  # skip if exists but is a dir/symlink
+
+  # If our sentinel is already there, don't double-add.
+  if [[ -f "$rc" ]] && grep -q "BEGIN CARAPACE openclaw shell wrapper" "$rc" 2>/dev/null; then
+    return 0
+  fi
+
+  # Append our block. Touch the file if it doesn't exist so subsequent
+  # interactive shells will source it (bash sources ~/.bashrc on
+  # interactive non-login; zsh sources ~/.zshrc unconditionally for
+  # interactive shells).
+  cat >> "$rc" <<'OPENCLAW_FN_BLOCK'
+
+# ── BEGIN CARAPACE openclaw shell wrapper ─────────────────────────────
+# Routes interactive `openclaw` and `openclaw chat` to carapace-tui
+# (which sets OPENCLAW_DISABLE_BUNDLED_PLUGINS=1 to work around
+# openclaw bug #75137 — TUI 100% CPU / blank pane). All other
+# subcommands pass through to the real openclaw binary.
+# Remove this block once openclaw ships PR #75503 (or set
+# CARAPACE_DISABLE_OPENCLAW_WRAPPER=1 in your shell to opt out).
+openclaw() {
+  if [ -n "${CARAPACE_DISABLE_OPENCLAW_WRAPPER:-}" ]; then
+    command openclaw "$@"
+    return $?
+  fi
+  case "${1:-}" in
+    "" | chat)
+      command carapace-tui
+      ;;
+    *)
+      command openclaw "$@"
+      ;;
+  esac
+}
+# ── END CARAPACE openclaw shell wrapper ───────────────────────────────
+OPENCLAW_FN_BLOCK
+  return 0
+}
+
+# Inject into bash + zsh rc files. Pick whichever exist (or create
+# ~/.bashrc since bash is universal on the Linuxes this script targets).
+[[ ! -f "$HOME/.bashrc" ]] && touch "$HOME/.bashrc"
+_install_openclaw_shell_function "$HOME/.bashrc"
+[[ -f "$HOME/.zshrc" ]] && _install_openclaw_shell_function "$HOME/.zshrc"
+ok "Shell function installed: typing 'openclaw' (or 'openclaw chat') interactively now routes through carapace-tui — open a new shell or 'source ~/.bashrc' to activate"
+
 # ── carapace-reap-orphans reaper ─────────────────────────
 # Catches orphan openclaw-tui processes that the carapace-tui wrapper
 # can't prevent: manual `openclaw` invocations, tmux server crashes,
