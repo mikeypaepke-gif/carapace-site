@@ -176,12 +176,6 @@ openclaw cron list           # scheduled jobs
 carapace-qr                  # re-display pair URL
 ```
 
-A `*/5 * * * * /usr/local/bin/carapace-reap-orphans` cron is installed
-as a safety net for any orphan `openclaw-tui` processes that slip
-through (e.g., users who run `--force-broken-tui` and lose their SSH
-session). Reaped events are logged to syslog with tag
-`carapace-reap-orphans`.
-
 ### Diagnostics — `/diag` endpoint
 
 The status server exposes `GET /diag` (over your Tailscale URL or
