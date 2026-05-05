@@ -2131,21 +2131,11 @@ else
   # Limit node memory during install to avoid OOM on low-RAM VPS.
   # postinstall-bundled-plugins.mjs uses a lot of memory on first pass.
   export NODE_OPTIONS="--max-old-space-size=768"
-  # Pinned to 2026.4.23 to match the Mac installer. Why pinned:
-  # 2026.4.15 leaked to 1.7 GB / 137% CPU within ~90s of boot and
-  # crashed macOS with OOM (LEAK INCIDENT 2026-04-22). 2026.4.23 is
-  # the last release that survived an overnight soak under our
-  # workload. Until a newer release passes the same soak the
-  # standard `curl ... | bash` install lands on exactly 4.23 so a
-  # fresh user can't accidentally land on a regression.
-  #
-  # To bump: confirm a candidate stays under 500 MB RSS for at least
-  # 12 hours of normal use, change the default below, and update the
-  # parallel pin in carapace-mac/Resources/install-openclaw.sh.
-  #
-  # Override at install-time with:
-  #   OPENCLAW_VERSION=2026.5.1 curl -fsSL https://carapace.info/install.sh | bash
-  : "${OPENCLAW_VERSION:=2026.4.23}"
+  # OpenClaw version — defaults to latest. Was pinned to 2026.4.23
+  # after the 4.15 OOM/leak incident (2026-04-22). Resolved in
+  # 2026.5.2; we now track latest. Override at install time:
+  #   OPENCLAW_VERSION=2026.5.2 curl -fsSL https://carapace.info/install.sh | bash
+  : "${OPENCLAW_VERSION:=latest}"
   retry 3 timeout 240 /usr/bin/npm install -g "openclaw@${OPENCLAW_VERSION}" --no-fund --loglevel=error --ignore-scripts
   # Run postinstall separately with explicit memory cap and swap already active
   if [ -f "$HOME/.npm-global/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs" ]; then
