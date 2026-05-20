@@ -95,21 +95,68 @@ function forwardToOpenClawStream(messages, agent_id, sessionKey, clientRes, mode
   const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) };
   if (tok) headers["Authorization"] = "Bearer " + tok;
   if (sessionKey) headers["x-openclaw-session-key"] = sessionKey;
+
+  // Open the client SSE response immediately, before OpenClaw has produced
+  // its first token. Long reasoning/tool-use turns can be legitimately quiet
+  // for minutes; this heartbeat tells iOS and Tailscale the request is alive
+  // instead of letting a socket/request timeout masquerade as a failed answer.
+  if (!clientRes.headersSent) {
+    clientRes.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+  }
+  clientRes.write(`event: openclaw.status\ndata: ${JSON.stringify({ status: "thinking", ts: Date.now() })}\n\n`);
+
   return new Promise((resolve, reject) => {
-    const r = http.request({
+    let settled = false;
+    let r = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearInterval(keepAlive);
+      resolve();
+    };
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(keepAlive);
+      try {
+        const message = err?.message || String(err);
+        // Keep this parseable by older iOS builds that only understand
+        // OpenAI-style `choices[0].delta.content` SSE payloads. Without this,
+        // the UI can show "(empty response)" and hide the real failure.
+        clientRes.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
+        clientRes.write("data: " + JSON.stringify({ choices: [{ delta: { content: `⚠️ ${message}` } }] }) + "\n\n");
+        clientRes.write("data: [DONE]\n\n");
+        clientRes.end();
+      } catch {}
+      resolve();
+    };
+    const keepAlive = setInterval(() => {
+      try { clientRes.write(`: openclaw-thinking ${Date.now()}\n\n`); }
+      catch { clearInterval(keepAlive); }
+    }, 15000);
+    clientRes.on("close", () => { clearInterval(keepAlive); try { if (r) r.destroy(); } catch {} });
+
+    r = http.request({
       hostname: "127.0.0.1", port: 18789, path: "/v1/chat/completions", method: "POST", headers,
     }, ocRes => {
-      // Forward status + SSE headers
-      clientRes.statusCode = ocRes.statusCode;
-      clientRes.setHeader("Content-Type", ocRes.headers["content-type"] || "text/event-stream");
-      clientRes.setHeader("Cache-Control", "no-cache");
-      clientRes.setHeader("Connection", "keep-alive");
+      if (!(ocRes.statusCode >= 200 && ocRes.statusCode < 300)) {
+        let errBody = "";
+        ocRes.on("data", chunk => errBody += chunk.toString());
+        ocRes.on("end", () => fail(new Error(`OpenClaw HTTP ${ocRes.statusCode}: ${errBody.slice(0, 300)}`)));
+        return;
+      }
       // For chat mode, pipe untouched so <think> blocks reach iOS for
       // brain-toggle display. For voice/vision, strip aggressively.
       if (mode === "chat") {
         // Chat mode pipes untouched — no synthetic thinking, no strip.
         ocRes.on("data", chunk => clientRes.write(chunk));
-        ocRes.on("end", () => { clientRes.end(); resolve(); });
+        ocRes.on("end", () => { clientRes.end(); finish(); });
+        ocRes.on("error", fail);
         return;
       }
       // Pipe with line-buffered <think>...</think> stripping. SSE chunks
@@ -172,11 +219,11 @@ function forwardToOpenClawStream(messages, agent_id, sessionKey, clientRes, mode
       ocRes.on("end", () => {
         if (buf) clientRes.write(buf);
         clientRes.end();
-        resolve();
+        finish();
       });
-      ocRes.on("error", reject);
+      ocRes.on("error", fail);
     });
-    r.on("error", reject);
+    r.on("error", fail);
     r.write(body);
     r.end();
   });
@@ -201,6 +248,8 @@ async function forwardToOpenClaw(messages, agent_id) {
   });
   return ocReq;
 }
+
+const TRACKER_PORT = 18795; // python project-tracker-server (legacy fallback)
 
 // ============================================================================
 // CARAPACE PROJECTS — per-agent PROJECTS.md tracker
@@ -655,6 +704,83 @@ function projectsMigrateOnStartup() {
 }
 projectsMigrateOnStartup();
 
+// Fallback: write prompt directly to the status-server's tracker file when the
+// Python tracker server isn't running (e.g. Linux headless installs).
+function writePromptLocally(pathname, body, res) {
+  try {
+    const m = pathname.match(/^\/projects\/([^/]+)\/(?:workstreams\/([^/]+)\/)?prompt\/?$/);
+    if (!m) {
+      res.writeHead(400, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ error: "bad path" }));
+      return;
+    }
+    const pid = decodeURIComponent(m[1]);
+    const wid = m[2] ? decodeURIComponent(m[2]) : null;
+    const payload = JSON.parse(body || "{}");
+    const fp = path.join(DIR, "carapace-project-tracker.json");
+    const data = JSON.parse(fs.readFileSync(fp, "utf8"));
+    const proj = (data.projects || []).find(p => p.id === pid);
+    if (!proj) {
+      res.writeHead(404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ error: "project not found" }));
+      return;
+    }
+    const now = new Date().toISOString();
+    if (wid) {
+      const ws = (proj.workstreams || []).find(w => w.id === wid);
+      if (!ws) {
+        res.writeHead(404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify({ error: "workstream not found" }));
+        return;
+      }
+      if ("focusPrompt" in payload) ws.focusPrompt = payload.focusPrompt;
+      ws.promptVersion = (ws.promptVersion || 0) + 1;
+      ws.promptUpdatedAt = now;
+      data.updated = now;
+      fs.writeFileSync(fp, JSON.stringify(data));
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ ok: true, id: pid, wid, promptVersion: ws.promptVersion, promptUpdatedAt: now }));
+    } else {
+      if ("divePrompt" in payload) proj.divePrompt = payload.divePrompt;
+      proj.promptVersion = (proj.promptVersion || 0) + 1;
+      proj.promptUpdatedAt = now;
+      data.updated = now;
+      fs.writeFileSync(fp, JSON.stringify(data));
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ ok: true, id: pid, promptVersion: proj.promptVersion, promptUpdatedAt: now }));
+    }
+  } catch(e) {
+    res.writeHead(500, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
+// Proxy a request body to the local python tracker server and forward the response.
+// Falls back to a direct file write if the tracker isn't running (Linux headless).
+function proxyToTracker(method, pathname, body, res) {
+  const opts = {
+    hostname: "127.0.0.1",
+    port: TRACKER_PORT,
+    path: pathname,
+    method,
+    headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body || "") }
+  };
+  const proxyReq = http.request(opts, (proxyRes) => {
+    let chunks = "";
+    proxyRes.on("data", d => { chunks += d; });
+    proxyRes.on("end", () => {
+      res.writeHead(proxyRes.statusCode || 502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(chunks || "{}");
+    });
+  });
+  proxyReq.on("error", (err) => {
+    // Tracker unreachable — fall back to direct status-server write (Linux path).
+    writePromptLocally(pathname, body, res);
+  });
+  if (body) proxyReq.write(body);
+  proxyReq.end();
+}
+
 function loadHistory(limit, token, agent) {
   try {
     // Verify token if gateway has one configured
@@ -820,8 +946,16 @@ function loadHistory(limit, token, agent) {
   } catch(e) { return { messages: [], count: 0 }; }
 }
 
+function extractBearer(req) {
+  const authLine = req.split("\r\n").find(l => l.toLowerCase().startsWith("authorization:"));
+  if (!authLine) return null;
+  const parts = authLine.split("Bearer ");
+  return parts.length > 1 ? parts[1].trim() : null;
+}
+
 const fileMap = {
   "/projects": "carapace-project-tracker.json",
+  "/tracker": "carapace-project-tracker.json",
   "/cron": "carapace-cron-tracker.json"
 };
 
@@ -1276,124 +1410,6 @@ http.createServer((req, res) => {
     const token = (req.headers["authorization"] || "").replace("Bearer ", "").trim() || null;
 
     if (p === "/health") { res.end(JSON.stringify({ ok: true })); return; }
-
-    // ── DIAG endpoint — surfaces silent failure modes ─────────────────
-    // Why: without this, three classes of failure are invisible to the
-    // user until the TUI hangs:
-    //   (a) provider billing/auth failures (gateway logs them but the
-    //       iOS app sees the gateway as healthy because /health passes)
-    //   (b) gateway event-loop saturation (high CPU + high p99 latency
-    //       caused by retry-storms or zombie TUIs)
-    //   (c) orphan openclaw-tui processes with deleted ptys
-    //   (d) main agent configured with a single provider — about to
-    //       become a hang the moment that provider blips
-    //
-    // GET /diag returns a structured snapshot. Status field is the
-    // single source of truth for the iOS app's red/yellow/green banner.
-    if (p === "/diag") {
-      try {
-        const { execSync } = require("child_process");
-        const sh = (cmd) => {
-          try {
-            return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"], timeout: 3000, encoding: "utf8" }).trim();
-          } catch { return ""; }
-        };
-
-        // 1. Gateway HTTP health (cheap upstream check)
-        let gateway_health = null;
-        try {
-          const h = sh('curl -s --max-time 2 http://127.0.0.1:18789/health');
-          gateway_health = h ? JSON.parse(h) : null;
-        } catch { gateway_health = null; }
-
-        // 2. Recent gateway log markers (last ~500 lines of today's log)
-        // Counts billing/error/fallback-to-none patterns. The "to none"
-        // pattern is the high-signal one — it means a chat request had
-        // nowhere to go, which is what produces the "TUI hung" symptom.
-        const log_summary = { errors: 0, warnings: 0, billing_failures: 0, fallbacks_to_none: 0, last_billing_failure_at: null };
-        const latest_log = sh('ls -t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -1');
-        if (latest_log) {
-          const recent = sh(`tail -500 "${latest_log}"`);
-          if (recent) {
-            log_summary.errors = (recent.match(/"logLevelName":"ERROR"/g) || []).length;
-            log_summary.warnings = (recent.match(/"logLevelName":"WARN"/g) || []).length;
-            log_summary.billing_failures = (recent.match(/billing issue/g) || []).length;
-            log_summary.fallbacks_to_none = (recent.match(/next=none/g) || []).length;
-            // Surface timestamp of most recent billing failure for the
-            // iOS app to render "billing failed at HH:MM" diagnostics.
-            const billingMatches = recent.split("\n").filter(l => l.includes("billing issue"));
-            if (billingMatches.length > 0) {
-              const last = billingMatches[billingMatches.length - 1];
-              const tsMatch = last.match(/"time":"([^"]+)"/) || last.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/);
-              if (tsMatch) log_summary.last_billing_failure_at = tsMatch[1];
-            }
-          }
-        }
-
-        // 3. TUI process audit — total + orphans (deleted ptys)
-        const tui_pids_raw = sh("pgrep -x openclaw-tui");
-        const tui_pids = tui_pids_raw ? tui_pids_raw.split("\n").filter(Boolean) : [];
-        let tui_orphans = 0;
-        const orphan_pids = [];
-        for (const pid of tui_pids) {
-          const fd0 = sh(`ls -l /proc/${pid}/fd/0 2>/dev/null`);
-          if (fd0.includes("(deleted)")) {
-            tui_orphans++;
-            orphan_pids.push(parseInt(pid, 10));
-          }
-        }
-
-        // 4. Model configuration audit — main agent provider-fallback
-        // health. Single-provider main agent is a latent failure waiting
-        // to fire the next time the provider blips.
-        let model_config = null;
-        try {
-          const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".openclaw/openclaw.json"), "utf8"));
-          const main_agent = (cfg.agents?.list || []).find(a => a.id === "main");
-          const main_models = main_agent
-            ? [main_agent.model?.primary, ...(main_agent.model?.fallbacks || [])].filter(Boolean)
-            : [];
-          const main_providers = [...new Set(main_models.map(m => (m || "").split("/")[0]).filter(Boolean))];
-          model_config = {
-            main_primary: main_agent?.model?.primary || null,
-            main_fallbacks: main_agent?.model?.fallbacks || [],
-            main_providers_count: main_providers.length,
-            main_providers,
-            compaction_model: cfg.agents?.defaults?.compaction?.model || null,
-            heartbeat_model: cfg.agents?.defaults?.heartbeat?.model || null,
-            auth_profiles: Object.keys(cfg.auth?.profiles || {}),
-          };
-        } catch { model_config = null; }
-
-        // 5. Roll-up status — single field the iOS app keys off.
-        // "ok"       = all green
-        // "warning"  = degraded, still functional (e.g. orphans accumulating, single-provider main)
-        // "degraded" = active failures user can feel right now
-        const issues = [];
-        if (log_summary.billing_failures > 0) issues.push({ kind: "billing_failure", count: log_summary.billing_failures, last_at: log_summary.last_billing_failure_at });
-        if (log_summary.fallbacks_to_none > 0) issues.push({ kind: "no_model_available", count: log_summary.fallbacks_to_none });
-        if (tui_orphans > 0) issues.push({ kind: "tui_orphans", count: tui_orphans, pids: orphan_pids });
-        if (model_config && model_config.main_providers_count < 2) issues.push({ kind: "main_single_provider", provider: model_config.main_providers[0] || null });
-        if (gateway_health === null) issues.push({ kind: "gateway_unreachable" });
-
-        const has_active_failure = issues.some(i => ["billing_failure", "no_model_available", "gateway_unreachable"].includes(i.kind));
-        const status = issues.length === 0 ? "ok" : (has_active_failure ? "degraded" : "warning");
-
-        res.end(JSON.stringify({
-          status,
-          issues,
-          gateway: gateway_health,
-          log_summary,
-          tui: { active: tui_pids.length, orphans: tui_orphans, orphan_pids },
-          model_config,
-          checked_at: new Date().toISOString(),
-        }, null, 2));
-      } catch (e) {
-        res.statusCode = 500;
-        res.end(JSON.stringify({ error: e.message }));
-      }
-      return;
-    }
 
     // ── COGNITIVE MEMORY endpoints ────────────────────────────────────
     if (p === "/cognitive/health") {
@@ -2013,9 +2029,10 @@ http.createServer((req, res) => {
       return;
     }
 
-    // GET /projects?agent=<id> — sourced from <agent-workspace>/PROJECTS.md.
-    // Per-agent: each agent has its own board. Default agent=main when omitted.
-    if (p === "/projects") {
+    // GET /projects?agent=<id> + /tracker?agent=<id> — sourced from
+    // <agent-workspace>/PROJECTS.md. Per-agent: each agent has its
+    // own board. Default agent=main when omitted.
+    if (p === "/projects" || p === "/tracker") {
       if (!isTierPaid()) { res.end(EMPTY_PROJECTS); return; }
       try { res.end(JSON.stringify(projectsBuildResponse(agentParam))); }
       catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
